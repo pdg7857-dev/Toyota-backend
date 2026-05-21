@@ -45,6 +45,18 @@ npm run dev
 - `GET /finance-products` (filter: `?category=EXTENDED_WARRANTY|TIRE_RIM|...`)
 - `GET /rep-notes` (filters: `?scope=`, `?scopeId=`, `?tags=tag1,tag2`)
 
+### Comparison
+- `POST /compare` — body `{ "trimSlugs": [...] }` (2–6 trims). Returns each trim's specs, quote (with HST), and the warranty rows that apply to each model-year.
+
+### Scraper (admin)
+- `POST /admin/scrape/run` — body `{ "models": ["rav4", ...] }` (optional). Spawns a Playwright child process. Returns `{ runId, status }`.
+- `GET /admin/scrape/runs` — list recent runs.
+- `GET /admin/scrape/runs/:id/diffs` — pending field-level diffs.
+- `PATCH /admin/scrape/runs/:id/diffs` — body `{ "decisions": [{ "diffId": 1, "decision": "ACCEPT|REJECT" }, ...] }`.
+- `POST /admin/scrape/runs/:id/apply` — apply accepted diffs in a transaction. Bumps `catalog_version`.
+
+Scraper never writes directly to live tables — only to `scrape_diffs`. Manual curation is preserved until you explicitly accept a diff.
+
 ### Catalog writes (CRUD on each table)
 - `POST /models` · `PATCH /models/:id` · `DELETE /models/:id`
 - `POST /trims` · `PATCH /trims/:id` · `DELETE /trims/:id`
@@ -97,7 +109,9 @@ curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
 Open `http://localhost:3000/admin` in a browser. Paste your API token (it's stored in localStorage). Tabs:
 
 - **AI Q&A** — natural-language interface against the catalog.
+- **Compare** — pick 2–4 trims, see a side-by-side spec + price + warranty table.
 - **Models / Trims / Powertrains / Warranties / F&I Products / Rep Notes** — list and edit. Trims tab includes a "fees" button to upsert the per-trim fee schedule.
+- **Scraper** — trigger toyota.ca scrape, review field-level diffs against the live catalog, accept/reject each one before applying.
 
 ## Seed data accuracy
 
@@ -113,7 +127,26 @@ npm test
 
 Currently covers pricing math (`tests/pricing.test.ts`). Add more as new logic accretes.
 
-## Phase 2 (deferred)
+## Scraper usage
 
-- Playwright scraper against toyota.ca with diff-review workflow (`src/scraper/` placeholder exists in the schema as `scrape_runs`/`scrape_diffs`).
-- Multi-turn conversations for `/ai/ask`.
+```bash
+# Manual run from the CLI
+npm run scrape                          # all models
+npm run scrape -- --models rav4,camry   # subset
+
+# Or via the admin endpoint (spawns the same process detached)
+curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"models":["rav4"]}' \
+  http://localhost:3000/api/v1/admin/scrape/run
+# Then review and apply via the Scraper tab in the admin UI.
+```
+
+Playwright Chromium needs to be downloaded once: `npx playwright install chromium`.
+
+Toyota.ca DOM selectors in `src/scraper/sources/toyota-ca.ts` are best-effort — expect to refine them as the site evolves.
+
+## Phase 3 (still deferred)
+
+- Multi-turn conversations for `/ai/ask` (persist Q/A pairs, allow follow-ups with prior context).
+- Body color availability per trim.
+- Optional debug endpoint that shows the catalog context Claude would receive for a given question.

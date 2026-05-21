@@ -115,6 +115,53 @@ describe("catalog reads", () => {
   });
 });
 
+describe("compare endpoint", () => {
+  it("returns side-by-side specs for multiple trims", async () => {
+    const r = await request(app)
+      .post("/api/v1/compare")
+      .set(auth())
+      .send({
+        trimSlugs: ["rav4-2026-xle-hybrid-awd", "highlander-2026-xle-hybrid-awd"],
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.trims).toHaveLength(2);
+    expect(r.body.missing).toEqual([]);
+    expect(r.body.trims[0].quote.total).toBeGreaterThan(0);
+    // Distinct hybrid powertrains — RAV4 219hp, Highlander 243hp
+    const horsepower = r.body.trims.map((t: { powertrain: { horsepowerHp: number } }) => t.powertrain.horsepowerHp);
+    expect(new Set(horsepower).size).toBe(2);
+    // Warranty buckets keyed by model|year
+    expect(Object.keys(r.body.warrantyByModelYear)).toContain("rav4|2026");
+    expect(Object.keys(r.body.warrantyByModelYear)).toContain("highlander|2026");
+  });
+
+  it("returns missing slugs separately", async () => {
+    const r = await request(app)
+      .post("/api/v1/compare")
+      .set(auth())
+      .send({ trimSlugs: ["rav4-2026-xle-hybrid-awd", "does-not-exist"] });
+    expect(r.status).toBe(200);
+    expect(r.body.trims).toHaveLength(1);
+    expect(r.body.missing).toEqual(["does-not-exist"]);
+  });
+
+  it("validates minimum 2 trims", async () => {
+    const r = await request(app)
+      .post("/api/v1/compare")
+      .set(auth())
+      .send({ trimSlugs: ["rav4-2026-xle-hybrid-awd"] });
+    expect(r.status).toBe(400);
+  });
+});
+
+describe("admin scrape endpoints", () => {
+  it("lists scrape runs", async () => {
+    const r = await request(app).get("/api/v1/admin/scrape/runs").set(auth());
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.body.runs)).toBe(true);
+  });
+});
+
 describe("404 for unknown resources", () => {
   it("returns 404 for an unknown trim slug", async () => {
     const r = await request(app)
