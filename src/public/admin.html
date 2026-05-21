@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Toyota Backend — Admin</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #1a212a;
+    --panel-2: #232c38;
+    --border: #2c3645;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #eb0a1e;
+    --accent-hover: #c30819;
+    --ok: #2ea043;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header .brand { color: var(--accent); font-weight: 700; }
+  header .token-status { margin-left: auto; font-size: 12px; color: var(--muted); }
+  nav { display: flex; gap: 2px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; }
+  nav button { background: transparent; border: 0; color: var(--muted); padding: 12px 18px; cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent; }
+  nav button.active { color: var(--text); border-bottom-color: var(--accent); }
+  main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar input, .toolbar select { background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font: inherit; }
+  button.primary { background: var(--accent); color: white; border: 0; padding: 8px 14px; border-radius: 4px; cursor: pointer; font: inherit; font-weight: 500; }
+  button.primary:hover { background: var(--accent-hover); }
+  button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); padding: 6px 10px; border-radius: 4px; cursor: pointer; font: inherit; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 6px; overflow: hidden; }
+  th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; }
+  th { background: var(--panel-2); color: var(--muted); font-weight: 500; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; }
+  tr:last-child td { border-bottom: 0; }
+  tr:hover td { background: var(--panel-2); }
+  .edit-form { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin-top: 16px; }
+  .edit-form h3 { margin: 0 0 12px; font-size: 14px; }
+  .edit-form .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+  .edit-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  .edit-form input, .edit-form select, .edit-form textarea { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 7px 9px; border-radius: 4px; font: inherit; }
+  .edit-form textarea { min-height: 80px; resize: vertical; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+  .edit-form .actions { display: flex; gap: 8px; margin-top: 12px; }
+  .ai-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 16px; }
+  .ai-panel textarea { width: 100%; min-height: 80px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 10px; border-radius: 4px; font: inherit; resize: vertical; }
+  .ai-answer { margin-top: 16px; background: var(--panel-2); border-radius: 4px; padding: 14px; white-space: pre-wrap; }
+  .ai-meta { margin-top: 8px; font-size: 11px; color: var(--muted); display: flex; gap: 16px; flex-wrap: wrap; }
+  .badge { display: inline-block; padding: 2px 7px; border-radius: 3px; background: var(--panel-2); font-size: 11px; color: var(--muted); }
+  .empty { color: var(--muted); padding: 30px; text-align: center; }
+  .danger { color: var(--accent); }
+  .ok { color: var(--ok); }
+  .row-actions { display: flex; gap: 6px; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 20px; min-width: 320px; }
+  dialog::backdrop { background: rgba(0,0,0,0.7); }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="brand">Toyota</span> Backend</h1>
+  <span class="token-status" id="tokenStatus">no token</span>
+  <button class="secondary" onclick="changeToken()">change token</button>
+</header>
+<nav id="tabs"></nav>
+<main id="main"></main>
+
+<dialog id="tokenDialog">
+  <h3 style="margin-top:0">Enter API token</h3>
+  <p style="color: var(--muted); font-size: 12px;">Pasted from your <code>.env</code> file. Stored in localStorage.</p>
+  <input type="password" id="tokenInput" style="width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 8px; border-radius: 4px; font: inherit;" />
+  <div style="margin-top: 12px; display: flex; gap: 8px; justify-content: flex-end;">
+    <button class="secondary" onclick="document.getElementById('tokenDialog').close()">cancel</button>
+    <button class="primary" onclick="saveToken()">save</button>
+  </div>
+</dialog>
+
+<script>
+const TABS = ["ai", "models", "trims", "powertrains", "warranties", "finance", "notes"];
+const TAB_LABELS = { ai: "AI Q&A", models: "Models", trims: "Trims", powertrains: "Powertrains", warranties: "Warranties", finance: "F&I Products", notes: "Rep Notes" };
+let token = localStorage.getItem("toyota_token") || "";
+let currentTab = location.hash.replace("#", "") || "ai";
+if (!TABS.includes(currentTab)) currentTab = "ai";
+
+function changeToken() {
+  document.getElementById("tokenInput").value = token;
+  document.getElementById("tokenDialog").showModal();
+}
+function saveToken() {
+  token = document.getElementById("tokenInput").value.trim();
+  localStorage.setItem("toyota_token", token);
+  document.getElementById("tokenDialog").close();
+  updateTokenStatus();
+  render();
+}
+function updateTokenStatus() {
+  const el = document.getElementById("tokenStatus");
+  el.textContent = token ? `token: ${token.slice(0,6)}…${token.slice(-4)}` : "no token";
+  el.className = "token-status" + (token ? " ok" : " danger");
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch("/api/v1" + path, {
+    ...opts,
+    headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json", ...(opts.headers || {}) },
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(res.status + ": " + body);
+  }
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+function renderTabs() {
+  const nav = document.getElementById("tabs");
+  nav.innerHTML = TABS.map(t => `<button class="${t === currentTab ? 'active' : ''}" onclick="setTab('${t}')">${TAB_LABELS[t]}</button>`).join("");
+}
+function setTab(t) {
+  currentTab = t;
+  location.hash = t;
+  render();
+}
+
+async function render() {
+  renderTabs();
+  if (!token) {
+    document.getElementById("main").innerHTML = `<div class="empty">Set your API token to begin.</div>`;
+    return;
+  }
+  try {
+    if (currentTab === "ai") return renderAi();
+    if (currentTab === "models") return renderModels();
+    if (currentTab === "trims") return renderTrims();
+    if (currentTab === "powertrains") return renderPowertrains();
+    if (currentTab === "warranties") return renderWarranties();
+    if (currentTab === "finance") return renderFinance();
+    if (currentTab === "notes") return renderNotes();
+  } catch (e) {
+    document.getElementById("main").innerHTML = `<div class="empty danger">Error: ${e.message}</div>`;
+  }
+}
+
+// ---------- AI ----------
+function renderAi() {
+  document.getElementById("main").innerHTML = `
+    <div class="ai-panel">
+      <h3 style="margin-top:0">Ask the catalog</h3>
+      <textarea id="aiQ" placeholder="e.g. Customer comparing 2026 RAV4 Hybrid XLE vs Highlander Hybrid LE — what should I emphasize on warranty and price?"></textarea>
+      <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center;">
+        <label style="font-size: 12px; color: var(--muted);">Model:
+          <select id="aiModel"><option value="haiku">haiku-4-5 (fast)</option><option value="sonnet">sonnet-4-6 (smarter)</option></select>
+        </label>
+        <button class="primary" onclick="aiAsk()">Ask</button>
+      </div>
+      <div id="aiOut"></div>
+    </div>`;
+}
+async function aiAsk() {
+  const question = document.getElementById("aiQ").value.trim();
+  if (!question) return;
+  const model = document.getElementById("aiModel").value;
+  const out = document.getElementById("aiOut");
+  out.innerHTML = `<div class="ai-answer">Thinking…</div>`;
+  try {
+    const r = await api("/ai/ask", { method: "POST", body: JSON.stringify({ question, model }) });
+    out.innerHTML = `
+      <div class="ai-answer">${escapeHtml(r.answer)}</div>
+      <div class="ai-meta">
+        <span>model: ${r.model}</span>
+        <span>cached: ${r.cachedInputTokens} tok</span>
+        <span>uncached: ${r.uncachedInputTokens} tok</span>
+        <span>output: ${r.outputTokens} tok</span>
+        <span>catalog v${r.catalogVersion}</span>
+      </div>
+      ${r.citations?.length ? `<div class="ai-meta">citations: ${r.citations.map(c => `<span class="badge">${c.type}:${c.id}</span>`).join(" ")}</div>` : ""}`;
+  } catch (e) {
+    out.innerHTML = `<div class="ai-answer danger">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// ---------- Generic CRUD UI ----------
+function escapeHtml(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function fmt(v) { if (v == null) return "—"; if (typeof v === "object") return escapeHtml(JSON.stringify(v)); return escapeHtml(String(v)); }
+
+async function renderModels() {
+  const { models } = await api("/models");
+  document.getElementById("main").innerHTML = `
+    <div class="toolbar"><button class="primary" onclick="openModelForm()">+ New model</button></div>
+    <table><thead><tr><th>ID</th><th>Slug</th><th>Name</th><th>Body</th><th>Segment</th><th>Trims</th><th></th></tr></thead>
+    <tbody>${models.map(m => `<tr>
+      <td>${m.id}</td><td><code>${m.slug}</code></td><td>${escapeHtml(m.name)}</td>
+      <td>${fmt(m.bodyStyle)}</td><td>${fmt(m.segment)}</td><td>${m.trims?.length ?? 0}</td>
+      <td class="row-actions">
+        <button class="secondary" onclick='openModelForm(${JSON.stringify(m)})'>edit</button>
+        <button class="secondary danger" onclick="delItem('models', ${m.id})">delete</button>
+      </td></tr>`).join("")}</tbody></table>
+    <div id="formArea"></div>`;
+}
+function openModelForm(m = {}) {
+  document.getElementById("formArea").innerHTML = `
+    <div class="edit-form"><h3>${m.id ? "Edit model #" + m.id : "New model"}</h3>
+      <div class="grid">
+        <label>Slug<input id="f_slug" value="${escapeHtml(m.slug)}"></label>
+        <label>Name<input id="f_name" value="${escapeHtml(m.name)}"></label>
+        <label>Body style<input id="f_bodyStyle" value="${escapeHtml(m.bodyStyle)}"></label>
+        <label>Segment<input id="f_segment" value="${escapeHtml(m.segment)}"></label>
+      </div>
+      <label style="margin-top:10px">Notes (markdown)<textarea id="f_notesMd">${escapeHtml(m.notesMd)}</textarea></label>
+      <div class="actions">
+        <button class="primary" onclick="saveModel(${m.id || 'null'})">${m.id ? 'Save' : 'Create'}</button>
+        <button class="secondary" onclick="document.getElementById('formArea').innerHTML=''">Cancel</button>
+      </div></div>`;
+}
+async function saveModel(id) {
+  const data = {
+    slug: document.getElementById("f_slug").value.trim(),
+    name: document.getElementById("f_name").value.trim(),
+    bodyStyle: document.getElementById("f_bodyStyle").value.trim() || null,
+    segment: document.getElementById("f_segment").value.trim() || null,
+    notesMd: document.getElementById("f_notesMd").value || null,
+  };
+  await api(id ? `/models/${id}` : "/models", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+  render();
+}
+
+async function renderTrims() {
+  const [{ trims }, { models }, { powertrains }] = await Promise.all([api("/trims"), api("/models"), api("/powertrains")]);
+  window._models = models; window._powertrains = powertrains;
+  document.getElementById("main").innerHTML = `
+    <div class="toolbar"><button class="primary" onclick="openTrimForm()">+ New trim</button></div>
+    <table><thead><tr><th>ID</th><th>Slug</th><th>Model</th><th>Year</th><th>Name</th><th>Powertrain</th><th>MSRP</th><th></th></tr></thead>
+    <tbody>${trims.map(t => `<tr>
+      <td>${t.id}</td><td><code>${t.slug}</code></td><td>${escapeHtml(t.model?.name)}</td>
+      <td>${t.year}</td><td>${escapeHtml(t.name)}</td>
+      <td><span class="badge">${t.powertrain?.type}</span> ${escapeHtml(t.powertrain?.displayName)}</td>
+      <td>$${Number(t.msrpCad).toLocaleString("en-CA")}</td>
+      <td class="row-actions">
+        <button class="secondary" onclick='openTrimForm(${JSON.stringify(t)})'>edit</button>
+        <button class="secondary" onclick='openFeeForm(${t.id})'>fees</button>
+        <button class="secondary danger" onclick="delItem('trims', ${t.id})">del</button>
+      </td></tr>`).join("")}</tbody></table>
+    <div id="formArea"></div>`;
+}
+function openTrimForm(t = {}) {
+  const modelOpts = window._models.map(m => `<option value="${m.id}" ${m.id === t.modelId ? "selected" : ""}>${escapeHtml(m.name)}</option>`).join("");
+  const ptOpts = window._powertrains.map(p => `<option value="${p.id}" ${p.id === t.powertrainId ? "selected" : ""}>${p.type} — ${escapeHtml(p.displayName)}</option>`).join("");
+  document.getElementById("formArea").innerHTML = `
+    <div class="edit-form"><h3>${t.id ? "Edit trim #" + t.id : "New trim"}</h3>
+      <div class="grid">
+        <label>Model<select id="f_modelId">${modelOpts}</select></label>
+        <label>Powertrain<select id="f_powertrainId">${ptOpts}</select></label>
+        <label>Year<input id="f_year" type="number" value="${t.year || 2026}"></label>
+        <label>Name<input id="f_name" value="${escapeHtml(t.name)}"></label>
+        <label>Slug<input id="f_slug" value="${escapeHtml(t.slug)}"></label>
+        <label>MSRP CAD<input id="f_msrpCad" type="number" step="0.01" value="${t.msrpCad || 0}"></label>
+      </div>
+      <label style="margin-top:10px">Notes (rep cheat-sheet)<textarea id="f_notesMd">${escapeHtml(t.notesMd)}</textarea></label>
+      <div class="actions">
+        <button class="primary" onclick="saveTrim(${t.id || 'null'})">${t.id ? 'Save' : 'Create'}</button>
+        <button class="secondary" onclick="document.getElementById('formArea').innerHTML=''">Cancel</button>
+      </div></div>`;
+}
+async function saveTrim(id) {
+  const data = {
+    modelId: Number(document.getElementById("f_modelId").value),
+    powertrainId: Number(document.getElementById("f_powertrainId").value),
+    year: Number(document.getElementById("f_year").value),
+    name: document.getElementById("f_name").value.trim(),
+    slug: document.getElementById("f_slug").value.trim(),
+    msrpCad: Number(document.getElementById("f_msrpCad").value),
+    notesMd: document.getElementById("f_notesMd").value || null,
+  };
+  await api(id ? `/trims/${id}` : "/trims", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+  render();
+}
+function openFeeForm(trimId) {
+  document.getElementById("formArea").innerHTML = `
+    <div class="edit-form"><h3>Fees for trim #${trimId}</h3>
+      <div class="grid">
+        <label>Freight & PDI<input id="ff_freight" type="number" step="0.01" value="1930"></label>
+        <label>A/C Excise<input id="ff_ac" type="number" step="0.01" value="100"></label>
+        <label>OMVIC Fee<input id="ff_omvic" type="number" step="0.01" value="12.50"></label>
+        <label>Tire Stewardship<input id="ff_tire" type="number" step="0.01" value="22.40"></label>
+        <label>Dealer Admin<input id="ff_admin" type="number" step="0.01" value="499"></label>
+        <label>HST Rate<input id="ff_hst" type="number" step="0.001" value="0.13"></label>
+        <label>Effective Date<input id="ff_date" type="date" value="${new Date().toISOString().slice(0,10)}"></label>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="saveFees(${trimId})">Save</button>
+        <button class="secondary" onclick="document.getElementById('formArea').innerHTML=''">Cancel</button>
+      </div></div>`;
+}
+async function saveFees(trimId) {
+  const data = {
+    freightPdiCad: Number(document.getElementById("ff_freight").value),
+    acExciseCad: Number(document.getElementById("ff_ac").value),
+    omvicFeeCad: Number(document.getElementById("ff_omvic").value),
+    tireStewardshipCad: Number(document.getElementById("ff_tire").value),
+    dealerAdminCad: Number(document.getElementById("ff_admin").value),
+    hstRate: Number(document.getElementById("ff_hst").value),
+    effectiveDate: document.getElementById("ff_date").value,
+  };
+  await api(`/trims/${trimId}/fees`, { method: "PUT", body: JSON.stringify(data) });
+  render();
+}
+
+async function renderPowertrains() {
+  const { powertrains } = await api("/powertrains");
+  document.getElementById("main").innerHTML = `
+    <div class="toolbar"><button class="primary" onclick="openPtForm()">+ New powertrain</button></div>
+    <table><thead><tr><th>ID</th><th>Type</th><th>Display</th><th>HP</th><th>Drivetrain</th><th>Comb L/100</th><th></th></tr></thead>
+    <tbody>${powertrains.map(p => `<tr>
+      <td>${p.id}</td><td><span class="badge">${p.type}</span></td><td>${escapeHtml(p.displayName)}</td>
+      <td>${fmt(p.horsepowerHp)}</td><td>${fmt(p.drivetrain)}</td><td>${fmt(p.fuelEconomyCombL100)}</td>
+      <td class="row-actions">
+        <button class="secondary" onclick='openPtForm(${JSON.stringify(p)})'>edit</button>
+        <button class="secondary danger" onclick="delItem('powertrains', ${p.id})">del</button>
+      </td></tr>`).join("")}</tbody></table>
+    <div id="formArea"></div>`;
+}
+function openPtForm(p = {}) {
+  const types = ["GAS","HYBRID","PHEV","BEV"];
+  document.getElementById("formArea").innerHTML = `
+    <div class="edit-form"><h3>${p.id ? "Edit powertrain #" + p.id : "New powertrain"}</h3>
+      <div class="grid">
+        <label>Type<select id="pf_type">${types.map(t => `<option ${t===p.type?'selected':''}>${t}</option>`).join("")}</select></label>
+        <label>Display name<input id="pf_displayName" value="${escapeHtml(p.displayName)}"></label>
+        <label>Engine desc<input id="pf_engineDesc" value="${escapeHtml(p.engineDesc)}"></label>
+        <label>HP<input id="pf_hp" type="number" value="${p.horsepowerHp || ''}"></label>
+        <label>Torque lb-ft<input id="pf_tq" type="number" value="${p.torqueLbft || ''}"></label>
+        <label>Transmission<input id="pf_tx" value="${escapeHtml(p.transmission)}"></label>
+        <label>Drivetrain<input id="pf_dt" value="${escapeHtml(p.drivetrain)}"></label>
+        <label>Battery kWh<input id="pf_bat" type="number" step="0.01" value="${p.batteryKwh || ''}"></label>
+        <label>Electric range km<input id="pf_er" type="number" value="${p.electricRangeKm || ''}"></label>
+        <label>City L/100<input id="pf_fc" type="number" step="0.1" value="${p.fuelEconomyCityL100 || ''}"></label>
+        <label>Hwy L/100<input id="pf_fh" type="number" step="0.1" value="${p.fuelEconomyHwyL100 || ''}"></label>
+        <label>Comb L/100<input id="pf_fb" type="number" step="0.1" value="${p.fuelEconomyCombL100 || ''}"></label>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="savePt(${p.id || 'null'})">${p.id ? 'Save' : 'Create'}</button>
+        <button class="secondary" onclick="document.getElementById('formArea').innerHTML=''">Cancel</button>
+      </div></div>`;
+}
+async function savePt(id) {
+  const num = (v) => v === "" ? null : Number(v);
+  const data = {
+    type: document.getElementById("pf_type").value,
+    displayName: document.getElementById("pf_displayName").value.trim(),
+    engineDesc: document.getElementById("pf_engineDesc").value.trim() || null,
+    horsepowerHp: num(document.getElementById("pf_hp").value),
+    torqueLbft: num(document.getElementById("pf_tq").value),
+    transmission: document.getElementById("pf_tx").value.trim() || null,
+    drivetrain: document.getElementById("pf_dt").value.trim() || null,
+    batteryKwh: num(document.getElementById("pf_bat").value),
+    electricRangeKm: num(document.getElementById("pf_er").value),
+    fuelEconomyCityL100: num(document.getElementById("pf_fc").value),
+    fuelEconomyHwyL100: num(document.getElementById("pf_fh").value),
+    fuelEconomyCombL100: num(document.getElementById("pf_fb").value),
+  };
+  await api(id ? `/powertrains/${id}` : "/powertrains", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+  render();
+}
+
+async function renderWarranties() {
+  const [{ warranties }, { models }] = await Promise.all([api("/warranties"), api("/models")]);
+  window._models = models;
+  document.getElementById("main").innerHTML = `
+    <div class="toolbar"><button class="primary" onclick="openWForm()">+ New warranty</button></div>
+    <table><thead><tr><th>ID</th><th>Model</th><th>Year</th><th>Type</th><th>Months</th><th>KM</th><th>Applies to</th><th></th></tr></thead>
+    <tbody>${warranties.map(w => `<tr>
+      <td>${w.id}</td><td>${escapeHtml(w.model?.name)}</td><td>${w.year}</td>
+      <td><span class="badge">${w.coverageType}</span></td>
+      <td>${fmt(w.durationMonths)}</td><td>${w.distanceKm ? w.distanceKm.toLocaleString("en-CA") : "unlimited"}</td>
+      <td>${(w.appliesToPowertrains||[]).join(", ") || "all"}</td>
+      <td class="row-actions">
+        <button class="secondary" onclick='openWForm(${JSON.stringify(w)})'>edit</button>
+        <button class="secondary danger" onclick="delItem('warranties', ${w.id})">del</button>
+      </td></tr>`).join("")}</tbody></table>
+    <div id="formArea"></div>`;
+}
+function openWForm(w = {}) {
+  const modelOpts = window._models.map(m => `<option value="${m.id}" ${m.id === w.modelId ? "selected" : ""}>${escapeHtml(m.name)}</option>`).join("");
+  const types = ["BASIC","POWERTRAIN","HYBRID_COMPONENT","HYBRID_BATTERY","CORROSION_PERFORATION","EMISSIONS","ACCESSORIES","ROADSIDE"];
+  document.getElementById("formArea").innerHTML = `
+    <div class="edit-form"><h3>${w.id ? "Edit warranty #" + w.id : "New warranty"}</h3>
+      <div class="grid">
+        <label>Model<select id="wf_model">${modelOpts}</select></label>
+        <label>Year<input id="wf_year" type="number" value="${w.year || 2026}"></label>
+        <label>Type<select id="wf_type">${types.map(t => `<option ${t===w.coverageType?'selected':''}>${t}</option>`).join("")}</select></label>
+        <label>Duration (months)<input id="wf_dm" type="number" value="${w.durationMonths || ''}"></label>
+        <label>Distance (km, blank = unlimited)<input id="wf_dk" type="number" value="${w.distanceKm || ''}"></label>
+        <label>Applies to powertrains (comma)<input id="wf_pt" value="${(w.appliesToPowertrains||[]).join(',')}"></label>
+        <label>Source URL<input id="wf_src" value="${escapeHtml(w.sourceUrl)}"></label>
+      </div>
+      <label style="margin-top:10px">Description<textarea id="wf_desc">${escapeHtml(w.descriptionMd)}</textarea></label>
+      <div class="actions">
+        <button class="primary" onclick="saveW(${w.id || 'null'})">${w.id ? 'Save' : 'Create'}</button>
+        <button class="secondary" onclick="document.getElementById('formArea').innerHTML=''">Cancel</button>
+      </div></div>`;
+}
+async function saveW(id) {
+  const pts = document.getElementById("wf_pt").value.split(",").map(s => s.trim().toUpperCase()).filter(Boolean);
+  const data = {
+    modelId: Number(document.getElementById("wf_model").value),
+    year: Number(document.getElementById("wf_year").value),
+    coverageType: document.getElementById("wf_type").value,
+    durationMonths: document.getElementById("wf_dm").value ? Number(document.getElementById("wf_dm").value) : null,
+    distanceKm: document.getElementById("wf_dk").value ? Number(document.getElementById("wf_dk").value) : null,
+    appliesToPowertrains: pts,
+    descriptionMd: document.getElementById("wf_desc").value || null,
+    sourceUrl: document.getElementById("wf_src").value.trim() || null,
+  };
+  await api(id ? `/warranties/${id}` : "/warranties", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+  render();
+}
+
+async function renderFinance() {
+  const { products } = await api("/finance-products");
+  document.getElementById("main").innerHTML = `
+    <div class="toolbar"><button class="primary" onclick="openFpForm()">+ New product</button></div>
+    <table><thead><tr><th>ID</th><th>Slug</th><th>Name</th><th>Category</th><th>Active</th><th></th></tr></thead>
+    <tbody>${products.map(p => `<tr>
+      <td>${p.id}</td><td><code>${p.slug}</code></td><td>${escapeHtml(p.name)}</td>
+      <td><span class="badge">${p.category}</span></td><td>${p.active ? 'yes' : 'no'}</td>
+      <td class="row-actions">
+        <button class="secondary" onclick='openFpForm(${JSON.stringify(p)})'>edit</button>
+        <button class="secondary danger" onclick="delItem('finance-products', ${p.id})">del</button>
+      </td></tr>`).join("")}</tbody></table>
+    <div id="formArea"></div>`;
+}
+function openFpForm(p = {}) {
+  const cats = ["EXTENDED_WARRANTY","TIRE_RIM","APPEARANCE","PPF","GAP","KEY_REPLACEMENT","UNDERCOATING","OTHER"];
+  document.getElementById("formArea").innerHTML = `
+    <div class="edit-form"><h3>${p.id ? "Edit product #" + p.id : "New product"}</h3>
+      <div class="grid">
+        <label>Slug<input id="fp_slug" value="${escapeHtml(p.slug)}"></label>
+        <label>Name<input id="fp_name" value="${escapeHtml(p.name)}"></label>
+        <label>Category<select id="fp_cat">${cats.map(c => `<option ${c===p.category?'selected':''}>${c}</option>`).join("")}</select></label>
+        <label>Active<select id="fp_act"><option ${p.active!==false?'selected':''} value="true">yes</option><option ${p.active===false?'selected':''} value="false">no</option></select></label>
+      </div>
+      <label style="margin-top:10px">Description (markdown)<textarea id="fp_desc">${escapeHtml(p.descriptionMd)}</textarea></label>
+      <label style="margin-top:10px">Pricing notes<textarea id="fp_pn">${escapeHtml(p.pricingNotes)}</textarea></label>
+      <label style="margin-top:10px">Term options (JSON)<textarea id="fp_to">${escapeHtml(p.termOptionsJson ? JSON.stringify(p.termOptionsJson, null, 2) : '')}</textarea></label>
+      <div class="actions">
+        <button class="primary" onclick="saveFp(${p.id || 'null'})">${p.id ? 'Save' : 'Create'}</button>
+        <button class="secondary" onclick="document.getElementById('formArea').innerHTML=''">Cancel</button>
+      </div></div>`;
+}
+async function saveFp(id) {
+  let termOptionsJson = null;
+  const raw = document.getElementById("fp_to").value.trim();
+  if (raw) { try { termOptionsJson = JSON.parse(raw); } catch (e) { alert("Invalid JSON in term options"); return; } }
+  const data = {
+    slug: document.getElementById("fp_slug").value.trim(),
+    name: document.getElementById("fp_name").value.trim(),
+    category: document.getElementById("fp_cat").value,
+    descriptionMd: document.getElementById("fp_desc").value || null,
+    pricingNotes: document.getElementById("fp_pn").value || null,
+    termOptionsJson,
+    active: document.getElementById("fp_act").value === "true",
+  };
+  await api(id ? `/finance-products/${id}` : "/finance-products", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+  render();
+}
+
+async function renderNotes() {
+  const { notes } = await api("/rep-notes");
+  document.getElementById("main").innerHTML = `
+    <div class="toolbar"><button class="primary" onclick="openNoteForm()">+ New note</button></div>
+    <table><thead><tr><th>ID</th><th>Scope</th><th>Title</th><th>Tags</th><th>Updated</th><th></th></tr></thead>
+    <tbody>${notes.map(n => `<tr>
+      <td>${n.id}</td><td><span class="badge">${n.scopeType}${n.scopeId ? ':'+n.scopeId : ''}</span></td>
+      <td>${escapeHtml(n.title)}</td>
+      <td>${(n.tags||[]).map(t => `<span class="badge">${escapeHtml(t)}</span>`).join(" ")}</td>
+      <td>${new Date(n.updatedAt).toLocaleDateString()}</td>
+      <td class="row-actions">
+        <button class="secondary" onclick='openNoteForm(${JSON.stringify(n)})'>edit</button>
+        <button class="secondary danger" onclick="delItem('rep-notes', ${n.id})">del</button>
+      </td></tr>`).join("")}</tbody></table>
+    <div id="formArea"></div>`;
+}
+function openNoteForm(n = {}) {
+  const scopes = ["GLOBAL","MODEL","TRIM","COMPETITOR"];
+  document.getElementById("formArea").innerHTML = `
+    <div class="edit-form"><h3>${n.id ? "Edit note #" + n.id : "New note"}</h3>
+      <div class="grid">
+        <label>Scope<select id="nf_scope">${scopes.map(s => `<option ${s===n.scopeType?'selected':''}>${s}</option>`).join("")}</select></label>
+        <label>Scope ID (model/trim id; blank for GLOBAL)<input id="nf_scopeId" type="number" value="${n.scopeId || ''}"></label>
+        <label>Title<input id="nf_title" value="${escapeHtml(n.title)}"></label>
+        <label>Tags (comma)<input id="nf_tags" value="${(n.tags||[]).join(',')}"></label>
+      </div>
+      <label style="margin-top:10px">Body (markdown)<textarea id="nf_body" style="min-height:160px">${escapeHtml(n.bodyMd)}</textarea></label>
+      <div class="actions">
+        <button class="primary" onclick="saveNote(${n.id || 'null'})">${n.id ? 'Save' : 'Create'}</button>
+        <button class="secondary" onclick="document.getElementById('formArea').innerHTML=''">Cancel</button>
+      </div></div>`;
+}
+async function saveNote(id) {
+  const data = {
+    scopeType: document.getElementById("nf_scope").value,
+    scopeId: document.getElementById("nf_scopeId").value ? Number(document.getElementById("nf_scopeId").value) : null,
+    title: document.getElementById("nf_title").value.trim(),
+    bodyMd: document.getElementById("nf_body").value,
+    tags: document.getElementById("nf_tags").value.split(",").map(s => s.trim()).filter(Boolean),
+  };
+  await api(id ? `/rep-notes/${id}` : "/rep-notes", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+  render();
+}
+
+async function delItem(resource, id) {
+  if (!confirm("Delete " + resource + " #" + id + "?")) return;
+  await api(`/${resource}/${id}`, { method: "DELETE" });
+  render();
+}
+
+window.addEventListener("hashchange", () => {
+  currentTab = location.hash.replace("#", "") || "ai";
+  render();
+});
+
+updateTokenStatus();
+if (!token) { document.getElementById("tokenDialog").showModal(); }
+render();
+</script>
+</body>
+</html>

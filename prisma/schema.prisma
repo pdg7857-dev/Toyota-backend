@@ -1,0 +1,224 @@
+// Toyota Ontario sales-rep catalog schema.
+// See /root/.claude/plans/what-s-up-claude-we-enumerated-creek.md for design notes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PowertrainType {
+  GAS
+  HYBRID
+  PHEV
+  BEV
+}
+
+enum WarrantyCoverageType {
+  BASIC
+  POWERTRAIN
+  HYBRID_COMPONENT
+  HYBRID_BATTERY
+  CORROSION_PERFORATION
+  EMISSIONS
+  ACCESSORIES
+  ROADSIDE
+}
+
+enum FinanceProductCategory {
+  EXTENDED_WARRANTY
+  TIRE_RIM
+  APPEARANCE
+  PPF
+  GAP
+  KEY_REPLACEMENT
+  UNDERCOATING
+  OTHER
+}
+
+enum RepNoteScope {
+  MODEL
+  TRIM
+  GLOBAL
+  COMPETITOR
+}
+
+enum ScrapeRunStatus {
+  PENDING_REVIEW
+  APPLIED
+  REJECTED
+}
+
+enum ScrapeDiffDecision {
+  PENDING
+  ACCEPT
+  REJECT
+}
+
+model Model {
+  id         Int      @id @default(autoincrement())
+  slug       String   @unique
+  name       String
+  bodyStyle  String?  @map("body_style")
+  segment    String?
+  notesMd    String?  @map("notes_md")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  trims      Trim[]
+  warranties WarrantyCoverage[]
+
+  @@map("models")
+}
+
+model Powertrain {
+  id                    Int            @id @default(autoincrement())
+  type                  PowertrainType
+  displayName           String         @map("display_name")
+  engineDesc            String?        @map("engine_desc")
+  horsepowerHp          Int?           @map("horsepower_hp")
+  torqueLbft            Int?           @map("torque_lbft")
+  transmission          String?
+  drivetrain            String?
+  batteryKwh            Decimal?       @map("battery_kwh") @db.Decimal(5, 2)
+  electricRangeKm       Int?           @map("electric_range_km")
+  fuelEconomyCityL100   Decimal?       @map("fuel_economy_city_l100") @db.Decimal(4, 1)
+  fuelEconomyHwyL100    Decimal?       @map("fuel_economy_hwy_l100") @db.Decimal(4, 1)
+  fuelEconomyCombL100   Decimal?       @map("fuel_economy_comb_l100") @db.Decimal(4, 1)
+
+  trims                 Trim[]
+
+  @@map("powertrains")
+}
+
+model Trim {
+  id              Int      @id @default(autoincrement())
+  modelId         Int      @map("model_id")
+  powertrainId    Int      @map("powertrain_id")
+  year            Int
+  name            String
+  slug            String   @unique
+  msrpCad         Decimal  @map("msrp_cad") @db.Decimal(10, 2)
+  notesMd         String?  @map("notes_md")
+  previousTrimId  Int?     @unique @map("previous_trim_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  model           Model       @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  powertrain      Powertrain  @relation(fields: [powertrainId], references: [id])
+  previousTrim    Trim?       @relation("TrimLineage", fields: [previousTrimId], references: [id])
+  nextTrim        Trim?       @relation("TrimLineage")
+  fees            Fee[]
+
+  @@unique([modelId, year, name, powertrainId])
+  @@index([year])
+  @@index([modelId, year])
+  @@map("trims")
+}
+
+model Fee {
+  id                  Int       @id @default(autoincrement())
+  trimId              Int       @map("trim_id")
+  freightPdiCad       Decimal?  @map("freight_pdi_cad") @db.Decimal(10, 2)
+  acExciseCad         Decimal?  @map("ac_excise_cad") @db.Decimal(10, 2)
+  omvicFeeCad         Decimal?  @map("omvic_fee_cad") @db.Decimal(10, 2)
+  tireStewardshipCad  Decimal?  @map("tire_stewardship_cad") @db.Decimal(10, 2)
+  dealerAdminCad      Decimal?  @map("dealer_admin_cad") @db.Decimal(10, 2)
+  otherFeesJson       Json?     @map("other_fees_json")
+  hstRate             Decimal   @default(0.13) @map("hst_rate") @db.Decimal(4, 3)
+  effectiveDate       DateTime  @map("effective_date") @db.Date
+
+  trim                Trim      @relation(fields: [trimId], references: [id], onDelete: Cascade)
+
+  @@unique([trimId, effectiveDate])
+  @@map("fees")
+}
+
+model WarrantyCoverage {
+  id                     Int                  @id @default(autoincrement())
+  modelId                Int                  @map("model_id")
+  year                   Int
+  coverageType           WarrantyCoverageType @map("coverage_type")
+  durationMonths         Int?                 @map("duration_months")
+  distanceKm             Int?                 @map("distance_km")
+  appliesToPowertrains   PowertrainType[]     @map("applies_to_powertrains")
+  descriptionMd          String?              @map("description_md")
+  sourceUrl              String?              @map("source_url")
+
+  model                  Model                @relation(fields: [modelId], references: [id], onDelete: Cascade)
+
+  @@unique([modelId, year, coverageType])
+  @@index([modelId, year])
+  @@map("warranty_coverages")
+}
+
+model FinanceProduct {
+  id                    Int                    @id @default(autoincrement())
+  slug                  String                 @unique
+  name                  String
+  category              FinanceProductCategory
+  descriptionMd         String?                @map("description_md")
+  pricingNotes          String?                @map("pricing_notes")
+  termOptionsJson       Json?                  @map("term_options_json")
+  eligiblePowertrains   PowertrainType[]       @map("eligible_powertrains")
+  active                Boolean                @default(true)
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+
+  @@map("finance_products")
+}
+
+model RepNote {
+  id         Int          @id @default(autoincrement())
+  scopeType  RepNoteScope @map("scope_type")
+  scopeId    Int?         @map("scope_id")
+  title      String
+  bodyMd     String       @map("body_md")
+  tags       String[]
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  @@index([scopeType, scopeId])
+  @@map("rep_notes")
+}
+
+model ScrapeRun {
+  id           Int             @id @default(autoincrement())
+  startedAt    DateTime        @default(now()) @map("started_at")
+  finishedAt   DateTime?       @map("finished_at")
+  source       String
+  status       ScrapeRunStatus @default(PENDING_REVIEW)
+  summaryJson  Json?           @map("summary_json")
+
+  diffs        ScrapeDiff[]
+
+  @@map("scrape_runs")
+}
+
+model ScrapeDiff {
+  id         Int                @id @default(autoincrement())
+  runId      Int                @map("run_id")
+  tableName  String             @map("table_name")
+  recordPk   String             @map("record_pk")
+  field      String
+  oldValue   String?            @map("old_value")
+  newValue   String?            @map("new_value")
+  decision   ScrapeDiffDecision @default(PENDING)
+
+  run        ScrapeRun          @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@map("scrape_diffs")
+}
+
+// Single-row table used to invalidate the AI prompt cache when the catalog changes.
+model Meta {
+  id              Int      @id @default(1)
+  catalogVersion  Int      @default(1) @map("catalog_version")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("meta")
+}
