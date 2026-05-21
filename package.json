@@ -15,7 +15,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "db:seed": "tsx --env-file=.env src/db/seed.ts"
+    "db:seed": "tsx --env-file=.env src/db/seed.ts",
+    "scrape": "tsx --env-file=.env src/scraper/run.ts"
   },
   "prisma": {
     "seed": "tsx src/db/seed.ts"
@@ -33,6 +34,7 @@
     "@typescript-eslint/eslint-plugin": "^8.19.1",
     "@typescript-eslint/parser": "^8.19.1",
     "eslint": "^9.17.0",
+    "playwright": "^1.60.0",
     "prisma": "^6.1.0",
     "supertest": "^7.0.0",
     "tsx": "^4.19.2",

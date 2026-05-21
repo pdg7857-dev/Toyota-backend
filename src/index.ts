@@ -11,6 +11,7 @@ import { warrantiesRouter } from "./routes/warranties.js";
 import { financeRouter } from "./routes/finance.js";
 import { notesRouter } from "./routes/notes.js";
 import { aiRouter } from "./routes/ai.js";
+import { adminRouter } from "./routes/admin.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,6 +36,7 @@ export function createApp(): express.Express {
   api.use("/finance-products", financeRouter);
   api.use("/rep-notes", notesRouter);
   api.use("/ai", aiRouter);
+  api.use("/admin", adminRouter);
   app.use("/api/v1", api);
 
   app.use(notFound);

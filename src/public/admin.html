@@ -76,8 +76,8 @@
 </dialog>
 
 <script>
-const TABS = ["ai", "models", "trims", "powertrains", "warranties", "finance", "notes"];
-const TAB_LABELS = { ai: "AI Q&A", models: "Models", trims: "Trims", powertrains: "Powertrains", warranties: "Warranties", finance: "F&I Products", notes: "Rep Notes" };
+const TABS = ["ai", "models", "trims", "powertrains", "warranties", "finance", "notes", "scrape"];
+const TAB_LABELS = { ai: "AI Q&A", models: "Models", trims: "Trims", powertrains: "Powertrains", warranties: "Warranties", finance: "F&I Products", notes: "Rep Notes", scrape: "Scraper" };
 let token = localStorage.getItem("toyota_token") || "";
 let currentTab = location.hash.replace("#", "") || "ai";
 if (!TABS.includes(currentTab)) currentTab = "ai";
@@ -136,6 +136,7 @@ async function render() {
     if (currentTab === "warranties") return renderWarranties();
     if (currentTab === "finance") return renderFinance();
     if (currentTab === "notes") return renderNotes();
+    if (currentTab === "scrape") return renderScrape();
   } catch (e) {
     document.getElementById("main").innerHTML = `<div class="empty danger">Error: ${e.message}</div>`;
   }
@@ -505,6 +506,90 @@ async function saveNote(id) {
     tags: document.getElementById("nf_tags").value.split(",").map(s => s.trim()).filter(Boolean),
   };
   await api(id ? `/rep-notes/${id}` : "/rep-notes", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+  render();
+}
+
+// ---------- Scraper ----------
+async function renderScrape() {
+  const { runs } = await api("/admin/scrape/runs");
+  const runsHtml = runs.length === 0
+    ? `<div class="empty">No scrape runs yet.</div>`
+    : `<table><thead><tr><th>Run #</th><th>Source</th><th>Started</th><th>Finished</th><th>Status</th><th>Diffs</th><th></th></tr></thead>
+       <tbody>${runs.map(r => `<tr>
+         <td>${r.id}</td><td>${escapeHtml(r.source)}</td>
+         <td>${new Date(r.startedAt).toLocaleString()}</td>
+         <td>${r.finishedAt ? new Date(r.finishedAt).toLocaleString() : '<em>running…</em>'}</td>
+         <td><span class="badge">${r.status}</span></td>
+         <td>${r._count?.diffs ?? 0}</td>
+         <td class="row-actions">
+           <button class="secondary" onclick="reviewRun(${r.id})">review</button>
+         </td></tr>`).join("")}</tbody></table>`;
+  document.getElementById("main").innerHTML = `
+    <div class="toolbar">
+      <input id="scrapeModels" placeholder="model slugs (comma, blank = all)" style="width: 320px;">
+      <button class="primary" onclick="runScrape()">Run scraper</button>
+      <span style="color: var(--muted); font-size: 12px;">Spawns the Playwright child process. Polite delay ~3s/page. Results written to scrape_diffs for review — never directly to live tables.</span>
+    </div>
+    ${runsHtml}
+    <div id="diffArea"></div>`;
+}
+async function runScrape() {
+  const raw = document.getElementById("scrapeModels").value.trim();
+  const body = raw ? { models: raw.split(",").map(s => s.trim()).filter(Boolean) } : {};
+  const r = await api("/admin/scrape/run", { method: "POST", body: JSON.stringify(body) });
+  alert(`Scrape run #${r.runId} started. Refresh in ~1 minute to review diffs.`);
+  setTimeout(render, 2000);
+}
+async function reviewRun(runId) {
+  const { diffs } = await api(`/admin/scrape/runs/${runId}/diffs`);
+  if (diffs.length === 0) {
+    document.getElementById("diffArea").innerHTML = `<div class="edit-form"><h3>Run #${runId}: no diffs</h3><div class="empty">Either nothing changed, or the scraper is still running.</div></div>`;
+    return;
+  }
+  document.getElementById("diffArea").innerHTML = `
+    <div class="edit-form">
+      <h3>Run #${runId}: ${diffs.length} diffs</h3>
+      <table>
+        <thead><tr><th>#</th><th>Table</th><th>Record</th><th>Field</th><th>Old → New</th><th>Decision</th></tr></thead>
+        <tbody>${diffs.map(d => `<tr>
+          <td>${d.id}</td>
+          <td><span class="badge">${d.tableName}</span></td>
+          <td><code>${escapeHtml(d.recordPk)}</code></td>
+          <td>${escapeHtml(d.field)}</td>
+          <td><span style="color: var(--muted);">${escapeHtml(d.oldValue) || '—'}</span> → <strong>${escapeHtml(d.newValue) || '—'}</strong></td>
+          <td>
+            <select onchange="setDecision(${d.id}, this.value)">
+              <option value="PENDING" ${d.decision==='PENDING'?'selected':''}>PENDING</option>
+              <option value="ACCEPT" ${d.decision==='ACCEPT'?'selected':''}>ACCEPT</option>
+              <option value="REJECT" ${d.decision==='REJECT'?'selected':''}>REJECT</option>
+            </select>
+          </td></tr>`).join("")}</tbody>
+      </table>
+      <div class="actions">
+        <button class="primary" onclick="applyRun(${runId})">Apply accepted diffs</button>
+        <button class="secondary" onclick="bulkDecide(${runId}, 'ACCEPT')">Accept all</button>
+        <button class="secondary" onclick="bulkDecide(${runId}, 'REJECT')">Reject all</button>
+        <button class="secondary" onclick="document.getElementById('diffArea').innerHTML=''">Close</button>
+      </div>
+    </div>`;
+}
+const _pendingDecisions = new Map();
+function setDecision(diffId, decision) { _pendingDecisions.set(diffId, decision); }
+async function bulkDecide(runId, decision) {
+  const { diffs } = await api(`/admin/scrape/runs/${runId}/diffs`);
+  const decisions = diffs.map(d => ({ diffId: d.id, decision }));
+  await api(`/admin/scrape/runs/${runId}/diffs`, { method: "PATCH", body: JSON.stringify({ decisions }) });
+  reviewRun(runId);
+}
+async function applyRun(runId) {
+  // Flush any pending dropdown changes first
+  if (_pendingDecisions.size > 0) {
+    const decisions = [..._pendingDecisions.entries()].map(([diffId, decision]) => ({ diffId, decision }));
+    await api(`/admin/scrape/runs/${runId}/diffs`, { method: "PATCH", body: JSON.stringify({ decisions }) });
+    _pendingDecisions.clear();
+  }
+  const r = await api(`/admin/scrape/runs/${runId}/apply`, { method: "POST" });
+  alert(`Applied ${r.applied} diff(s) to the catalog. Catalog version bumped — AI prompt cache invalidated.`);
   render();
 }
 
