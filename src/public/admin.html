@@ -76,8 +76,8 @@
 </dialog>
 
 <script>
-const TABS = ["ai", "models", "trims", "powertrains", "warranties", "finance", "notes", "scrape"];
-const TAB_LABELS = { ai: "AI Q&A", models: "Models", trims: "Trims", powertrains: "Powertrains", warranties: "Warranties", finance: "F&I Products", notes: "Rep Notes", scrape: "Scraper" };
+const TABS = ["ai", "compare", "models", "trims", "powertrains", "warranties", "finance", "notes", "scrape"];
+const TAB_LABELS = { ai: "AI Q&A", compare: "Compare", models: "Models", trims: "Trims", powertrains: "Powertrains", warranties: "Warranties", finance: "F&I Products", notes: "Rep Notes", scrape: "Scraper" };
 let token = localStorage.getItem("toyota_token") || "";
 let currentTab = location.hash.replace("#", "") || "ai";
 if (!TABS.includes(currentTab)) currentTab = "ai";
@@ -137,6 +137,7 @@ async function render() {
     if (currentTab === "finance") return renderFinance();
     if (currentTab === "notes") return renderNotes();
     if (currentTab === "scrape") return renderScrape();
+    if (currentTab === "compare") return renderCompare();
   } catch (e) {
     document.getElementById("main").innerHTML = `<div class="empty danger">Error: ${e.message}</div>`;
   }
@@ -507,6 +508,56 @@ async function saveNote(id) {
   };
   await api(id ? `/rep-notes/${id}` : "/rep-notes", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
   render();
+}
+
+// ---------- Compare ----------
+async function renderCompare() {
+  const { trims } = await api("/trims");
+  window._allTrims = trims;
+  const grouped = {};
+  for (const t of trims) (grouped[t.model.name] ??= []).push(t);
+  const opts = Object.keys(grouped).sort().map(m =>
+    `<optgroup label="${escapeHtml(m)}">${grouped[m].map(t => `<option value="${t.slug}">${t.year} ${escapeHtml(t.name)} — $${Number(t.msrpCad).toLocaleString("en-CA")}</option>`).join("")}</optgroup>`
+  ).join("");
+  document.getElementById("main").innerHTML = `
+    <div class="edit-form">
+      <h3 style="margin-top:0">Side-by-side trim comparison</h3>
+      <div class="grid">
+        ${[0,1,2,3].map(i => `<label>Trim ${i+1}<select id="cmp_${i}"><option value="">— none —</option>${opts}</select></label>`).join("")}
+      </div>
+      <div class="actions"><button class="primary" onclick="doCompare()">Compare</button></div>
+    </div>
+    <div id="compareOut"></div>`;
+}
+async function doCompare() {
+  const slugs = [0,1,2,3].map(i => document.getElementById(`cmp_${i}`).value).filter(Boolean);
+  if (slugs.length < 2) { alert("Pick at least 2 trims."); return; }
+  const r = await api("/compare", { method: "POST", body: JSON.stringify({ trimSlugs: slugs }) });
+  const rows = r.trims;
+  const fmtMoney = (n) => "$" + Number(n).toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const headerCells = rows.map(t => `<th>${escapeHtml(t.model.name)}<br><span style="font-weight: 400; color: var(--muted);">${t.year} ${escapeHtml(t.name)}</span></th>`).join("");
+  const row = (label, fn) => `<tr><th>${label}</th>${rows.map(t => `<td>${fn(t)}</td>`).join("")}</tr>`;
+  const w = r.warrantyByModelYear;
+  const findW = (t, type) => (w[`${t.model.slug}|${t.year}`] || []).find(x => x.coverageType === type);
+  const fmtW = (cov) => cov ? `${cov.durationMonths}mo / ${cov.distanceKm ? cov.distanceKm.toLocaleString("en-CA")+"km" : "unlimited"}` : "—";
+  document.getElementById("compareOut").innerHTML = `
+    <table style="margin-top:16px">
+      <thead><tr><th></th>${headerCells}</tr></thead>
+      <tbody>
+        ${row("MSRP", t => fmtMoney(t.quote.msrp))}
+        ${row("Out-the-door (HST in)", t => `<strong>${fmtMoney(t.quote.total)}</strong>`)}
+        ${row("Powertrain", t => `<span class="badge">${t.powertrain.type}</span> ${escapeHtml(t.powertrain.displayName)}`)}
+        ${row("HP / Torque", t => `${t.powertrain.horsepowerHp || "—"} hp / ${t.powertrain.torqueLbft || "—"} lb-ft`)}
+        ${row("Drivetrain", t => escapeHtml(t.powertrain.drivetrain || "—"))}
+        ${row("Combined L/100km", t => t.powertrain.fuelEconomyCombL100 ?? "—")}
+        ${row("Electric range (km)", t => t.powertrain.electricRangeKm ?? "—")}
+        ${row("Basic warranty", t => fmtW(findW(t,"BASIC")))}
+        ${row("Powertrain warranty", t => fmtW(findW(t,"POWERTRAIN")))}
+        ${row("Hybrid battery", t => fmtW(findW(t,"HYBRID_BATTERY")))}
+        ${row("Corrosion", t => fmtW(findW(t,"CORROSION_PERFORATION")))}
+      </tbody>
+    </table>
+    ${r.missing && r.missing.length > 0 ? `<div class="empty danger">Not found: ${r.missing.join(", ")}</div>` : ""}`;
 }
 
 // ---------- Scraper ----------

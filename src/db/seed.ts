@@ -137,6 +137,60 @@ const REP_NOTES: Array<{
     bodyMd: "When customer hesitates on hybrid premium:\n\"On a [model], you'll pay about $2,500–3,000 more for hybrid up front. At today's gas prices ($1.65/L average ON), that pays back in about 3–4 years of average driving (20,000 km/yr). And — this is the part most people miss — Toyota covers the HV battery for **10 years or 240,000 kilometres**. So you're not taking on hybrid risk, you're hedging against gas-price risk for a decade.\"",
     tags: ["sales-script", "hybrid"],
   },
+  {
+    scopeType: RepNoteScope.COMPETITOR,
+    title: "Highlander vs Honda Pilot",
+    bodyMd: "Pilot has bigger 3rd row, no hybrid option.\n- Highlander Hybrid AWD has no Pilot equivalent — instant differentiator.\n- Pilot's V6 = better towing (5,000 lb vs ~3,500). If they need to tow, push Grand Highlander Hybrid MAX (8,000 lb) instead.\n- HV battery warranty 10/240 vs Honda 8/160.\n- Resale: comparable. Differentiator is hybrid availability and powertrain breadth.",
+    tags: ["objection-handling", "competitor", "highlander", "suv"],
+  },
+  {
+    scopeType: RepNoteScope.COMPETITOR,
+    title: "Sienna vs Honda Odyssey / Chrysler Pacifica",
+    bodyMd: "Sienna is hybrid-only. AWD available — Odyssey is FWD-only.\n- Pacifica Hybrid is a PHEV (FWD-only, 51 km electric range). Sienna is HEV — no plug, 6.7 L/100km combined.\n- Sienna wins on: AWD, fuel economy, resale, no plug-in lifestyle change required.\n- Odyssey wins on: cabin width, Magic Slide 2nd-row seats.\n- Customer-facing line: \"If you want one vehicle that does Costco runs in the city AND a winter cottage trip, Sienna Hybrid AWD is the only AWD minivan in Canada.\"",
+    tags: ["objection-handling", "competitor", "sienna", "minivan"],
+  },
+  {
+    scopeType: RepNoteScope.COMPETITOR,
+    title: "Tundra vs Ford F-150",
+    bodyMd: "Tundra i-FORCE MAX (437 hp / 583 lb-ft) competes with F-150 PowerBoost (430 hp / 570 lb-ft).\n- Toyota wins on: HV battery warranty (10/240 vs Ford 8/160), proven hybrid reputation, no Sync issues.\n- F-150 wins on: more cab/bed configurations, ProPower onboard (7.2kW gen), Lightning EV option if they want full electric truck.\n- Both tow ~11,000–12,000 lb. Tundra max payload is lower (~1,940 lb vs F-150 max ~3,300).\n- For F&I retention: Tundra historically loses ~$3,000/yr depreciation vs F-150's ~$4,500.",
+    tags: ["objection-handling", "competitor", "tundra", "truck"],
+  },
+  {
+    scopeType: RepNoteScope.COMPETITOR,
+    title: "Corolla Cross Hybrid vs HR-V / Kona",
+    bodyMd: "Honda HR-V doesn't offer hybrid. Hyundai Kona Hybrid isn't sold in Canada (only ICE + EV).\n- Corolla Cross Hybrid AWD = 196 hp combined, 6.0 L/100km, AWD-e standard. No direct competitor in the subcompact-hybrid-AWD slot.\n- Lead: \"In your size and price range, this is literally the only AWD hybrid subcompact SUV available in Canada.\"\n- HR-V wins on cabin packaging (Magic Seat). Kona EV is the comparison if they're EV-curious.",
+    tags: ["objection-handling", "competitor", "corolla-cross", "hybrid"],
+  },
+  {
+    scopeType: RepNoteScope.COMPETITOR,
+    title: "bZ4X vs Hyundai Ioniq 5 / VW ID.4 / Tesla Model Y",
+    bodyMd: "Hardest segment to defend on paper. bZ4X range ~406 km FWD vs Ioniq 5 ~488 km, Model Y ~525 km.\n- Toyota wins on: dealer network density, hybrid system experience, NACS port (2026+ via adapter — verify timing), bundled DC fast charging credits at delivery (verify current program).\n- Tesla wins on: Supercharger network (now shared via NACS), range, software.\n- Ioniq 5 wins on: 800V charging (~18 min 10–80%), retro-futurist styling.\n- Lead with the value angle: starting MSRP undercuts Model Y, plus full iZEV incentive eligibility. Don't argue range head-to-head — flip to total cost of ownership and Toyota reliability.",
+    tags: ["objection-handling", "competitor", "bz4x", "bev"],
+  },
+  {
+    scopeType: RepNoteScope.COMPETITOR,
+    title: "Prius vs Civic Hybrid",
+    bodyMd: "Civic Hybrid (returns to Canada lineup) is the cleanest direct competitor.\n- Prius wins on: AWD availability (Civic Hybrid is FWD-only), fuel economy (~4.5 L/100km combined vs Civic ~4.8), HV battery 10/240 vs Honda 8/160.\n- Civic wins on: cabin space, value, traditional sedan profile if customer doesn't want hatchback.\n- Lead: \"Both are great. Question is, do you ever drive in snow? Because Prius is the only mainstream compact hybrid with AWD in Canada.\"",
+    tags: ["objection-handling", "competitor", "prius", "hybrid"],
+  },
+  {
+    scopeType: RepNoteScope.GLOBAL,
+    title: "Lease vs finance — quick decision framework",
+    bodyMd: "Ask in this order:\n1. **How long will you keep it?** <4 yrs → lease. >6 yrs → finance. 4–6 yrs → either.\n2. **Annual km?** <20,000/yr → lease is fine. >24,000/yr → finance (lease excess km is ~$0.15–0.20/km).\n3. **Down payment available?** Low down + high km → finance. High down + low km → lease.\n4. **Want to customize / modify?** → finance (lease prohibits permanent mods).\n5. **Use vehicle for business?** → lease often better for tax write-offs (consult CRA).\n\nGAP insurance is mandatory pitch on both, but ESPECIALLY long-term finance.",
+    tags: ["sales-process", "lease", "finance"],
+  },
+  {
+    scopeType: RepNoteScope.GLOBAL,
+    title: "Toyota Safety Sense 3.0 — talking points",
+    bodyMd: "Standard on every 2025+ Toyota in Canada (no trim upgrade needed):\n- Pre-Collision System with Pedestrian Detection (now includes motorcyclists and oncoming-vehicle detection at intersections)\n- Full-Speed Dynamic Radar Cruise Control with curve speed management\n- Lane Departure Alert + Steering Assist + Lane Tracing Assist\n- Automatic High Beams\n- Road Sign Assist\n- Proactive Driving Assist (new in TSS 3.0 — gentle braking + steering input in routine driving)\n\nCustomer-facing line: \"Every 2025 Toyota — from the base Corolla LE to a Tundra Capstone — comes with the same active-safety package. You're not paying for trim to get safety.\"",
+    tags: ["safety", "feature", "cheat-sheet"],
+  },
+  {
+    scopeType: RepNoteScope.GLOBAL,
+    title: "Ontario EV/PHEV incentives (verify current!)",
+    bodyMd: "**Always check toyota.ca/transport-canada current rates before quoting — these change.**\n- Federal iZEV: up to $5,000 for eligible BEVs, $2,500 for eligible PHEVs (≥50 km range). Applied at delivery by dealer.\n- Ontario: provincial EV rebate ended 2018; **no current ON-specific rebate** (as of recent verification — confirm).\n- Eligible 2025/2026 Toyotas: Prius Prime (PHEV), RAV4 Prime (PHEV), bZ4X (BEV) — subject to MSRP caps. Verify each cap before quoting.\n- Tip: federal program is point-of-sale, not income-tested. Easy yes for the customer.",
+    tags: ["incentives", "izev", "ev", "phev", "cheat-sheet"],
+  },
 ];
 
 async function main() {
