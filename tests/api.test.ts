@@ -154,6 +154,34 @@ describe("compare endpoint", () => {
   });
 });
 
+describe("AI introspection endpoints", () => {
+  it("GET /ai/health reports config and catalog version", async () => {
+    const r = await request(app).get("/api/v1/ai/health").set(auth());
+    expect(r.status).toBe(200);
+    expect(r.body.defaultModel).toBe("claude-haiku-4-5");
+    expect(r.body.optInModel).toBe("claude-sonnet-4-6");
+    expect(typeof r.body.catalogVersion).toBe("number");
+    expect(typeof r.body.anthropicConfigured).toBe("boolean");
+  });
+
+  it("GET /ai/context-preview scopes models from the question", async () => {
+    const r = await request(app)
+      .get("/api/v1/ai/context-preview")
+      .query({ question: "What is the warranty on a 2026 RAV4 Hybrid battery?" })
+      .set(auth());
+    expect(r.status).toBe(200);
+    expect(r.body.scopedModels).toContain("rav4");
+    expect(r.body.fullCatalogBlock).toContain("[trim:rav4-2026-xle-hybrid-awd]");
+    expect(r.body.scopedBlock).toContain("RAV4");
+    expect(r.body.sizes.fullCatalogChars).toBeGreaterThan(1000);
+  });
+
+  it("GET /ai/context-preview requires a question", async () => {
+    const r = await request(app).get("/api/v1/ai/context-preview").set(auth());
+    expect(r.status).toBe(400);
+  });
+});
+
 describe("admin scrape endpoints", () => {
   it("lists scrape runs", async () => {
     const r = await request(app).get("/api/v1/admin/scrape/runs").set(auth());
