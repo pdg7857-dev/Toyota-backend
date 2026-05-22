@@ -1,5 +1,11 @@
-// Toyota Ontario sales-rep catalog schema.
-// See /root/.claude/plans/what-s-up-claude-we-enumerated-creek.md for design notes.
+// Ontario car comparison + Toyota sales-rep catalog schema.
+//
+// Schema evolved from a Toyota-only catalog to a multi-brand comparison
+// database covering every 2025/2026 model available for sale in Ontario.
+// Toyota and Lexus retain "featured" status used by the web UI to emphasize
+// them. The original Toyota tables (Model/Trim/Powertrain/Warranty/Fee/
+// FinanceProduct/RepNote) are preserved for the existing sales-rep API; the
+// new comparison site lives at /web and shares this Prisma client.
 
 generator client {
   provider = "prisma-client-js"
@@ -70,19 +76,109 @@ enum ConversationRole {
   ASSISTANT
 }
 
+enum IssueSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum IssueStatus {
+  REPORTED
+  RECALL_OPEN
+  RECALL_CLOSED
+  TSB
+  RESOLVED
+}
+
+enum MentionPlatform {
+  REDDIT
+  FORUM
+  PROFESSIONAL_REVIEW
+  YOUTUBE
+  RECALL_DB
+  CONSUMER_REPORTS
+  OTHER
+}
+
+enum Sentiment {
+  POSITIVE
+  NEGATIVE
+  NEUTRAL
+  MIXED
+}
+
+model Brand {
+  id                          Int       @id @default(autoincrement())
+  slug                        String    @unique
+  name                        String
+  country                     String?
+  parentCompany               String?   @map("parent_company")
+  websiteUrl                  String?   @map("website_url")
+  logoUrl                     String?   @map("logo_url")
+
+  // Whether to highlight this brand in the comparison UI. Toyota and Lexus
+  // get this flag — the home page sorts featured brands first and shows a
+  // distinct visual treatment for their cards.
+  isFeatured                  Boolean   @default(false) @map("is_featured")
+
+  // Brand-level warranty defaults in Canada. Override at the model level if a
+  // model deviates (e.g. EV-specific battery coverage).
+  basicWarrantyMonths         Int?      @map("basic_warranty_months")
+  basicWarrantyKm             Int?      @map("basic_warranty_km")
+  powertrainWarrantyMonths    Int?      @map("powertrain_warranty_months")
+  powertrainWarrantyKm        Int?      @map("powertrain_warranty_km")
+  hybridComponentMonths       Int?      @map("hybrid_component_months")
+  hybridComponentKm           Int?      @map("hybrid_component_km")
+  hybridBatteryMonths         Int?      @map("hybrid_battery_months")
+  hybridBatteryKm             Int?      @map("hybrid_battery_km")
+  corrosionMonths             Int?      @map("corrosion_months")
+  corrosionKm                 Int?      @map("corrosion_km") // null = unlimited
+  roadsideMonths              Int?      @map("roadside_months")
+  roadsideKm                  Int?      @map("roadside_km") // null = unlimited
+
+  // Aggregate reliability + ownership signals (0-10). Editorial best-effort,
+  // surfaced as guidance not gospel — the source is captured in notesMd.
+  reliabilityScore            Decimal?  @map("reliability_score") @db.Decimal(3, 1)
+  resaleValueScore            Decimal?  @map("resale_value_score") @db.Decimal(3, 1)
+  dealerNetworkScore          Decimal?  @map("dealer_network_score") @db.Decimal(3, 1)
+
+  // Bias context used by the comparison UI's editorial blurbs.
+  notesMd                     String?   @map("notes_md")
+
+  createdAt                   DateTime  @default(now()) @map("created_at")
+  updatedAt                   DateTime  @updatedAt @map("updated_at")
+
+  models                      Model[]
+  commonIssues                CommonIssue[]
+  externalMentions            ExternalMention[]
+  prosCons                    ProCon[]
+
+  @@map("brands")
+}
+
 model Model {
-  id         Int      @id @default(autoincrement())
-  slug       String   @unique
-  name       String
-  bodyStyle  String?  @map("body_style")
-  segment    String?
-  notesMd    String?  @map("notes_md")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id          Int      @id @default(autoincrement())
+  brandId     Int?     @map("brand_id")
+  slug        String   @unique
+  name        String
+  bodyStyle   String?  @map("body_style")
+  segment     String?
+  startingMsrpCad Decimal? @map("starting_msrp_cad") @db.Decimal(10, 2)
+  imageUrl    String?  @map("image_url")
+  notesMd     String?  @map("notes_md")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
-  trims      Trim[]
-  warranties WarrantyCoverage[]
+  brand            Brand?            @relation(fields: [brandId], references: [id])
+  trims            Trim[]
+  warranties       WarrantyCoverage[]
+  ownershipCosts   OwnershipCost[]
+  commonIssues     CommonIssue[]
+  prosCons         ProCon[]
+  externalMentions ExternalMention[]
 
+  @@index([brandId])
   @@map("models")
 }
 
@@ -295,4 +391,130 @@ model Meta {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("meta")
+}
+
+// =====================================================================
+// Comparison-site tables — ownership cost, reliability, external mentions
+// =====================================================================
+
+model OwnershipCost {
+  id                       Int       @id @default(autoincrement())
+  modelId                  Int       @map("model_id")
+  year                     Int
+
+  // Tires
+  tireFrontSize            String?   @map("tire_front_size")
+  tireRearSize             String?   @map("tire_rear_size") // null = same as front (square setup)
+  estTireSetCad            Decimal?  @map("est_tire_set_cad") @db.Decimal(10, 2)
+  estWinterTireSetCad      Decimal?  @map("est_winter_tire_set_cad") @db.Decimal(10, 2)
+
+  // Routine maintenance
+  oilType                  String?   @map("oil_type")
+  oilCapacityL             Decimal?  @map("oil_capacity_l") @db.Decimal(4, 1)
+  estOilChangeCad          Decimal?  @map("est_oil_change_cad") @db.Decimal(10, 2)
+  oilChangeIntervalKm      Int?      @map("oil_change_interval_km")
+  brakeJobFrontCad         Decimal?  @map("brake_job_front_cad") @db.Decimal(10, 2)
+  brakeJobRearCad          Decimal?  @map("brake_job_rear_cad") @db.Decimal(10, 2)
+
+  // Labour
+  dealerLabourRateCad      Decimal?  @map("dealer_labour_rate_cad") @db.Decimal(10, 2)
+  indieLabourRateCad       Decimal?  @map("indie_labour_rate_cad") @db.Decimal(10, 2)
+
+  // Inclusive free-maintenance program (e.g. Toyota Tire & Brake Plan, BMW
+  // Ultimate Care). null/0 means none.
+  includedMaintenanceMonths Int?     @map("included_maintenance_months")
+  includedMaintenanceKm     Int?     @map("included_maintenance_km")
+  includedMaintenanceNotes  String?  @map("included_maintenance_notes")
+
+  // Editorial summary of typical 5-year ownership cost.
+  fiveYearOwnershipCostCad Decimal?  @map("five_year_ownership_cost_cad") @db.Decimal(10, 2)
+
+  sourceUrls               String[]  @map("source_urls")
+  notesMd                  String?   @map("notes_md")
+  createdAt                DateTime  @default(now()) @map("created_at")
+  updatedAt                DateTime  @updatedAt @map("updated_at")
+
+  model                    Model     @relation(fields: [modelId], references: [id], onDelete: Cascade)
+
+  @@unique([modelId, year])
+  @@index([modelId])
+  @@map("ownership_costs")
+}
+
+model CommonIssue {
+  id              Int             @id @default(autoincrement())
+  // Issue is attached to either a model (preferred) or a brand (cross-model).
+  modelId         Int?            @map("model_id")
+  brandId         Int?            @map("brand_id")
+  yearsAffected   Int[]           @map("years_affected")
+
+  title           String
+  description     String
+  severity        IssueSeverity   @default(MEDIUM)
+  status          IssueStatus     @default(REPORTED)
+
+  // How often it's reported. Editorial — pulled from Reddit/forum counts +
+  // recall databases. Lets the UI sort "most-common issues first".
+  mentionCount    Int             @default(1) @map("mention_count")
+
+  recallId        String?         @map("recall_id") // Transport Canada / NHTSA ref
+  sourceUrl       String?         @map("source_url")
+  evidenceMd      String?         @map("evidence_md")
+
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  model           Model?          @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  brand           Brand?          @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  @@index([modelId])
+  @@index([brandId])
+  @@index([severity])
+  @@map("common_issues")
+}
+
+model ProCon {
+  id          Int      @id @default(autoincrement())
+  // Pro/con can attach to model or brand.
+  modelId     Int?     @map("model_id")
+  brandId     Int?     @map("brand_id")
+
+  isPro       Boolean  @map("is_pro")
+  text        String
+  sourceUrl   String?  @map("source_url")
+  weight      Int      @default(1) // ordering hint, higher = more prominent
+
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  model       Model?   @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  brand       Brand?   @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  @@index([modelId])
+  @@index([brandId])
+  @@map("pros_cons")
+}
+
+model ExternalMention {
+  id              Int             @id @default(autoincrement())
+  modelId         Int?            @map("model_id")
+  brandId         Int?            @map("brand_id")
+
+  platform        MentionPlatform
+  title           String
+  url             String          @unique
+  authorHandle    String?         @map("author_handle")
+  subreddit       String?
+  summary         String?
+  sentiment       Sentiment?
+  upvotes         Int?
+  postedAt        DateTime?       @map("posted_at")
+  scrapedAt       DateTime        @default(now()) @map("scraped_at")
+
+  model           Model?          @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  brand           Brand?          @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  @@index([modelId])
+  @@index([brandId])
+  @@index([platform])
+  @@map("external_mentions")
 }

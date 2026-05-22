@@ -1,4 +1,54 @@
-# Toyota-backend
+# Toyota-backend + Ontario Car Comparison
+
+Two related projects in one repo, sharing a single Prisma schema and Postgres database.
+
+1. **Toyota sales-rep backend** (`/src`): REST catalog + Claude Q&A for a Toyota Ontario rep. Every 2025/2026 model and trim, MSRPs + Ontario fees, warranties, F&I products, rep notes.
+2. **Ontario Car Comparison site** (`/web`): Next.js 15 site covering every 2025/2026 vehicle sold in Ontario. Brand-level warranty, pricing, ownership cost (tires, oil, brakes, labour), curated pros/cons, common issues sourced from OEM sites + Reddit. **Toyota and Lexus are "featured" brands** — they get visual prominence and the deepest data set.
+
+## Quick start (both projects)
+
+```bash
+npm install
+cp .env.example .env  # set DATABASE_URL, API_TOKEN, ANTHROPIC_API_KEY
+npm run prisma:migrate -- --name init  # one-shot, creates all tables
+npm run db:seed                # Toyota sales-rep data
+npm run db:seed:comparison     # multi-brand comparison data
+npm run dev                    # Toyota API (http://localhost:3000)
+
+# In a second terminal — the comparison site:
+cd web && npm install
+cd .. && npm run web:dev       # comparison site (http://localhost:3001)
+```
+
+The two apps share the same Prisma client, so a change in one schema is visible in both.
+
+## Ontario Car Comparison site
+
+Routes (Next.js App Router, all server-rendered):
+
+- `/` — home, brand grid with Toyota + Lexus featured at top, plus the featured-model carousel
+- `/brands/[slug]` — brand profile: warranty headline numbers, reliability/resale scores, model lineup
+- `/vehicles` — filterable index (brand, segment, max MSRP, sort)
+- `/vehicles/[slug]` — single vehicle: trims + MSRPs, pros/cons, ownership cost, known issues, Reddit discussion roundup
+- `/compare?slugs=rav4,cr-v,cx-5,model-y` — side-by-side compare of up to 4 vehicles (URL is shareable)
+- `/issues` — all known issues across the catalog, sorted by severity
+
+The comparison site's data is seeded from `src/db/comparison-seed-data.ts` and kept current by the scraper at `src/scraper/run-comparison.ts`:
+
+```bash
+npm run scrape:comparison                   # all brands + Reddit issue scrape
+npm run scrape:comparison -- --brands toyota,lexus
+npm run scrape:comparison -- --reddit-only  # just refresh Reddit mentions
+npm run scrape:comparison -- --no-reddit    # OEM scrape only
+```
+
+Brands with dedicated scrapers (Toyota, Lexus) get full data; others use the generic `stub-brand` scraper that hits each model URL and extracts the lowest plausible price (sanity-checked within ±30% of seed value). Upgrade by writing a brand-specific scraper in `src/scraper/sources/<brand>-ca.ts` and registering it in `run-comparison.ts`.
+
+Reddit issue mentions are stored in `external_mentions` and surfaced on the per-vehicle page. Sentiment is heuristic (title scan + upvote count) — verify before relying.
+
+---
+
+## Toyota sales-rep backend
 
 Personal reference + Q&A backend for a Toyota Ontario sales rep. Covers every 2025/2026 model and trim sold in Ontario — specs, MSRPs + Ontario fees, warranties, F&I/upsell products, and rep cheat-sheet notes. REST catalog + Claude-powered natural-language Q&A on top.
 

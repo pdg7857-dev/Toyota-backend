@@ -8,3 +8,9 @@ coverage/
 .vscode/
 .idea/
 screenshots/
+
+# Next.js (comparison site at /web)
+web/.next/
+web/out/
+web/next-env.d.ts
+web/tsconfig.tsbuildinfo
