@@ -1,6 +1,7 @@
 // Run with: `npm run db:seed` (after `npm run prisma:migrate`)
 import { PrismaClient, PowertrainType, WarrantyCoverageType, FinanceProductCategory, RepNoteScope } from "@prisma/client";
 import { POWERTRAINS, MODELS, DEFAULT_FEES } from "./seed-data.js";
+import { BODY_COLORS } from "./colors-seed.js";
 
 const prisma = new PrismaClient();
 
@@ -307,7 +308,17 @@ async function main() {
   }
   console.log(`  ${REP_NOTES.length} rep notes (global + competitor)`);
 
-  // 6. Meta
+  // 6. Body colors (catalog only — trim availability is curated via admin UI)
+  for (const c of BODY_COLORS) {
+    await prisma.bodyColor.upsert({
+      where: { slug: c.slug },
+      create: c,
+      update: { name: c.name, hex: c.hex ?? null, type: c.type, notesMd: c.notesMd ?? null },
+    });
+  }
+  console.log(`  ${BODY_COLORS.length} body colors`);
+
+  // 7. Meta
   await prisma.meta.upsert({
     where: { id: 1 },
     create: { id: 1, catalogVersion: 1 },

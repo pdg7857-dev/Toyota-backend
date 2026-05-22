@@ -76,8 +76,8 @@
 </dialog>
 
 <script>
-const TABS = ["ai", "compare", "models", "trims", "powertrains", "warranties", "finance", "notes", "scrape"];
-const TAB_LABELS = { ai: "AI Q&A", compare: "Compare", models: "Models", trims: "Trims", powertrains: "Powertrains", warranties: "Warranties", finance: "F&I Products", notes: "Rep Notes", scrape: "Scraper" };
+const TABS = ["ai", "search", "compare", "models", "trims", "powertrains", "warranties", "finance", "colors", "notes", "scrape"];
+const TAB_LABELS = { ai: "AI Q&A", search: "Search", compare: "Compare", models: "Models", trims: "Trims", powertrains: "Powertrains", warranties: "Warranties", finance: "F&I Products", colors: "Colors", notes: "Rep Notes", scrape: "Scraper" };
 let token = localStorage.getItem("toyota_token") || "";
 let currentTab = location.hash.replace("#", "") || "ai";
 if (!TABS.includes(currentTab)) currentTab = "ai";
@@ -138,25 +138,68 @@ async function render() {
     if (currentTab === "notes") return renderNotes();
     if (currentTab === "scrape") return renderScrape();
     if (currentTab === "compare") return renderCompare();
+    if (currentTab === "search") return renderSearch();
+    if (currentTab === "colors") return renderColors();
   } catch (e) {
     document.getElementById("main").innerHTML = `<div class="empty danger">Error: ${e.message}</div>`;
   }
 }
 
 // ---------- AI ----------
-function renderAi() {
+let _currentConversationId = null;
+
+async function renderAi() {
+  const { conversations } = await api("/ai/conversations");
+  const convList = conversations.length === 0
+    ? `<div class="empty" style="padding: 10px;">No conversations yet</div>`
+    : conversations.map(c => `
+        <div onclick="loadConversation(${c.id})" style="padding: 8px 10px; border-bottom: 1px solid var(--border); cursor: pointer; ${c.id === _currentConversationId ? 'background: var(--panel-2);' : ''}">
+          <div style="font-size: 13px; ${c.id === _currentConversationId ? 'font-weight: 600;' : ''}">${escapeHtml(c.title || `#${c.id}`).slice(0, 50)}</div>
+          <div style="font-size: 11px; color: var(--muted);">${c._count.messages} msg • ${new Date(c.updatedAt).toLocaleDateString()}</div>
+        </div>`).join("");
   document.getElementById("main").innerHTML = `
-    <div class="ai-panel">
-      <h3 style="margin-top:0">Ask the catalog</h3>
-      <textarea id="aiQ" placeholder="e.g. Customer comparing 2026 RAV4 Hybrid XLE vs Highlander Hybrid LE — what should I emphasize on warranty and price?"></textarea>
-      <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center;">
-        <label style="font-size: 12px; color: var(--muted);">Model:
-          <select id="aiModel"><option value="haiku">haiku-4-5 (fast)</option><option value="sonnet">sonnet-4-6 (smarter)</option></select>
-        </label>
-        <button class="primary" onclick="aiAsk()">Ask</button>
+    <div style="display: grid; grid-template-columns: 240px 1fr; gap: 16px; align-items: start;">
+      <div style="background: var(--panel); border: 1px solid var(--border); border-radius: 6px;">
+        <div style="padding: 10px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+          <strong style="font-size: 12px;">Conversations</strong>
+          <button class="secondary" style="font-size: 11px; padding: 3px 8px;" onclick="newConversation()">+ new</button>
+        </div>
+        ${convList}
       </div>
-      <div id="aiOut"></div>
+      <div class="ai-panel">
+        <h3 style="margin-top:0">${_currentConversationId ? `Conversation #${_currentConversationId}` : 'New conversation'}</h3>
+        <div id="aiHistory"></div>
+        <textarea id="aiQ" placeholder="e.g. Customer comparing 2026 RAV4 Hybrid XLE vs Highlander Hybrid LE — what should I emphasize on warranty and price?"></textarea>
+        <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center;">
+          <label style="font-size: 12px; color: var(--muted);">Model:
+            <select id="aiModel"><option value="haiku">haiku-4-5 (fast)</option><option value="sonnet">sonnet-4-6 (smarter)</option></select>
+          </label>
+          <button class="primary" onclick="aiAsk()">${_currentConversationId ? 'Send' : 'Ask'}</button>
+          ${_currentConversationId ? `<button class="secondary" onclick="deleteConversation(${_currentConversationId})">Delete</button>` : ''}
+        </div>
+        <div id="aiOut"></div>
+      </div>
     </div>`;
+  if (_currentConversationId) await renderHistory();
+}
+function newConversation() { _currentConversationId = null; render(); }
+async function loadConversation(id) { _currentConversationId = id; render(); }
+async function deleteConversation(id) {
+  if (!confirm("Delete conversation #" + id + "?")) return;
+  await api(`/ai/conversations/${id}`, { method: "DELETE" });
+  _currentConversationId = null;
+  render();
+}
+async function renderHistory() {
+  if (!_currentConversationId) return;
+  const conv = await api(`/ai/conversations/${_currentConversationId}`);
+  const el = document.getElementById("aiHistory");
+  if (!el) return;
+  el.innerHTML = conv.messages.map(m => `
+    <div style="margin-bottom: 10px;">
+      <div style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">${m.role}${m.modelUsed ? ' · ' + m.modelUsed : ''}</div>
+      <div class="ai-answer" style="margin: 0;">${escapeHtml(m.content)}</div>
+    </div>`).join("");
 }
 async function aiAsk() {
   const question = document.getElementById("aiQ").value.trim();
@@ -165,17 +208,12 @@ async function aiAsk() {
   const out = document.getElementById("aiOut");
   out.innerHTML = `<div class="ai-answer">Thinking…</div>`;
   try {
-    const r = await api("/ai/ask", { method: "POST", body: JSON.stringify({ question, model }) });
-    out.innerHTML = `
-      <div class="ai-answer">${escapeHtml(r.answer)}</div>
-      <div class="ai-meta">
-        <span>model: ${r.model}</span>
-        <span>cached: ${r.cachedInputTokens} tok</span>
-        <span>uncached: ${r.uncachedInputTokens} tok</span>
-        <span>output: ${r.outputTokens} tok</span>
-        <span>catalog v${r.catalogVersion}</span>
-      </div>
-      ${r.citations?.length ? `<div class="ai-meta">citations: ${r.citations.map(c => `<span class="badge">${c.type}:${c.id}</span>`).join(" ")}</div>` : ""}`;
+    const body = { question, model };
+    if (_currentConversationId) body.conversationId = _currentConversationId;
+    const r = await api("/ai/ask", { method: "POST", body: JSON.stringify(body) });
+    _currentConversationId = r.conversationId;
+    document.getElementById("aiQ").value = "";
+    render();
   } catch (e) {
     out.innerHTML = `<div class="ai-answer danger">${escapeHtml(e.message)}</div>`;
   }
@@ -508,6 +546,170 @@ async function saveNote(id) {
   };
   await api(id ? `/rep-notes/${id}` : "/rep-notes", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
   render();
+}
+
+// ---------- Search ----------
+function renderSearch() {
+  document.getElementById("main").innerHTML = `
+    <div class="edit-form">
+      <h3 style="margin-top:0">Search by budget &amp; needs</h3>
+      <div class="grid">
+        <label>Year<select id="s_year"><option value="">any</option><option>2025</option><option selected>2026</option></select></label>
+        <label>Body styles (comma)<input id="s_body" placeholder="SUV, Sedan, Truck"></label>
+        <label>Max MSRP $<input id="s_maxMsrp" type="number" placeholder="40000"></label>
+        <label>Max OTD (with HST) $<input id="s_maxTotal" type="number" placeholder="55000"></label>
+        <label>Powertrains (comma)<input id="s_pt" placeholder="HYBRID,PHEV,BEV"></label>
+        <label>Drivetrain contains<input id="s_dt" placeholder="AWD"></label>
+        <label>Min HP<input id="s_minHp" type="number"></label>
+        <label>Max combined L/100km<input id="s_maxFe" type="number" step="0.1" placeholder="7.0"></label>
+        <label>Min electric range (km)<input id="s_minER" type="number" placeholder="50"></label>
+        <label>Sort by<select id="s_sort">
+          <option value="msrp">MSRP</option>
+          <option value="total">OTD total</option>
+          <option value="fuel_economy">Fuel economy</option>
+          <option value="horsepower">Horsepower</option>
+          <option value="electric_range">Electric range</option>
+        </select></label>
+        <label>Direction<select id="s_dir"><option value="asc">asc</option><option value="desc">desc</option></select></label>
+        <label><input type="checkbox" id="s_hybridOnly"> Hybrid/PHEV/BEV only</label>
+        <label><input type="checkbox" id="s_awdOnly"> AWD only</label>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="doSearch()">Search</button>
+        <button class="secondary" onclick="document.getElementById('searchOut').innerHTML=''">Clear results</button>
+      </div>
+    </div>
+    <div id="searchOut"></div>`;
+}
+async function doSearch() {
+  const val = (id) => document.getElementById(id).value.trim();
+  const num = (id) => val(id) ? Number(val(id)) : undefined;
+  const list = (id) => val(id) ? val(id).split(",").map(s => s.trim().toUpperCase()).filter(Boolean) : undefined;
+  const cap = (id) => val(id) ? val(id).split(",").map(s => s.trim()).filter(Boolean) : undefined;
+  const body = {
+    year: num("s_year"),
+    bodyStyles: cap("s_body"),
+    powertrains: list("s_pt"),
+    drivetrainContains: val("s_dt") || undefined,
+    minHp: num("s_minHp"),
+    maxComboL100: num("s_maxFe"),
+    minElectricRangeKm: num("s_minER"),
+    maxMsrpCad: num("s_maxMsrp"),
+    maxTotalCad: num("s_maxTotal"),
+    hybridOnly: document.getElementById("s_hybridOnly").checked || undefined,
+    awdOnly: document.getElementById("s_awdOnly").checked || undefined,
+    sortBy: document.getElementById("s_sort").value,
+    sortDir: document.getElementById("s_dir").value,
+    limit: 50,
+  };
+  Object.keys(body).forEach(k => body[k] === undefined && delete body[k]);
+  const r = await api("/search", { method: "POST", body: JSON.stringify(body) });
+  const fmt = (n) => "$" + Number(n).toLocaleString("en-CA", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  document.getElementById("searchOut").innerHTML = `
+    <div style="margin: 16px 0 8px; color: var(--muted); font-size: 13px;">${r.count} matches</div>
+    <table>
+      <thead><tr><th>Year</th><th>Model</th><th>Trim</th><th>Powertrain</th><th>HP</th><th>L/100km</th><th>EV km</th><th>MSRP</th><th>OTD</th></tr></thead>
+      <tbody>${r.results.map(t => `<tr>
+        <td>${t.year}</td>
+        <td>${escapeHtml(t.model.name)}</td>
+        <td>${escapeHtml(t.name)}</td>
+        <td><span class="badge">${t.powertrain.type}</span> ${escapeHtml(t.powertrain.drivetrain || '')}</td>
+        <td>${t.powertrain.horsepowerHp ?? '—'}</td>
+        <td>${t.powertrain.fuelEconomyCombL100 ?? '—'}</td>
+        <td>${t.powertrain.electricRangeKm ?? '—'}</td>
+        <td>${fmt(t.msrp)}</td>
+        <td><strong>${fmt(t.total)}</strong></td>
+      </tr>`).join("")}</tbody>
+    </table>`;
+}
+
+// ---------- Colors ----------
+async function renderColors() {
+  const [{ colors }, { trims }] = await Promise.all([api("/colors"), api("/trims")]);
+  window._colors = colors;
+  window._allTrims = trims;
+  const trimOpts = trims.map(t => `<option value="${t.id}">${t.year} ${escapeHtml(t.model.name)} ${escapeHtml(t.name)}</option>`).join("");
+  document.getElementById("main").innerHTML = `
+    <div class="toolbar">
+      <button class="primary" onclick="openColorForm()">+ New color</button>
+      <select id="cl_pickTrim" style="width: 320px;"><option value="">— pick a trim to manage its colors —</option>${trimOpts}</select>
+      <button class="secondary" onclick="loadTrimColors()">Load</button>
+    </div>
+    <table>
+      <thead><tr><th>ID</th><th>Slug</th><th>Name</th><th>Type</th><th>Hex</th><th></th></tr></thead>
+      <tbody>${colors.map(c => `<tr>
+        <td>${c.id}</td><td><code>${c.slug}</code></td><td>${escapeHtml(c.name)}</td>
+        <td><span class="badge">${c.type}</span></td>
+        <td>${c.hex ? `<span style="display:inline-block;width:14px;height:14px;background:${c.hex};border:1px solid var(--border);vertical-align:middle;margin-right:6px"></span><code>${c.hex}</code>` : '—'}</td>
+        <td class="row-actions">
+          <button class="secondary" onclick='openColorForm(${JSON.stringify(c)})'>edit</button>
+          <button class="secondary danger" onclick="delItem('colors', ${c.id})">del</button>
+        </td></tr>`).join("")}</tbody>
+    </table>
+    <div id="colorFormArea"></div>
+    <div id="trimColorsArea"></div>`;
+}
+function openColorForm(c = {}) {
+  const types = ["STANDARD", "METALLIC", "PEARL", "TWO_TONE"];
+  document.getElementById("colorFormArea").innerHTML = `
+    <div class="edit-form"><h3>${c.id ? "Edit color #" + c.id : "New color"}</h3>
+      <div class="grid">
+        <label>Slug<input id="cf_slug" value="${escapeHtml(c.slug)}"></label>
+        <label>Name<input id="cf_name" value="${escapeHtml(c.name)}"></label>
+        <label>Type<select id="cf_type">${types.map(t => `<option ${t===c.type?'selected':''}>${t}</option>`).join("")}</select></label>
+        <label>Hex<input id="cf_hex" value="${escapeHtml(c.hex)}" placeholder="#000000"></label>
+      </div>
+      <label style="margin-top:10px">Notes<textarea id="cf_notes">${escapeHtml(c.notesMd)}</textarea></label>
+      <div class="actions">
+        <button class="primary" onclick="saveColor(${c.id || 'null'})">${c.id ? 'Save' : 'Create'}</button>
+        <button class="secondary" onclick="document.getElementById('colorFormArea').innerHTML=''">Cancel</button>
+      </div></div>`;
+}
+async function saveColor(id) {
+  const data = {
+    slug: document.getElementById("cf_slug").value.trim(),
+    name: document.getElementById("cf_name").value.trim(),
+    type: document.getElementById("cf_type").value,
+    hex: document.getElementById("cf_hex").value.trim() || null,
+    notesMd: document.getElementById("cf_notes").value || null,
+  };
+  await api(id ? `/colors/${id}` : "/colors", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+  render();
+}
+async function loadTrimColors() {
+  const trimId = document.getElementById("cl_pickTrim").value;
+  if (!trimId) return;
+  const trim = window._allTrims.find(t => t.id === Number(trimId));
+  const { trimColors } = await api(`/colors/trim/${trimId}`);
+  const assigned = new Map(trimColors.map(tc => [tc.bodyColorId, tc]));
+  document.getElementById("trimColorsArea").innerHTML = `
+    <div class="edit-form">
+      <h3>Colors for ${trim.year} ${escapeHtml(trim.model.name)} ${escapeHtml(trim.name)}</h3>
+      <table>
+        <thead><tr><th></th><th>Color</th><th>Available</th><th>Premium $</th><th></th></tr></thead>
+        <tbody>${window._colors.map(c => {
+          const tc = assigned.get(c.id);
+          return `<tr>
+            <td>${c.hex ? `<span style="display:inline-block;width:14px;height:14px;background:${c.hex};border:1px solid var(--border);"></span>` : ''}</td>
+            <td>${escapeHtml(c.name)} <span class="badge">${c.type}</span></td>
+            <td><input type="checkbox" id="tc_a_${c.id}" ${tc?.available ? 'checked' : ''}></td>
+            <td><input id="tc_p_${c.id}" type="number" step="1" value="${tc?.premiumChargeCad || ''}" style="width:80px"></td>
+            <td><button class="secondary" onclick="saveTrimColor(${trimId}, ${c.id})">Save</button></td>
+          </tr>`;
+        }).join("")}</tbody>
+      </table>
+    </div>`;
+}
+async function saveTrimColor(trimId, bodyColorId) {
+  const available = document.getElementById(`tc_a_${bodyColorId}`).checked;
+  const premium = document.getElementById(`tc_p_${bodyColorId}`).value;
+  await api(`/colors/trim`, { method: "PUT", body: JSON.stringify({
+    trimId: Number(trimId),
+    bodyColorId,
+    available,
+    premiumChargeCad: premium ? Number(premium) : null,
+  })});
+  loadTrimColors();
 }
 
 // ---------- Compare ----------

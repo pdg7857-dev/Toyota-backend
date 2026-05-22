@@ -50,6 +50,7 @@ export async function getTrimBySlug(slug: string) {
       model: true,
       powertrain: true,
       fees: { orderBy: { effectiveDate: "desc" }, take: 1 },
+      colors: { include: { bodyColor: true }, orderBy: { bodyColor: { name: "asc" } } },
     },
   });
   if (!trim) return null;

@@ -182,6 +182,86 @@ describe("AI introspection endpoints", () => {
   });
 });
 
+describe("body colors", () => {
+  it("lists seeded colors", async () => {
+    const r = await request(app).get("/api/v1/colors").set(auth());
+    expect(r.status).toBe(200);
+    const slugs = r.body.colors.map((c: { slug: string }) => c.slug);
+    expect(slugs).toContain("wind-chill-pearl");
+    expect(slugs).toContain("magnetic-gray-metallic");
+    expect(slugs).toContain("midnight-black-metallic");
+  });
+
+  it("upserts trim-color availability and surfaces it on the trim detail", async () => {
+    const colors = await request(app).get("/api/v1/colors").set(auth());
+    const wcp = colors.body.colors.find((c: { slug: string }) => c.slug === "wind-chill-pearl");
+    const trim = await request(app).get("/api/v1/trims/camry-2026-xle-hybrid-awd").set(auth());
+    const upsert = await request(app)
+      .put("/api/v1/colors/trim")
+      .set(auth())
+      .send({ trimId: trim.body.id, bodyColorId: wcp.id, available: true, premiumChargeCad: 255 });
+    expect(upsert.status).toBe(200);
+    const after = await request(app).get("/api/v1/trims/camry-2026-xle-hybrid-awd").set(auth());
+    const slugs = after.body.colors.map((tc: { bodyColor: { slug: string } }) => tc.bodyColor.slug);
+    expect(slugs).toContain("wind-chill-pearl");
+  });
+});
+
+describe("search by budget & needs", () => {
+  it("filters by hybrid + AWD + body style + max OTD", async () => {
+    const r = await request(app)
+      .post("/api/v1/search")
+      .set(auth())
+      .send({
+        year: 2026,
+        hybridOnly: true,
+        awdOnly: true,
+        bodyStyles: ["SUV"],
+        maxTotalCad: 55000,
+        sortBy: "fuel_economy",
+        sortDir: "asc",
+        limit: 20,
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.count).toBeGreaterThan(0);
+    for (const t of r.body.results) {
+      expect(t.year).toBe(2026);
+      expect(["HYBRID", "PHEV", "BEV"]).toContain(t.powertrain.type);
+      expect((t.powertrain.drivetrain ?? "").toUpperCase()).toContain("AWD");
+      expect(t.total).toBeLessThanOrEqual(55000);
+    }
+  });
+
+  it("sorts by total OTD ascending", async () => {
+    const r = await request(app)
+      .post("/api/v1/search")
+      .set(auth())
+      .send({ year: 2026, sortBy: "total", sortDir: "asc", limit: 10 });
+    expect(r.status).toBe(200);
+    for (let i = 1; i < r.body.results.length; i++) {
+      expect(r.body.results[i].total).toBeGreaterThanOrEqual(r.body.results[i - 1].total);
+    }
+  });
+
+  it("validates input schema", async () => {
+    const r = await request(app).post("/api/v1/search").set(auth()).send({ year: "nope" });
+    expect(r.status).toBe(400);
+  });
+});
+
+describe("conversations", () => {
+  it("lists conversations", async () => {
+    const r = await request(app).get("/api/v1/ai/conversations").set(auth());
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.body.conversations)).toBe(true);
+  });
+
+  it("returns 404 for unknown conversation id", async () => {
+    const r = await request(app).get("/api/v1/ai/conversations/99999999").set(auth());
+    expect(r.status).toBe(404);
+  });
+});
+
 describe("admin scrape endpoints", () => {
   it("lists scrape runs", async () => {
     const r = await request(app).get("/api/v1/admin/scrape/runs").set(auth());

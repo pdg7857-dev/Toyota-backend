@@ -38,12 +38,18 @@ npm run dev
 - `GET /models` (optional `?year=2026`)
 - `GET /models/:slug`
 - `GET /trims` (filters: `?model=`, `?year=`, `?powertrain=GAS|HYBRID|PHEV|BEV`, `?maxPrice=`)
-- `GET /trims/:slug`
+- `GET /trims/:slug` — includes color availability for the trim
 - `GET /trims/:slug/quote` — out-the-door price with HST breakdown
 - `GET /powertrains`
 - `GET /warranties` (filters: `?model=`, `?year=`)
 - `GET /finance-products` (filter: `?category=EXTENDED_WARRANTY|TIRE_RIM|...`)
 - `GET /rep-notes` (filters: `?scope=`, `?scopeId=`, `?tags=tag1,tag2`)
+- `GET /colors` — catalog of body colors
+- `GET /colors/trim/:trimId` — color availability for a trim
+- `PUT /colors/trim` — upsert trim×color availability `{ trimId, bodyColorId, available, premiumChargeCad }`
+
+### Search
+- `POST /search` — filter by `year`, `bodyStyles[]`, `segments[]`, `powertrains[]`, `drivetrainContains`, `minHp/maxHp`, `maxComboL100`, `minElectricRangeKm`, `maxMsrpCad`, `maxTotalCad` (after HST), `hybridOnly`, `awdOnly`. Sort by `msrp | total | fuel_economy | horsepower | electric_range`.
 
 ### Comparison
 - `POST /compare` — body `{ "trimSlugs": [...] }` (2–6 trims). Returns each trim's specs, quote (with HST), and the warranty rows that apply to each model-year.
@@ -69,8 +75,12 @@ Scraper never writes directly to live tables — only to `scrape_diffs`. Manual 
 Every write bumps `meta.catalog_version`, which invalidates the AI prompt cache.
 
 ### AI Q&A
-- `POST /ai/ask` — body `{ "question": "...", "model": "haiku" | "sonnet" }`
-  Returns `{ answer, citations[], model, cachedInputTokens, uncachedInputTokens, outputTokens, catalogVersion, scopedModels }`.
+- `POST /ai/ask` — body `{ "question": "...", "model": "haiku" | "sonnet", "conversationId": 123 }`. Omit `conversationId` for a new conversation; pass it to continue an existing one (prior turns are sent to Claude as message history). Returns `{ answer, citations[], conversationId, model, cachedInputTokens, uncachedInputTokens, outputTokens, catalogVersion, scopedModels }`.
+- `GET /ai/conversations` — list recent conversations with message counts.
+- `GET /ai/conversations/:id` — full message history for one conversation.
+- `DELETE /ai/conversations/:id` — discard.
+- `GET /ai/health` — config + catalog version.
+- `GET /ai/context-preview?question=...` — see exactly what would be sent to Claude.
 
 ## Smoke-test commands
 
@@ -108,9 +118,10 @@ curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
 
 Open `http://localhost:3000/admin` in a browser. Paste your API token (it's stored in localStorage). Tabs:
 
-- **AI Q&A** — natural-language interface against the catalog.
+- **AI Q&A** — multi-turn conversations with the catalog. Sidebar lists prior conversations; click to resume. Each reply records token usage (cached vs uncached) and citations.
+- **Search** — budget+needs filter: max OTD, hybrid/AWD only, body style, fuel economy, electric range, horsepower, with sortable results.
 - **Compare** — pick 2–4 trims, see a side-by-side spec + price + warranty table.
-- **Models / Trims / Powertrains / Warranties / F&I Products / Rep Notes** — list and edit. Trims tab includes a "fees" button to upsert the per-trim fee schedule.
+- **Models / Trims / Powertrains / Warranties / F&I Products / Colors / Rep Notes** — list and edit. Trims tab includes a "fees" button to upsert the per-trim fee schedule. Colors tab includes a per-trim availability matrix (check the box, set premium upcharge, save per row).
 - **Scraper** — trigger toyota.ca scrape, review field-level diffs against the live catalog, accept/reject each one before applying.
 
 ## Seed data accuracy
@@ -145,8 +156,8 @@ Playwright Chromium needs to be downloaded once: `npx playwright install chromiu
 
 Toyota.ca DOM selectors in `src/scraper/sources/toyota-ca.ts` are best-effort — expect to refine them as the site evolves.
 
-## Phase 3 (still deferred)
+## Possible future work
 
-- Multi-turn conversations for `/ai/ask` (persist Q/A pairs, allow follow-ups with prior context).
-- Body color availability per trim.
-- Optional debug endpoint that shows the catalog context Claude would receive for a given question.
+- Toyota.ca color-page scraper to auto-populate `trim_colors`.
+- Bulk apply colors (e.g., "all 2026 RAV4 trims get these 6 colors" form).
+- Surface trim-color availability in the AI catalog context block so the rep can ask color-availability questions.

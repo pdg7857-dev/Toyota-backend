@@ -15,9 +15,12 @@ function getClient(): Anthropic {
   return client;
 }
 
+export type PriorTurn = { role: "user" | "assistant"; content: string };
+
 export type AskOptions = {
   question: string;
   modelChoice?: "haiku" | "sonnet";
+  priorTurns?: PriorTurn[];
 };
 
 export type AskResult = {
@@ -48,9 +51,23 @@ function parseCitations(text: string): { answer: string; citations: AskResult["c
   return { answer: cleaned, citations };
 }
 
-export async function ask({ question, modelChoice }: AskOptions, ctx: CatalogContext): Promise<AskResult> {
+export async function ask({ question, modelChoice, priorTurns }: AskOptions, ctx: CatalogContext): Promise<AskResult> {
   const model = modelChoice === "sonnet" ? HIGH_QUALITY_MODEL : DEFAULT_MODEL;
   const anthropic = getClient();
+
+  const messages: Array<{ role: "user" | "assistant"; content: string | Array<{ type: "text"; text: string }> }> = [];
+  for (const t of priorTurns ?? []) {
+    messages.push({ role: t.role, content: t.content });
+  }
+  messages.push({
+    role: "user",
+    content: [
+      ...(ctx.scopedBlock
+        ? [{ type: "text" as const, text: `Relevant additional detail:\n${ctx.scopedBlock}` }]
+        : []),
+      { type: "text" as const, text: `Question from the rep:\n${question}` },
+    ],
+  });
 
   const response = await anthropic.messages.create({
     model,
@@ -59,17 +76,7 @@ export async function ask({ question, modelChoice }: AskOptions, ctx: CatalogCon
       { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
       { type: "text", text: ctx.fullCatalogBlock, cache_control: { type: "ephemeral" } },
     ],
-    messages: [
-      {
-        role: "user",
-        content: [
-          ...(ctx.scopedBlock
-            ? [{ type: "text" as const, text: `Relevant additional detail:\n${ctx.scopedBlock}` }]
-            : []),
-          { type: "text" as const, text: `Question from the rep:\n${question}` },
-        ],
-      },
-    ],
+    messages,
   });
 
   const textBlocks = response.content.filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text");

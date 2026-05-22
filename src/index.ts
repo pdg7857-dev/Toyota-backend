@@ -13,6 +13,8 @@ import { notesRouter } from "./routes/notes.js";
 import { aiRouter } from "./routes/ai.js";
 import { adminRouter } from "./routes/admin.js";
 import { compareRouter } from "./routes/compare.js";
+import { colorsRouter } from "./routes/colors.js";
+import { searchRouter } from "./routes/search.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +41,8 @@ export function createApp(): express.Express {
   api.use("/ai", aiRouter);
   api.use("/admin", adminRouter);
   api.use("/compare", compareRouter);
+  api.use("/colors", colorsRouter);
+  api.use("/search", searchRouter);
   app.use("/api/v1", api);
 
   app.use(notFound);

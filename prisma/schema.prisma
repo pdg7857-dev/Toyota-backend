@@ -58,6 +58,18 @@ enum ScrapeDiffDecision {
   REJECT
 }
 
+enum BodyColorType {
+  STANDARD
+  METALLIC
+  PEARL
+  TWO_TONE
+}
+
+enum ConversationRole {
+  USER
+  ASSISTANT
+}
+
 model Model {
   id         Int      @id @default(autoincrement())
   slug       String   @unique
@@ -112,6 +124,7 @@ model Trim {
   previousTrim    Trim?       @relation("TrimLineage", fields: [previousTrimId], references: [id])
   nextTrim        Trim?       @relation("TrimLineage")
   fees            Fee[]
+  colors          TrimColor[]
 
   @@unique([modelId, year, name, powertrainId])
   @@index([year])
@@ -212,6 +225,67 @@ model ScrapeDiff {
 
   @@index([runId])
   @@map("scrape_diffs")
+}
+
+model BodyColor {
+  id                Int             @id @default(autoincrement())
+  slug              String          @unique
+  name              String
+  hex               String?
+  type              BodyColorType   @default(STANDARD)
+  notesMd           String?         @map("notes_md")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  trimAvailability  TrimColor[]
+
+  @@map("body_colors")
+}
+
+model TrimColor {
+  id                 Int        @id @default(autoincrement())
+  trimId             Int        @map("trim_id")
+  bodyColorId        Int        @map("body_color_id")
+  available          Boolean    @default(true)
+  premiumChargeCad   Decimal?   @map("premium_charge_cad") @db.Decimal(10, 2)
+  notesMd            String?    @map("notes_md")
+
+  trim               Trim       @relation(fields: [trimId], references: [id], onDelete: Cascade)
+  bodyColor          BodyColor  @relation(fields: [bodyColorId], references: [id], onDelete: Cascade)
+
+  @@unique([trimId, bodyColorId])
+  @@index([trimId])
+  @@index([bodyColorId])
+  @@map("trim_colors")
+}
+
+model Conversation {
+  id          Int                   @id @default(autoincrement())
+  title       String?
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+
+  messages    ConversationMessage[]
+
+  @@map("conversations")
+}
+
+model ConversationMessage {
+  id                  Int               @id @default(autoincrement())
+  conversationId      Int               @map("conversation_id")
+  role                ConversationRole
+  content             String
+  modelUsed           String?           @map("model_used")
+  citationsJson       Json?             @map("citations_json")
+  cachedInputTokens   Int?              @map("cached_input_tokens")
+  uncachedInputTokens Int?              @map("uncached_input_tokens")
+  outputTokens        Int?              @map("output_tokens")
+  createdAt           DateTime          @default(now()) @map("created_at")
+
+  conversation        Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("conversation_messages")
 }
 
 // Single-row table used to invalidate the AI prompt cache when the catalog changes.
