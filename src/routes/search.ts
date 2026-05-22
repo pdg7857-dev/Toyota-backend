@@ -7,11 +7,13 @@ import { computeQuote } from "../services/pricing.js";
 export const searchRouter: Router = Router();
 
 const searchSchema = z.object({
+  make: z.enum(["Toyota", "Lexus"]).optional(),
   year: z.number().int().optional(),
   bodyStyles: z.array(z.string()).optional(),
   segments: z.array(z.string()).optional(),
   powertrains: z.array(z.nativeEnum(PowertrainType)).optional(),
   drivetrainContains: z.string().optional(),
+  colorSlugs: z.array(z.string()).optional(),
   minHp: z.number().int().optional(),
   maxHp: z.number().int().optional(),
   maxComboL100: z.number().optional(),
@@ -34,10 +36,14 @@ searchRouter.post("/", async (req, res, next) => {
     const where: Prisma.TrimWhereInput = {};
     if (f.year) where.year = f.year;
     const modelWhere: Prisma.ModelWhereInput = {};
+    if (f.make) modelWhere.make = f.make;
     if (f.bodyStyles && f.bodyStyles.length > 0) modelWhere.bodyStyle = { in: f.bodyStyles };
     if (f.segments && f.segments.length > 0) modelWhere.segment = { in: f.segments };
     if (Object.keys(modelWhere).length > 0) where.model = modelWhere;
     if (f.maxMsrpCad != null) where.msrpCad = { lte: f.maxMsrpCad };
+    if (f.colorSlugs && f.colorSlugs.length > 0) {
+      where.colors = { some: { available: true, bodyColor: { slug: { in: f.colorSlugs } } } };
+    }
 
     const powertrainWhere: Prisma.PowertrainWhereInput = {};
     let needsPtFilter = false;

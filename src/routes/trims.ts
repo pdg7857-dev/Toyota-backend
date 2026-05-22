@@ -33,6 +33,7 @@ trimsRouter.get("/", async (req, res, next) => {
   try {
     const filters = {
       model: typeof req.query.model === "string" ? req.query.model : undefined,
+      make: typeof req.query.make === "string" ? req.query.make : undefined,
       year: req.query.year ? Number(req.query.year) : undefined,
       powertrain:
         typeof req.query.powertrain === "string"
@@ -66,7 +67,15 @@ trimsRouter.get("/:slug/quote", async (req, res, next) => {
     const trim = await getTrimBySlug(slug);
     if (!trim) return res.status(404).json({ error: "not_found" });
     const fee = trim.fees[0] ?? null;
-    const quote = computeQuote(trim.msrpCad, fee);
+    const colorSlug = typeof req.query.color === "string" ? req.query.color : undefined;
+    let colorPremium: { colorName: string; amount: number } | undefined;
+    if (colorSlug) {
+      const match = trim.colors.find((c) => c.bodyColor.slug === colorSlug);
+      if (!match) return res.status(404).json({ error: "color_not_available_for_trim", color: colorSlug });
+      const premium = match.premiumChargeCad ? Number(match.premiumChargeCad.toString()) : 0;
+      colorPremium = { colorName: match.bodyColor.name, amount: premium };
+    }
+    const quote = computeQuote(trim.msrpCad, fee, colorPremium);
     res.json({
       trim: { slug: trim.slug, name: trim.name, year: trim.year, model: trim.model.name },
       ...quote,

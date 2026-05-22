@@ -74,6 +74,7 @@ model Model {
   id         Int      @id @default(autoincrement())
   slug       String   @unique
   name       String
+  make       String   @default("Toyota")
   bodyStyle  String?  @map("body_style")
   segment    String?
   notesMd    String?  @map("notes_md")
@@ -83,6 +84,7 @@ model Model {
   trims      Trim[]
   warranties WarrantyCoverage[]
 
+  @@index([make])
   @@map("models")
 }
 

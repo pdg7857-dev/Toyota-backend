@@ -15,11 +15,14 @@ export type QuoteLineItem = { label: string; amount: number };
 export type Quote = {
   msrp: number;
   feeLineItems: QuoteLineItem[];
+  colorPremium?: { colorName: string; amount: number };
   subtotal: number;
   hstRate: number;
   hst: number;
   total: number;
 };
+
+export type ColorPremium = { colorName: string; amount: number };
 
 function toNum(v: Prisma.Decimal | number | null | undefined): number {
   if (v == null) return 0;
@@ -31,7 +34,11 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-export function computeQuote(msrp: Prisma.Decimal | number, fee: FeeInput | null): Quote {
+export function computeQuote(
+  msrp: Prisma.Decimal | number,
+  fee: FeeInput | null,
+  colorPremium?: ColorPremium | null,
+): Quote {
   const msrpN = toNum(msrp);
   const lineItems: QuoteLineItem[] = [];
   if (fee) {
@@ -52,14 +59,16 @@ export function computeQuote(msrp: Prisma.Decimal | number, fee: FeeInput | null
       }
     }
   }
+  const colorAmount = colorPremium && colorPremium.amount > 0 ? colorPremium.amount : 0;
   const feesSum = lineItems.reduce((acc, li) => acc + li.amount, 0);
-  const subtotal = round2(msrpN + feesSum);
+  const subtotal = round2(msrpN + feesSum + colorAmount);
   const hstRate = fee ? toNum(fee.hstRate) : 0.13;
   const hst = round2(subtotal * hstRate);
   const total = round2(subtotal + hst);
   return {
     msrp: round2(msrpN),
     feeLineItems: lineItems.map((li) => ({ label: li.label, amount: round2(li.amount) })),
+    colorPremium: colorAmount > 0 ? { colorName: colorPremium!.colorName, amount: round2(colorAmount) } : undefined,
     subtotal,
     hstRate,
     hst,

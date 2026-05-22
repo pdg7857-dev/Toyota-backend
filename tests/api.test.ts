@@ -182,6 +182,117 @@ describe("AI introspection endpoints", () => {
   });
 });
 
+describe("multi-make catalog (Toyota + Lexus)", () => {
+  it("lists Lexus models when filtered by make", async () => {
+    const r = await request(app).get("/api/v1/models").query({ make: "Lexus" }).set(auth());
+    expect(r.status).toBe(200);
+    expect(r.body.models.length).toBeGreaterThanOrEqual(10);
+    const slugs = r.body.models.map((m: { slug: string }) => m.slug);
+    expect(slugs).toContain("lexus-rx");
+    expect(slugs).toContain("lexus-nx");
+    expect(slugs).toContain("lexus-is");
+  });
+
+  it("filters trims by make", async () => {
+    const r = await request(app).get("/api/v1/trims").query({ make: "Lexus", year: 2026 }).set(auth());
+    expect(r.status).toBe(200);
+    expect(r.body.trims.length).toBeGreaterThan(0);
+    for (const t of r.body.trims) {
+      expect(t.model.make).toBe("Lexus");
+      expect(t.year).toBe(2026);
+    }
+  });
+
+  it("returns a Lexus quote with the same Ontario fee stack", async () => {
+    const r = await request(app).get("/api/v1/trims/lexus-rx-2026-350h-premium/quote").set(auth());
+    expect(r.status).toBe(200);
+    expect(r.body.hstRate).toBe(0.13);
+    expect(r.body.total).toBeGreaterThan(r.body.msrp);
+  });
+});
+
+describe("color premium in quote", () => {
+  it("applies the configured premium and recomputes HST + total", async () => {
+    const colors = await request(app).get("/api/v1/colors").set(auth());
+    const wcp = colors.body.colors.find((c: { slug: string }) => c.slug === "wind-chill-pearl");
+    const trim = await request(app).get("/api/v1/trims/highlander-2026-xle-hybrid-awd").set(auth());
+    await request(app)
+      .put("/api/v1/colors/trim")
+      .set(auth())
+      .send({ trimId: trim.body.id, bodyColorId: wcp.id, available: true, premiumChargeCad: 255 });
+
+    const without = await request(app).get("/api/v1/trims/highlander-2026-xle-hybrid-awd/quote").set(auth());
+    const withColor = await request(app)
+      .get("/api/v1/trims/highlander-2026-xle-hybrid-awd/quote")
+      .query({ color: "wind-chill-pearl" })
+      .set(auth());
+    expect(withColor.status).toBe(200);
+    expect(withColor.body.colorPremium).toEqual({ colorName: "Wind Chill Pearl", amount: 255 });
+    expect(withColor.body.subtotal).toBeCloseTo(without.body.subtotal + 255, 2);
+    expect(withColor.body.total).toBeCloseTo(without.body.total + 255 * 1.13, 1);
+  });
+
+  it("returns 404 if the color is not available on that trim", async () => {
+    const r = await request(app)
+      .get("/api/v1/trims/highlander-2026-xle-hybrid-awd/quote")
+      .query({ color: "nonexistent-color-slug" })
+      .set(auth());
+    expect(r.status).toBe(404);
+  });
+});
+
+describe("payments", () => {
+  it("computes finance monthly payment with Ontario HST", async () => {
+    const r = await request(app)
+      .post("/api/v1/payments/finance")
+      .set(auth())
+      .send({
+        trimSlug: "rav4-2026-xle-hybrid-awd",
+        aprPercent: 5.99,
+        termMonths: 60,
+        downPaymentCad: 5000,
+      });
+    expect(r.status).toBe(200);
+    expect(r.body.monthlyBeforeTax).toBeGreaterThan(0);
+    // Monthly HST-in should be ~13% higher than before tax
+    expect(r.body.monthlyTaxInOntario).toBeCloseTo(r.body.monthlyBeforeTax * 1.13, 1);
+    // Sum across all months should equal totalPaid roughly
+    expect(r.body.totalPaid).toBeCloseTo(r.body.monthlyTaxInOntario * 60, 0);
+  });
+
+  it("computes lease monthly payment with residual and money factor", async () => {
+    const r = await request(app)
+      .post("/api/v1/payments/lease")
+      .set(auth())
+      .send({
+        trimSlug: "lexus-rx-2026-350h-premium",
+        residualPercent: 55,
+        moneyFactor: 0.0025,
+        termMonths: 48,
+        downPaymentCad: 5000,
+        acquisitionFeeCad: 695,
+      });
+    expect(r.status).toBe(200);
+    // depreciation + rent = base monthly
+    expect(r.body.baseMonthly).toBeCloseTo(
+      r.body.depreciationPerMonth + r.body.rentChargePerMonth,
+      1,
+    );
+    // effective APR ≈ moneyFactor × 2400
+    expect(r.body.effectiveApr).toBeCloseTo(0.0025 * 2400, 2);
+    // residual = msrp × 55%
+    expect(r.body.residualValue).toBeCloseTo(r.body.msrp * 0.55, 0);
+  });
+
+  it("rejects negative amount financed", async () => {
+    const r = await request(app)
+      .post("/api/v1/payments/finance")
+      .set(auth())
+      .send({ amountFinancedCad: 0, aprPercent: 6, termMonths: 60 });
+    expect(r.status).toBe(400);
+  });
+});
+
 describe("body colors", () => {
   it("lists seeded colors", async () => {
     const r = await request(app).get("/api/v1/colors").set(auth());

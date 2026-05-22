@@ -76,8 +76,8 @@
 </dialog>
 
 <script>
-const TABS = ["ai", "search", "compare", "models", "trims", "powertrains", "warranties", "finance", "colors", "notes", "scrape"];
-const TAB_LABELS = { ai: "AI Q&A", search: "Search", compare: "Compare", models: "Models", trims: "Trims", powertrains: "Powertrains", warranties: "Warranties", finance: "F&I Products", colors: "Colors", notes: "Rep Notes", scrape: "Scraper" };
+const TABS = ["ai", "search", "compare", "payments", "models", "trims", "powertrains", "warranties", "finance", "colors", "notes", "scrape"];
+const TAB_LABELS = { ai: "AI Q&A", search: "Search", compare: "Compare", payments: "Payments", models: "Models", trims: "Trims", powertrains: "Powertrains", warranties: "Warranties", finance: "F&I Products", colors: "Colors", notes: "Rep Notes", scrape: "Scraper" };
 let token = localStorage.getItem("toyota_token") || "";
 let currentTab = location.hash.replace("#", "") || "ai";
 if (!TABS.includes(currentTab)) currentTab = "ai";
@@ -140,6 +140,7 @@ async function render() {
     if (currentTab === "compare") return renderCompare();
     if (currentTab === "search") return renderSearch();
     if (currentTab === "colors") return renderColors();
+    if (currentTab === "payments") return renderPayments();
   } catch (e) {
     document.getElementById("main").innerHTML = `<div class="empty danger">Error: ${e.message}</div>`;
   }
@@ -549,11 +550,14 @@ async function saveNote(id) {
 }
 
 // ---------- Search ----------
-function renderSearch() {
+async function renderSearch() {
+  const { colors } = await api("/colors");
+  const colorOpts = colors.map(c => `<option value="${c.slug}">${escapeHtml(c.name)}</option>`).join("");
   document.getElementById("main").innerHTML = `
     <div class="edit-form">
       <h3 style="margin-top:0">Search by budget &amp; needs</h3>
       <div class="grid">
+        <label>Make<select id="s_make"><option value="">any</option><option>Toyota</option><option>Lexus</option></select></label>
         <label>Year<select id="s_year"><option value="">any</option><option>2025</option><option selected>2026</option></select></label>
         <label>Body styles (comma)<input id="s_body" placeholder="SUV, Sedan, Truck"></label>
         <label>Max MSRP $<input id="s_maxMsrp" type="number" placeholder="40000"></label>
@@ -563,6 +567,7 @@ function renderSearch() {
         <label>Min HP<input id="s_minHp" type="number"></label>
         <label>Max combined L/100km<input id="s_maxFe" type="number" step="0.1" placeholder="7.0"></label>
         <label>Min electric range (km)<input id="s_minER" type="number" placeholder="50"></label>
+        <label>Colors (ctrl/cmd-click)<select id="s_colors" multiple size="4" style="height:auto">${colorOpts}</select></label>
         <label>Sort by<select id="s_sort">
           <option value="msrp">MSRP</option>
           <option value="total">OTD total</option>
@@ -586,11 +591,14 @@ async function doSearch() {
   const num = (id) => val(id) ? Number(val(id)) : undefined;
   const list = (id) => val(id) ? val(id).split(",").map(s => s.trim().toUpperCase()).filter(Boolean) : undefined;
   const cap = (id) => val(id) ? val(id).split(",").map(s => s.trim()).filter(Boolean) : undefined;
+  const selectedColors = [...document.getElementById("s_colors").selectedOptions].map(o => o.value);
   const body = {
+    make: val("s_make") || undefined,
     year: num("s_year"),
     bodyStyles: cap("s_body"),
     powertrains: list("s_pt"),
     drivetrainContains: val("s_dt") || undefined,
+    colorSlugs: selectedColors.length > 0 ? selectedColors : undefined,
     minHp: num("s_minHp"),
     maxComboL100: num("s_maxFe"),
     minElectricRangeKm: num("s_minER"),
@@ -611,7 +619,7 @@ async function doSearch() {
       <thead><tr><th>Year</th><th>Model</th><th>Trim</th><th>Powertrain</th><th>HP</th><th>L/100km</th><th>EV km</th><th>MSRP</th><th>OTD</th></tr></thead>
       <tbody>${r.results.map(t => `<tr>
         <td>${t.year}</td>
-        <td>${escapeHtml(t.model.name)}</td>
+        <td><span class="badge">${escapeHtml(t.model.bodyStyle || '')}</span> ${escapeHtml(t.model.name)}</td>
         <td>${escapeHtml(t.name)}</td>
         <td><span class="badge">${t.powertrain.type}</span> ${escapeHtml(t.powertrain.drivetrain || '')}</td>
         <td>${t.powertrain.horsepowerHp ?? '—'}</td>
@@ -621,6 +629,90 @@ async function doSearch() {
         <td><strong>${fmt(t.total)}</strong></td>
       </tr>`).join("")}</tbody>
     </table>`;
+}
+
+// ---------- Payments ----------
+async function renderPayments() {
+  const { trims } = await api("/trims");
+  const opts = trims.map(t => `<option value="${t.slug}">${t.year} ${escapeHtml(t.model.name)} ${escapeHtml(t.name)} — $${Number(t.msrpCad).toLocaleString("en-CA")}</option>`).join("");
+  document.getElementById("main").innerHTML = `
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start;">
+      <div class="edit-form">
+        <h3 style="margin-top:0">Finance</h3>
+        <div class="grid">
+          <label>Trim<select id="pf_trim">${opts}</select></label>
+          <label>APR %<input id="pf_apr" type="number" step="0.01" value="5.99"></label>
+          <label>Term (months)<input id="pf_term" type="number" value="60"></label>
+          <label>Down payment $<input id="pf_down" type="number" value="5000"></label>
+          <label>Trade equity $<input id="pf_trade" type="number" value="0"></label>
+        </div>
+        <div class="actions">
+          <button class="primary" onclick="calcFinance()">Calculate</button>
+        </div>
+        <div id="pfOut"></div>
+      </div>
+      <div class="edit-form">
+        <h3 style="margin-top:0">Lease</h3>
+        <div class="grid">
+          <label>Trim<select id="pl_trim">${opts}</select></label>
+          <label>Residual %<input id="pl_residual" type="number" step="0.1" value="55"></label>
+          <label>Money Factor<input id="pl_mf" type="number" step="0.00001" value="0.00250"></label>
+          <label>Term (months)<input id="pl_term" type="number" value="48"></label>
+          <label>Down payment $<input id="pl_down" type="number" value="5000"></label>
+          <label>Acquisition fee $<input id="pl_acq" type="number" value="695"></label>
+        </div>
+        <div class="actions">
+          <button class="primary" onclick="calcLease()">Calculate</button>
+        </div>
+        <div id="plOut"></div>
+      </div>
+    </div>`;
+}
+async function calcFinance() {
+  const body = {
+    trimSlug: document.getElementById("pf_trim").value,
+    aprPercent: Number(document.getElementById("pf_apr").value),
+    termMonths: Number(document.getElementById("pf_term").value),
+    downPaymentCad: Number(document.getElementById("pf_down").value || 0),
+    tradeEquityCad: Number(document.getElementById("pf_trade").value || 0),
+  };
+  const r = await api("/payments/finance", { method: "POST", body: JSON.stringify(body) });
+  const fmt = (n) => "$" + Number(n).toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  document.getElementById("pfOut").innerHTML = `
+    <table style="margin-top:14px"><tbody>
+      <tr><th>MSRP</th><td>${fmt(r.msrp)}</td></tr>
+      <tr><th>Out-the-door</th><td>${fmt(r.otd)}</td></tr>
+      <tr><th>Amount financed</th><td>${fmt(r.amountFinanced)}</td></tr>
+      <tr><th>Monthly (before tax)</th><td>${fmt(r.monthlyBeforeTax)}</td></tr>
+      <tr><th>Monthly (HST in)</th><td><strong>${fmt(r.monthlyTaxInOntario)}</strong></td></tr>
+      <tr><th>Total interest</th><td>${fmt(r.totalInterest)}</td></tr>
+      <tr><th>Total paid</th><td>${fmt(r.totalPaid)}</td></tr>
+    </tbody></table>`;
+}
+async function calcLease() {
+  const body = {
+    trimSlug: document.getElementById("pl_trim").value,
+    residualPercent: Number(document.getElementById("pl_residual").value),
+    moneyFactor: Number(document.getElementById("pl_mf").value),
+    termMonths: Number(document.getElementById("pl_term").value),
+    downPaymentCad: Number(document.getElementById("pl_down").value || 0),
+    acquisitionFeeCad: Number(document.getElementById("pl_acq").value || 0),
+  };
+  const r = await api("/payments/lease", { method: "POST", body: JSON.stringify(body) });
+  const fmt = (n) => "$" + Number(n).toLocaleString("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  document.getElementById("plOut").innerHTML = `
+    <table style="margin-top:14px"><tbody>
+      <tr><th>MSRP</th><td>${fmt(r.msrp)}</td></tr>
+      <tr><th>Cap cost (incl. fees)</th><td>${fmt(r.capCost)}</td></tr>
+      <tr><th>Adjusted cap cost</th><td>${fmt(r.adjustedCapCost)}</td></tr>
+      <tr><th>Residual ($)</th><td>${fmt(r.residualValue)}</td></tr>
+      <tr><th>Depreciation/mo</th><td>${fmt(r.depreciationPerMonth)}</td></tr>
+      <tr><th>Rent charge/mo</th><td>${fmt(r.rentChargePerMonth)}</td></tr>
+      <tr><th>Base monthly</th><td>${fmt(r.baseMonthly)}</td></tr>
+      <tr><th>Monthly (HST in)</th><td><strong>${fmt(r.monthlyTaxIn)}</strong></td></tr>
+      <tr><th>Effective APR</th><td>${r.effectiveApr}%</td></tr>
+      <tr><th>Total paid</th><td>${fmt(r.totalPaid)}</td></tr>
+    </tbody></table>`;
 }
 
 // ---------- Colors ----------

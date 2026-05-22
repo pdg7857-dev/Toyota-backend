@@ -35,11 +35,11 @@ npm run dev
 ## Endpoints (all under `/api/v1`, all require `Authorization: Bearer $API_TOKEN`)
 
 ### Catalog reads
-- `GET /models` (optional `?year=2026`)
+- `GET /models` (optional `?year=2026`, `?make=Toyota|Lexus`)
 - `GET /models/:slug`
-- `GET /trims` (filters: `?model=`, `?year=`, `?powertrain=GAS|HYBRID|PHEV|BEV`, `?maxPrice=`)
+- `GET /trims` (filters: `?model=`, `?make=Toyota|Lexus`, `?year=`, `?powertrain=GAS|HYBRID|PHEV|BEV`, `?maxPrice=`)
 - `GET /trims/:slug` — includes color availability for the trim
-- `GET /trims/:slug/quote` — out-the-door price with HST breakdown
+- `GET /trims/:slug/quote` — out-the-door price with HST breakdown. Optional `?color=<slug>` adds the configured premium for that color.
 - `GET /powertrains`
 - `GET /warranties` (filters: `?model=`, `?year=`)
 - `GET /finance-products` (filter: `?category=EXTENDED_WARRANTY|TIRE_RIM|...`)
@@ -49,7 +49,11 @@ npm run dev
 - `PUT /colors/trim` — upsert trim×color availability `{ trimId, bodyColorId, available, premiumChargeCad }`
 
 ### Search
-- `POST /search` — filter by `year`, `bodyStyles[]`, `segments[]`, `powertrains[]`, `drivetrainContains`, `minHp/maxHp`, `maxComboL100`, `minElectricRangeKm`, `maxMsrpCad`, `maxTotalCad` (after HST), `hybridOnly`, `awdOnly`. Sort by `msrp | total | fuel_economy | horsepower | electric_range`.
+- `POST /search` — filter by `make`, `year`, `bodyStyles[]`, `segments[]`, `powertrains[]`, `drivetrainContains`, `colorSlugs[]` (returns trims that have any of those colors available), `minHp/maxHp`, `maxComboL100`, `minElectricRangeKm`, `maxMsrpCad`, `maxTotalCad` (after HST), `hybridOnly`, `awdOnly`. Sort by `msrp | total | fuel_economy | horsepower | electric_range`.
+
+### Payments
+- `POST /payments/finance` — body `{ trimSlug?, amountFinancedCad?, aprPercent, termMonths, downPaymentCad?, tradeEquityCad?, includeFeesAndHst? }`. With `trimSlug`, the OTD (incl. HST) is computed and used as the financed amount unless overridden. Returns monthly before-tax + tax-in, total interest, total paid.
+- `POST /payments/lease` — body `{ trimSlug?, msrpCad?, capCostCad?, residualPercent, moneyFactor, termMonths, downPaymentCad?, tradeEquityCad?, acquisitionFeeCad? }`. With `trimSlug`, MSRP and pre-tax cap cost (MSRP + all fees) are auto-populated. Returns adjusted cap cost, residual value, depreciation/mo, rent charge/mo, base monthly, HST in, effective APR.
 
 ### Comparison
 - `POST /compare` — body `{ "trimSlugs": [...] }` (2–6 trims). Returns each trim's specs, quote (with HST), and the warranty rows that apply to each model-year.
@@ -118,9 +122,10 @@ curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
 
 Open `http://localhost:3000/admin` in a browser. Paste your API token (it's stored in localStorage). Tabs:
 
-- **AI Q&A** — multi-turn conversations with the catalog. Sidebar lists prior conversations; click to resume. Each reply records token usage (cached vs uncached) and citations.
-- **Search** — budget+needs filter: max OTD, hybrid/AWD only, body style, fuel economy, electric range, horsepower, with sortable results.
+- **AI Q&A** — multi-turn conversations with the catalog (Toyota + Lexus). Sidebar lists prior conversations; click to resume. Each reply records token usage (cached vs uncached) and citations. Color availability is included in the context block when a model is in scope.
+- **Search** — budget+needs filter: make, max OTD, hybrid/AWD only, body style, fuel economy, electric range, horsepower, available colors. Sortable results.
 - **Compare** — pick 2–4 trims, see a side-by-side spec + price + warranty table.
+- **Payments** — finance and lease calculators side by side. Pick a trim, enter APR/term/down payment or residual/money factor, get the Ontario tax-in monthly payment.
 - **Models / Trims / Powertrains / Warranties / F&I Products / Colors / Rep Notes** — list and edit. Trims tab includes a "fees" button to upsert the per-trim fee schedule. Colors tab includes a per-trim availability matrix (check the box, set premium upcharge, save per row).
 - **Scraper** — trigger toyota.ca scrape, review field-level diffs against the live catalog, accept/reject each one before applying.
 
@@ -156,8 +161,18 @@ Playwright Chromium needs to be downloaded once: `npx playwright install chromiu
 
 Toyota.ca DOM selectors in `src/scraper/sources/toyota-ca.ts` are best-effort — expect to refine them as the site evolves.
 
+## Catalog scope
+
+The seed covers **30 models / 288 trims**:
+
+- **Toyota Canada (20 models):** Corolla, GR Corolla, Camry, Corolla Cross, RAV4, Highlander, Grand Highlander, Crown, Crown Signia, 4Runner, Land Cruiser, Sequoia, Tacoma, Tundra, Sienna, GR86, GR Supra, Prius, Prius Prime, bZ4X.
+- **Lexus Canada (10 models):** IS, ES, NX, RX, TX, GX, LX, RZ, LC, LS.
+
+Each model has 2025 and 2026 trims. Lexus rep notes call out the complimentary maintenance differentiator (4 yr / 80,000 km free scheduled service) and competitor matchups against BMW, Audi, Mercedes, Acura, Genesis.
+
 ## Possible future work
 
-- Toyota.ca color-page scraper to auto-populate `trim_colors`.
-- Bulk apply colors (e.g., "all 2026 RAV4 trims get these 6 colors" form).
-- Surface trim-color availability in the AI catalog context block so the rep can ask color-availability questions.
+- Toyota.ca + lexus.ca color-page scrapers to auto-populate `trim_colors`.
+- Trade-in valuation entry on payments calculations (subtract trade equity from cap cost / amount financed — partial wiring already exists).
+- Bulk apply colors form ("all 2026 RAV4 trims get these 6 colors").
+- Service cost calculator (Toyota Express Maintenance schedule × labour rate + parts).

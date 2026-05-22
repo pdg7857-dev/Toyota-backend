@@ -55,9 +55,9 @@ async function buildFullCatalogSummary(): Promise<string> {
     },
     orderBy: { name: "asc" },
   });
-  const lines: string[] = ["# Catalog summary (all models, compact)"];
+  const lines: string[] = ["# Catalog summary (Toyota + Lexus, compact)"];
   for (const m of models) {
-    lines.push(`\n## [model:${m.slug}] ${m.name}${m.bodyStyle ? ` (${m.bodyStyle})` : ""}`);
+    lines.push(`\n## [model:${m.slug}] ${m.make} ${m.name}${m.bodyStyle ? ` (${m.bodyStyle})` : ""}`);
     if (m.segment) lines.push(`Segment: ${m.segment}`);
     if (m.trims.length === 0) {
       lines.push("- No trims seeded.");
@@ -95,7 +95,11 @@ async function buildScopedBlock(
           ...(years.length > 0 ? { year: { in: years } } : {}),
           ...(powertrains.length > 0 ? { powertrain: { type: { in: powertrains } } } : {}),
         },
-        include: { powertrain: true, fees: { orderBy: { effectiveDate: "desc" }, take: 1 } },
+        include: {
+          powertrain: true,
+          fees: { orderBy: { effectiveDate: "desc" }, take: 1 },
+          colors: { include: { bodyColor: true }, where: { available: true } },
+        },
         orderBy: [{ year: "desc" }, { msrpCad: "asc" }],
       },
       warranties: {
@@ -120,6 +124,15 @@ async function buildScopedBlock(
         lines.push(
           `- Fees: freight/PDI $${decimalToNum(fee.freightPdiCad) ?? "?"} · A/C $${decimalToNum(fee.acExciseCad) ?? "?"} · OMVIC $${decimalToNum(fee.omvicFeeCad) ?? "?"} · tire $${decimalToNum(fee.tireStewardshipCad) ?? "?"} · dealer admin $${decimalToNum(fee.dealerAdminCad) ?? "?"}`,
         );
+      }
+      if (t.colors.length > 0) {
+        const colorBits = t.colors.map((tc) => {
+          const premium = decimalToNum(tc.premiumChargeCad);
+          return premium && premium > 0
+            ? `${tc.bodyColor.name} (+$${premium})`
+            : tc.bodyColor.name;
+        });
+        lines.push(`- Available colors: ${colorBits.join(", ")}`);
       }
       if (t.notesMd) lines.push(`- Rep notes: ${t.notesMd}`);
     }

@@ -2,6 +2,7 @@
 import { PrismaClient, PowertrainType, WarrantyCoverageType, FinanceProductCategory, RepNoteScope } from "@prisma/client";
 import { POWERTRAINS, MODELS, DEFAULT_FEES } from "./seed-data.js";
 import { BODY_COLORS } from "./colors-seed.js";
+import { LEXUS_POWERTRAINS, LEXUS_MODELS } from "./lexus-seed.js";
 
 const prisma = new PrismaClient();
 
@@ -189,19 +190,48 @@ const REP_NOTES: Array<{
   {
     scopeType: RepNoteScope.GLOBAL,
     title: "Ontario EV/PHEV incentives (verify current!)",
-    bodyMd: "**Always check toyota.ca/transport-canada current rates before quoting — these change.**\n- Federal iZEV: up to $5,000 for eligible BEVs, $2,500 for eligible PHEVs (≥50 km range). Applied at delivery by dealer.\n- Ontario: provincial EV rebate ended 2018; **no current ON-specific rebate** (as of recent verification — confirm).\n- Eligible 2025/2026 Toyotas: Prius Prime (PHEV), RAV4 Prime (PHEV), bZ4X (BEV) — subject to MSRP caps. Verify each cap before quoting.\n- Tip: federal program is point-of-sale, not income-tested. Easy yes for the customer.",
+    bodyMd: "**Always check toyota.ca/transport-canada current rates before quoting — these change.**\n- Federal iZEV: up to $5,000 for eligible BEVs, $2,500 for eligible PHEVs (≥50 km range). Applied at delivery by dealer.\n- Ontario: provincial EV rebate ended 2018; **no current ON-specific rebate** (as of recent verification — confirm).\n- Eligible 2025/2026 Toyotas: Prius Prime (PHEV), RAV4 Prime (PHEV), bZ4X (BEV) — subject to MSRP caps. Verify each cap before quoting.\n- Eligible 2025/2026 Lexus: NX 450h+ (PHEV), RX 450h+ (PHEV), TX 550h+ (PHEV), RZ 300e/450e (BEV) — also subject to caps.\n- Tip: federal program is point-of-sale, not income-tested. Easy yes for the customer.",
     tags: ["incentives", "izev", "ev", "phev", "cheat-sheet"],
+  },
+  {
+    scopeType: RepNoteScope.GLOBAL,
+    title: "Lexus Complimentary Maintenance — major differentiator",
+    bodyMd: "Lexus Canada includes **scheduled maintenance free for the first 4 years / 80,000 km** (whichever comes first):\n- Oil + filter changes\n- Tire rotations\n- Brake inspections\n- All factory-scheduled services\n\nGermans (BMW/Audi/Mercedes) charge for everything after year 1 unless customer buys a Service Inclusive plan ($2,000–$4,000+). \n\nCustomer-facing line: \"With Lexus, you don't pay for an oil change or tire rotation for four years. With [German brand], your first dealer-paid service is the day after delivery.\" Quantify it: roughly $2,500–$3,500 of free maintenance value.",
+    tags: ["lexus", "warranty", "maintenance", "cheat-sheet"],
+  },
+  {
+    scopeType: RepNoteScope.COMPETITOR,
+    title: "Lexus NX vs Acura RDX",
+    bodyMd: "Closest cross-shop in Canada.\n- NX 350h Hybrid AWD has no RDX equivalent (Acura doesn't offer RDX hybrid). Instant differentiator.\n- NX 450h+ PHEV qualifies for federal iZEV ($2,500). RDX doesn't.\n- 4yr/80k complimentary maintenance vs Acura's Premier Service (varies, typically not included).\n- RDX wins on: A-SPEC styling, ELS Studio audio, slightly more interior space.\n- Pricing: NX 250 base $50,900 vs RDX base ~$54,000 — Lexus is actually cheaper on entry, more expensive on top trims.",
+    tags: ["lexus", "competitor", "nx", "objection-handling"],
+  },
+  {
+    scopeType: RepNoteScope.COMPETITOR,
+    title: "Lexus RX vs BMW X5 / Audi Q7 / Acura MDX",
+    bodyMd: "RX is a 5-seater (TX for 3-row). Adjust the comparison:\n- RX 350h Hybrid AWD vs X5 xDrive40i: better fuel economy (6.5 vs 9.5 L/100km), 4yr free maintenance, 10/240 HV battery warranty.\n- RX 500h F SPORT Performance (366 hp DIRECT4) competes with X5 M60i (523 hp) on feel — not on numbers.\n- RX 450h+ PHEV is the iZEV play. ~60 km EV range. No direct BMW equivalent (XM is much higher).\n- BMW wins on driving dynamics, brand cachet, more powerful top trims.\n- Lexus wins on reliability (consistently top 3 in JD Power), free maintenance, no warranty surprises.",
+    tags: ["lexus", "competitor", "rx", "objection-handling"],
+  },
+  {
+    scopeType: RepNoteScope.COMPETITOR,
+    title: "Lexus IS 500 vs BMW M340i / Audi S4",
+    bodyMd: "IS 500 = 472 hp 5.0L NA V8 RWD. The only naturally-aspirated V8 sport sedan left under $100k in Canada.\n- M340i: 386 hp turbo I6 AWD, faster on paper.\n- S4: 349 hp turbo V6 AWD, comparable performance.\n- IS 500 wins on character — the V8 sound, RWD purity, F SPORT Performance limited supply.\n- Sell on emotion and exclusivity, not stats. \"This is one of the last great V8 sport sedans you can buy new.\"",
+    tags: ["lexus", "competitor", "is", "objection-handling"],
+  },
+  {
+    scopeType: RepNoteScope.GLOBAL,
+    title: "Toyota → Lexus cross-shop conversations",
+    bodyMd: "Common scenarios where a Toyota customer is genuinely better off in a Lexus (referral opportunity, even if you only sell Toyota):\n- Customer wants RAV4 Limited Hybrid at $48k → NX 350h Premium at $57k. ~$9k for materially upgraded interior, F SPORT options, 4yr free maintenance.\n- Customer wants Highlander Platinum Hybrid at $66k → RX 350h Premium at $68k. Basically free upgrade in materials.\n- Customer wants Grand Highlander Platinum Hybrid MAX at $74k → TX 500h F SPORT 2 at $86k. Worth the step if budget allows.\n- Customer wants Land Cruiser at $82k → GX 550 Overtrail at $93k or LX 700h Overtrail at $130k.\n\nWhen the gap is <$10k, the Lexus complimentary maintenance often closes most of it on TCO.",
+    tags: ["lexus", "cross-shop", "sales-process"],
   },
 ];
 
 async function main() {
   console.log("Seeding Toyota catalog…");
 
-  // 1. Powertrains. No natural unique key in the schema, so we match by
-  // (type, displayName) which is unique among our seed rows. Existing rows
-  // are updated in place; new rows are created.
+  // 1. Powertrains (Toyota + Lexus combined).
+  const allPowertrains = [...POWERTRAINS, ...LEXUS_POWERTRAINS];
   const powertrainIdByKey = new Map<string, number>();
-  for (const p of POWERTRAINS) {
+  for (const p of allPowertrains) {
     const { key, ...data } = p;
     const existing = await prisma.powertrain.findFirst({
       where: { type: data.type, displayName: data.displayName },
@@ -211,37 +241,45 @@ async function main() {
       : await prisma.powertrain.create({ data });
     powertrainIdByKey.set(key, row.id);
   }
-  console.log(`  ${POWERTRAINS.length} powertrains`);
+  console.log(`  ${allPowertrains.length} powertrains`);
 
-  // 2. Models + trims + fees
+  // 2. Models + trims + fees (Toyota + Lexus)
+  const seedMakes: Array<{ make: string; models: typeof MODELS }> = [
+    { make: "Toyota", models: MODELS },
+    { make: "Lexus", models: LEXUS_MODELS },
+  ];
+  let totalModels = 0;
   let trimCount = 0;
-  for (const m of MODELS) {
-    const model = await prisma.model.upsert({
-      where: { slug: m.slug },
-      create: { slug: m.slug, name: m.name, bodyStyle: m.bodyStyle, segment: m.segment, notesMd: m.notesMd },
-      update: { name: m.name, bodyStyle: m.bodyStyle, segment: m.segment, notesMd: m.notesMd },
-    });
-    for (const t of m.trims) {
-      const powertrainId = powertrainIdByKey.get(t.powertrainKey);
-      if (!powertrainId) {
-        console.warn(`  skipping trim ${t.slug} — unknown powertrain key ${t.powertrainKey}`);
-        continue;
+  for (const { make, models } of seedMakes) {
+    for (const m of models) {
+      const model = await prisma.model.upsert({
+        where: { slug: m.slug },
+        create: { slug: m.slug, name: m.name, make, bodyStyle: m.bodyStyle, segment: m.segment, notesMd: m.notesMd },
+        update: { name: m.name, make, bodyStyle: m.bodyStyle, segment: m.segment, notesMd: m.notesMd },
+      });
+      totalModels += 1;
+      for (const t of m.trims) {
+        const powertrainId = powertrainIdByKey.get(t.powertrainKey);
+        if (!powertrainId) {
+          console.warn(`  skipping trim ${t.slug} — unknown powertrain key ${t.powertrainKey}`);
+          continue;
+        }
+        const trim = await prisma.trim.upsert({
+          where: { slug: t.slug },
+          create: { slug: t.slug, name: t.name, year: t.year, msrpCad: t.msrpCad, modelId: model.id, powertrainId, notesMd: t.notesMd },
+          update: { name: t.name, year: t.year, msrpCad: t.msrpCad, modelId: model.id, powertrainId, notesMd: t.notesMd },
+        });
+        const effectiveDate = new Date("2025-01-01");
+        await prisma.fee.upsert({
+          where: { trimId_effectiveDate: { trimId: trim.id, effectiveDate } },
+          create: { trimId: trim.id, effectiveDate, ...DEFAULT_FEES },
+          update: { ...DEFAULT_FEES },
+        });
+        trimCount += 1;
       }
-      const trim = await prisma.trim.upsert({
-        where: { slug: t.slug },
-        create: { slug: t.slug, name: t.name, year: t.year, msrpCad: t.msrpCad, modelId: model.id, powertrainId, notesMd: t.notesMd },
-        update: { name: t.name, year: t.year, msrpCad: t.msrpCad, modelId: model.id, powertrainId, notesMd: t.notesMd },
-      });
-      const effectiveDate = new Date("2025-01-01");
-      await prisma.fee.upsert({
-        where: { trimId_effectiveDate: { trimId: trim.id, effectiveDate } },
-        create: { trimId: trim.id, effectiveDate, ...DEFAULT_FEES },
-        update: { ...DEFAULT_FEES },
-      });
-      trimCount += 1;
     }
   }
-  console.log(`  ${MODELS.length} models, ${trimCount} trims (with default Ontario fees)`);
+  console.log(`  ${totalModels} models, ${trimCount} trims (with default Ontario fees)`);
 
   // 3. Warranties — apply baseline to every model × year (2025, 2026)
   const allModels = await prisma.model.findMany();

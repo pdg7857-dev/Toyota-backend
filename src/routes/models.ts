@@ -8,6 +8,7 @@ export const modelsRouter: Router = Router();
 const modelInputSchema = z.object({
   slug: z.string().min(1),
   name: z.string().min(1),
+  make: z.string().min(1).optional(),
   bodyStyle: z.string().nullable().optional(),
   segment: z.string().nullable().optional(),
   notesMd: z.string().nullable().optional(),
@@ -17,7 +18,8 @@ modelsRouter.get("/", async (req, res, next) => {
   try {
     const yearParam = req.query.year;
     const year = yearParam ? Number(yearParam) : undefined;
-    const models = await listModels(year);
+    const make = typeof req.query.make === "string" ? req.query.make : undefined;
+    const models = await listModels(year, make);
     res.json({ models });
   } catch (e) {
     next(e);

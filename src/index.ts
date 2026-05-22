@@ -15,6 +15,7 @@ import { adminRouter } from "./routes/admin.js";
 import { compareRouter } from "./routes/compare.js";
 import { colorsRouter } from "./routes/colors.js";
 import { searchRouter } from "./routes/search.js";
+import { paymentsRouter } from "./routes/payments.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -43,6 +44,7 @@ export function createApp(): express.Express {
   api.use("/compare", compareRouter);
   api.use("/colors", colorsRouter);
   api.use("/search", searchRouter);
+  api.use("/payments", paymentsRouter);
   app.use("/api/v1", api);
 
   app.use(notFound);

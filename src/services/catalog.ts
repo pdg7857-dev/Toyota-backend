@@ -1,9 +1,10 @@
 import { prisma } from "../db/client.js";
 import type { Prisma, PowertrainType } from "@prisma/client";
 
-export async function listModels(year?: number) {
+export async function listModels(year?: number, make?: string) {
   return prisma.model.findMany({
-    orderBy: { name: "asc" },
+    where: make ? { make } : undefined,
+    orderBy: [{ make: "asc" }, { name: "asc" }],
     include: year
       ? { trims: { where: { year }, select: { id: true, name: true, year: true, slug: true, msrpCad: true } } }
       : { trims: { select: { id: true, name: true, year: true, slug: true, msrpCad: true } } },
@@ -25,6 +26,7 @@ export async function getModelBySlug(slug: string) {
 
 export type TrimFilters = {
   model?: string;
+  make?: string;
   year?: number;
   powertrain?: PowertrainType;
   maxPrice?: number;
@@ -32,7 +34,11 @@ export type TrimFilters = {
 
 export async function listTrims(filters: TrimFilters) {
   const where: Prisma.TrimWhereInput = {};
-  if (filters.model) where.model = { slug: filters.model };
+  if (filters.model || filters.make) {
+    where.model = {};
+    if (filters.model) where.model.slug = filters.model;
+    if (filters.make) where.model.make = filters.make;
+  }
   if (filters.year) where.year = filters.year;
   if (filters.powertrain) where.powertrain = { type: filters.powertrain };
   if (filters.maxPrice) where.msrpCad = { lte: filters.maxPrice };
