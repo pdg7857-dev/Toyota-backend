@@ -3,6 +3,16 @@ import { PrismaClient, PowertrainType, WarrantyCoverageType, FinanceProductCateg
 import { POWERTRAINS, MODELS, DEFAULT_FEES } from "./seed-data.js";
 import { BODY_COLORS } from "./colors-seed.js";
 import { LEXUS_POWERTRAINS, LEXUS_MODELS } from "./lexus-seed.js";
+import { TOW_RATINGS } from "./tow-seed.js";
+import {
+  OPTION_PACKAGES,
+  TRIM_OPTION_LINKS,
+  FINANCE_PROMOS,
+  INCENTIVES,
+  MAINTENANCE_INTERVALS,
+  WALKAROUND_NOTES,
+  EXTRA_REP_NOTES,
+} from "./extras-seed.js";
 
 const prisma = new PrismaClient();
 
@@ -356,7 +366,153 @@ async function main() {
   }
   console.log(`  ${BODY_COLORS.length} body colors`);
 
-  // 7. Meta
+  // 7. Tow / payload ratings on trims that already exist
+  let towCount = 0;
+  for (const t of TOW_RATINGS) {
+    const trim = await prisma.trim.findUnique({ where: { slug: t.trimSlug } });
+    if (!trim) continue;
+    await prisma.trim.update({
+      where: { id: trim.id },
+      data: {
+        towRatingLbs: t.towRatingLbs ?? null,
+        payloadLbs: t.payloadLbs ?? null,
+        gvwrLbs: t.gvwrLbs ?? null,
+      },
+    });
+    towCount += 1;
+  }
+  console.log(`  ${towCount} tow/payload ratings`);
+
+  // 8. Option packages
+  for (const p of OPTION_PACKAGES) {
+    await prisma.optionPackage.upsert({
+      where: { slug: p.slug },
+      create: p,
+      update: { name: p.name, descriptionMd: p.descriptionMd, featuresJson: (p.featuresJson ?? null) as never },
+    });
+  }
+  console.log(`  ${OPTION_PACKAGES.length} option packages`);
+
+  let trimOptionCount = 0;
+  for (const link of TRIM_OPTION_LINKS) {
+    const trim = await prisma.trim.findUnique({ where: { slug: link.trimSlug } });
+    const pkg = await prisma.optionPackage.findUnique({ where: { slug: link.packageSlug } });
+    if (!trim || !pkg) continue;
+    await prisma.trimOption.upsert({
+      where: { trimId_optionPackageId: { trimId: trim.id, optionPackageId: pkg.id } },
+      create: {
+        trimId: trim.id,
+        optionPackageId: pkg.id,
+        priceCad: link.priceCad,
+        notesMd: link.notesMd ?? null,
+      },
+      update: { priceCad: link.priceCad, notesMd: link.notesMd ?? null },
+    });
+    trimOptionCount += 1;
+  }
+  console.log(`  ${trimOptionCount} trim-option links`);
+
+  // 9. Finance promos
+  for (const p of FINANCE_PROMOS) {
+    const existing = await prisma.financePromo.findFirst({
+      where: { modelSlug: p.modelSlug, kind: p.kind, termMonths: p.termMonths, effectiveFrom: new Date(p.effectiveFrom) },
+    });
+    const data = {
+      modelSlug: p.modelSlug,
+      kind: p.kind,
+      termMonths: p.termMonths,
+      aprPercent: p.aprPercent ?? null,
+      moneyFactor: p.moneyFactor ?? null,
+      residualPercent: p.residualPercent ?? null,
+      effectiveFrom: new Date(p.effectiveFrom),
+      effectiveTo: p.effectiveTo ? new Date(p.effectiveTo) : null,
+      notesMd: p.notesMd ?? null,
+    };
+    if (existing) {
+      await prisma.financePromo.update({ where: { id: existing.id }, data });
+    } else {
+      await prisma.financePromo.create({ data });
+    }
+  }
+  console.log(`  ${FINANCE_PROMOS.length} finance promos`);
+
+  // 10. Incentives
+  for (const i of INCENTIVES) {
+    await prisma.incentive.upsert({
+      where: { slug: i.slug },
+      create: {
+        slug: i.slug,
+        name: i.name,
+        kind: i.kind,
+        amountCad: i.amountCad ?? null,
+        stackable: i.stackable ?? true,
+        eligibleMakes: i.eligibleMakes ?? [],
+        eligibleSlugs: i.eligibleSlugs ?? [],
+        eligibleYears: i.eligibleYears ?? [],
+        effectiveFrom: new Date(i.effectiveFrom),
+        effectiveTo: i.effectiveTo ? new Date(i.effectiveTo) : null,
+        notesMd: i.notesMd ?? null,
+      },
+      update: {
+        name: i.name,
+        kind: i.kind,
+        amountCad: i.amountCad ?? null,
+        stackable: i.stackable ?? true,
+        eligibleMakes: i.eligibleMakes ?? [],
+        eligibleSlugs: i.eligibleSlugs ?? [],
+        eligibleYears: i.eligibleYears ?? [],
+        effectiveFrom: new Date(i.effectiveFrom),
+        effectiveTo: i.effectiveTo ? new Date(i.effectiveTo) : null,
+        notesMd: i.notesMd ?? null,
+      },
+    });
+  }
+  console.log(`  ${INCENTIVES.length} incentives`);
+
+  // 11. Maintenance intervals (global defaults — applied to all models)
+  // Wipe and reseed since these are pure reference data.
+  await prisma.maintenanceInterval.deleteMany({ where: { modelSlug: null } });
+  for (const m of MAINTENANCE_INTERVALS) {
+    await prisma.maintenanceInterval.create({
+      data: {
+        modelSlug: m.modelSlug ?? null,
+        powertrainType: m.powertrainType ?? null,
+        intervalKm: m.intervalKm,
+        servicesJson: m.servicesJson as never,
+        partsCostCad: m.partsCostCad ?? null,
+        labourMinutes: m.labourMinutes ?? null,
+        notesMd: m.notesMd ?? null,
+      },
+    });
+  }
+  console.log(`  ${MAINTENANCE_INTERVALS.length} maintenance intervals`);
+
+  // 12. Walkaround notes (scoped to specific trims) + extra rep notes
+  for (const w of WALKAROUND_NOTES) {
+    const trim = await prisma.trim.findUnique({ where: { slug: w.scopeSlug } });
+    if (!trim) continue;
+    const existing = await prisma.repNote.findFirst({
+      where: { scopeType: RepNoteScope.TRIM, scopeId: trim.id, title: w.title },
+    });
+    if (existing) {
+      await prisma.repNote.update({ where: { id: existing.id }, data: { bodyMd: w.bodyMd, tags: w.tags } });
+    } else {
+      await prisma.repNote.create({
+        data: { scopeType: RepNoteScope.TRIM, scopeId: trim.id, title: w.title, bodyMd: w.bodyMd, tags: w.tags },
+      });
+    }
+  }
+  for (const n of EXTRA_REP_NOTES) {
+    const existing = await prisma.repNote.findFirst({ where: { scopeType: n.scopeType, title: n.title } });
+    if (existing) {
+      await prisma.repNote.update({ where: { id: existing.id }, data: { bodyMd: n.bodyMd, tags: n.tags } });
+    } else {
+      await prisma.repNote.create({ data: n });
+    }
+  }
+  console.log(`  ${WALKAROUND_NOTES.length} walkaround notes + ${EXTRA_REP_NOTES.length} extra rep notes`);
+
+  // 13. Meta
   await prisma.meta.upsert({
     where: { id: 1 },
     create: { id: 1, catalogVersion: 1 },

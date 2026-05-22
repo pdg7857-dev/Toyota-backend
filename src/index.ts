@@ -16,6 +16,13 @@ import { compareRouter } from "./routes/compare.js";
 import { colorsRouter } from "./routes/colors.js";
 import { searchRouter } from "./routes/search.js";
 import { paymentsRouter } from "./routes/payments.js";
+import { promosRouter } from "./routes/promos.js";
+import { incentivesRouter } from "./routes/incentives.js";
+import { optionsRouter } from "./routes/options.js";
+import { customersRouter } from "./routes/customers.js";
+import { maintenanceRouter } from "./routes/maintenance.js";
+import { walkaroundRouter } from "./routes/walkaround.js";
+import { quotePdfRouter } from "./routes/quote-pdf.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -45,6 +52,13 @@ export function createApp(): express.Express {
   api.use("/colors", colorsRouter);
   api.use("/search", searchRouter);
   api.use("/payments", paymentsRouter);
+  api.use("/promos", promosRouter);
+  api.use("/incentives", incentivesRouter);
+  api.use("/options", optionsRouter);
+  api.use("/customers", customersRouter);
+  api.use("/maintenance", maintenanceRouter);
+  api.use("/walkaround", walkaroundRouter);
+  api.use(quotePdfRouter);
   app.use("/api/v1", api);
 
   app.use(notFound);

@@ -373,6 +373,165 @@ describe("conversations", () => {
   });
 });
 
+describe("promos", () => {
+  it("lists active promos for a model", async () => {
+    const r = await request(app)
+      .get("/api/v1/promos")
+      .query({ modelSlug: "rav4" })
+      .set(auth());
+    expect(r.status).toBe(200);
+    expect(r.body.promos.length).toBeGreaterThan(0);
+    for (const p of r.body.promos) expect(p.modelSlug).toBe("rav4");
+  });
+});
+
+describe("auto-promo in payments", () => {
+  it("finance auto-applies the active promo APR when not passed", async () => {
+    const r = await request(app)
+      .post("/api/v1/payments/finance")
+      .set(auth())
+      .send({ trimSlug: "rav4-2026-xle-hybrid-awd", termMonths: 60, downPaymentCad: 5000 });
+    expect(r.status).toBe(200);
+    expect(r.body.promoUsed).toMatch(/rav4 FINANCE/);
+    expect(r.body.apr).toBeGreaterThan(0);
+  });
+
+  it("lease auto-applies the active promo MF + residual when not passed", async () => {
+    const r = await request(app)
+      .post("/api/v1/payments/lease")
+      .set(auth())
+      .send({ trimSlug: "lexus-rx-2026-350h-premium", termMonths: 48, downPaymentCad: 5000, acquisitionFeeCad: 695 });
+    expect(r.status).toBe(200);
+    expect(r.body.promoUsed).toMatch(/lexus-rx LEASE/);
+    expect(r.body.monthlyTaxIn).toBeGreaterThan(0);
+  });
+
+  it("returns 400 if no APR and no promo available for the model+term", async () => {
+    const r = await request(app)
+      .post("/api/v1/payments/finance")
+      .set(auth())
+      .send({ trimSlug: "land-cruiser-2026-1958-hybrid-4wd", termMonths: 84, downPaymentCad: 5000 });
+    expect(r.status).toBe(400);
+  });
+});
+
+describe("incentives", () => {
+  it("lists active incentives", async () => {
+    const r = await request(app).get("/api/v1/incentives").set(auth());
+    expect(r.status).toBe(200);
+    const slugs = r.body.incentives.map((i: { slug: string }) => i.slug);
+    expect(slugs).toContain("toyota-loyalty-500");
+    expect(slugs).toContain("izev-bev-5000");
+  });
+
+  it("returns eligible incentives for a Lexus PHEV trim", async () => {
+    const r = await request(app)
+      .get("/api/v1/incentives/for-trim/lexus-nx-2026-450h-plus-premium")
+      .set(auth());
+    expect(r.status).toBe(200);
+    const slugs = r.body.stackable.map((i: { slug: string }) => i.slug);
+    expect(slugs).toContain("lexus-loyalty-1000");
+    expect(slugs).toContain("izev-phev-2500"); // Lexus NX PHEV is on the eligible list
+    expect(r.body.maxStackTotal).toBeGreaterThanOrEqual(2500 + 1000);
+  });
+
+  it("excludes Toyota-only incentives from Lexus trims", async () => {
+    const r = await request(app)
+      .get("/api/v1/incentives/for-trim/lexus-rx-2026-350h-premium")
+      .set(auth());
+    const slugs = r.body.stackable.map((i: { slug: string }) => i.slug);
+    expect(slugs).not.toContain("toyota-loyalty-500");
+    expect(slugs).toContain("lexus-loyalty-1000");
+  });
+});
+
+describe("tow ratings", () => {
+  it("trim detail returns tow rating + payload for trucks", async () => {
+    const r = await request(app).get("/api/v1/trims/tundra-2026-sr5-doublecab-4wd-gas").set(auth());
+    expect(r.status).toBe(200);
+    expect(r.body.towRatingLbs).toBeGreaterThanOrEqual(10000);
+    expect(r.body.payloadLbs).toBeGreaterThan(1000);
+  });
+});
+
+describe("options / packages", () => {
+  it("lists option packages", async () => {
+    const r = await request(app).get("/api/v1/options").set(auth());
+    expect(r.status).toBe(200);
+    const slugs = r.body.packages.map((p: { slug: string }) => p.slug);
+    expect(slugs).toContain("premium-audio");
+    expect(slugs).toContain("tow-package");
+  });
+
+  it("returns trim-option availability", async () => {
+    const trim = await request(app).get("/api/v1/trims/rav4-2026-xle-hybrid-awd").set(auth());
+    const r = await request(app).get(`/api/v1/options/trim/${trim.body.id}`).set(auth());
+    expect(r.status).toBe(200);
+    const slugs = r.body.trimOptions.map((to: { optionPackage: { slug: string } }) => to.optionPackage.slug);
+    expect(slugs).toContain("premium-audio");
+  });
+});
+
+describe("customers", () => {
+  it("CRUD + interactions", async () => {
+    const create = await request(app)
+      .post("/api/v1/customers")
+      .set(auth())
+      .send({ name: "Test Customer", email: "test@example.com", status: "LEAD" });
+    expect(create.status).toBe(201);
+    const id = create.body.id;
+
+    const inter = await request(app)
+      .post(`/api/v1/customers/${id}/interactions`)
+      .set(auth())
+      .send({ kind: "CALL", bodyMd: "Initial outreach call." });
+    expect(inter.status).toBe(201);
+
+    const get = await request(app).get(`/api/v1/customers/${id}`).set(auth());
+    expect(get.status).toBe(200);
+    expect(get.body.interactions.length).toBe(1);
+
+    const del = await request(app).delete(`/api/v1/customers/${id}`).set(auth());
+    expect(del.status).toBe(204);
+  });
+});
+
+describe("maintenance projection", () => {
+  it("projects cost from 0 to 100k km", async () => {
+    const r = await request(app)
+      .post("/api/v1/maintenance/project")
+      .set(auth())
+      .send({ modelSlug: "rav4", targetKm: 100000, labourRateCad: 180 });
+    expect(r.status).toBe(200);
+    expect(r.body.totals.visits).toBeGreaterThan(0);
+    expect(r.body.totals.total).toBeGreaterThan(0);
+    expect(r.body.totals.parts + r.body.totals.labour).toBeCloseTo(r.body.totals.total, 1);
+  });
+});
+
+describe("walkaround", () => {
+  it("returns trim-tagged walkaround notes when present", async () => {
+    const r = await request(app)
+      .get("/api/v1/walkaround/rav4-2026-xle-hybrid-awd")
+      .set(auth());
+    expect(r.status).toBe(200);
+    expect(r.body.walkaroundNotes.length).toBeGreaterThan(0);
+    for (const n of r.body.walkaroundNotes) expect(n.tags).toContain("walkaround");
+  });
+});
+
+describe("quote.html render", () => {
+  it("renders a printable HTML quote", async () => {
+    const r = await request(app)
+      .get("/api/v1/trims/rav4-2026-xle-hybrid-awd/quote.html")
+      .set(auth());
+    expect(r.status).toBe(200);
+    expect(r.headers["content-type"]).toMatch(/html/);
+    expect(r.text).toContain("Out-the-Door Total");
+    expect(r.text).toContain("Finance"); // auto-attached promo
+  });
+});
+
 describe("admin scrape endpoints", () => {
   it("lists scrape runs", async () => {
     const r = await request(app).get("/api/v1/admin/scrape/runs").set(auth());

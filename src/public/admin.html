@@ -76,8 +76,8 @@
 </dialog>
 
 <script>
-const TABS = ["ai", "search", "compare", "payments", "models", "trims", "powertrains", "warranties", "finance", "colors", "notes", "scrape"];
-const TAB_LABELS = { ai: "AI Q&A", search: "Search", compare: "Compare", payments: "Payments", models: "Models", trims: "Trims", powertrains: "Powertrains", warranties: "Warranties", finance: "F&I Products", colors: "Colors", notes: "Rep Notes", scrape: "Scraper" };
+const TABS = ["ai", "search", "compare", "payments", "customers", "models", "trims", "options", "powertrains", "warranties", "finance", "promos", "incentives", "colors", "notes", "maintenance", "scrape"];
+const TAB_LABELS = { ai: "AI Q&A", search: "Search", compare: "Compare", payments: "Payments", customers: "Customers", models: "Models", trims: "Trims", options: "Options", powertrains: "Powertrains", warranties: "Warranties", finance: "F&I Products", promos: "Promos", incentives: "Incentives", colors: "Colors", notes: "Rep Notes", maintenance: "Maintenance", scrape: "Scraper" };
 let token = localStorage.getItem("toyota_token") || "";
 let currentTab = location.hash.replace("#", "") || "ai";
 if (!TABS.includes(currentTab)) currentTab = "ai";
@@ -141,6 +141,11 @@ async function render() {
     if (currentTab === "search") return renderSearch();
     if (currentTab === "colors") return renderColors();
     if (currentTab === "payments") return renderPayments();
+    if (currentTab === "promos") return renderPromos();
+    if (currentTab === "incentives") return renderIncentives();
+    if (currentTab === "options") return renderOptions();
+    if (currentTab === "customers") return renderCustomers();
+    if (currentTab === "maintenance") return renderMaintenance();
   } catch (e) {
     document.getElementById("main").innerHTML = `<div class="empty danger">Error: ${e.message}</div>`;
   }
@@ -279,6 +284,7 @@ async function renderTrims() {
       <td class="row-actions">
         <button class="secondary" onclick='openTrimForm(${JSON.stringify(t)})'>edit</button>
         <button class="secondary" onclick='openFeeForm(${t.id})'>fees</button>
+        <button class="secondary" onclick="printQuote('${t.slug}')">quote</button>
         <button class="secondary danger" onclick="delItem('trims', ${t.id})">del</button>
       </td></tr>`).join("")}</tbody></table>
     <div id="formArea"></div>`;
@@ -301,6 +307,19 @@ function openTrimForm(t = {}) {
         <button class="primary" onclick="saveTrim(${t.id || 'null'})">${t.id ? 'Save' : 'Create'}</button>
         <button class="secondary" onclick="document.getElementById('formArea').innerHTML=''">Cancel</button>
       </div></div>`;
+}
+async function printQuote(slug) {
+  // Open the HTML quote in a new tab. Token is passed via fetch+blob since
+  // the bearer header doesn't survive a top-level navigation.
+  const res = await fetch(`/api/v1/trims/${encodeURIComponent(slug)}/quote.html`, {
+    headers: { Authorization: "Bearer " + token },
+  });
+  if (!res.ok) { alert("Failed to render quote"); return; }
+  const html = await res.text();
+  const w = window.open("", "_blank");
+  if (!w) { alert("Allow pop-ups for the quote tab."); return; }
+  w.document.write(html);
+  w.document.close();
 }
 async function saveTrim(id) {
   const data = {
@@ -852,6 +871,363 @@ async function doCompare() {
       </tbody>
     </table>
     ${r.missing && r.missing.length > 0 ? `<div class="empty danger">Not found: ${r.missing.join(", ")}</div>` : ""}`;
+}
+
+// ---------- Promos ----------
+async function renderPromos() {
+  const { promos } = await api("/promos?activeOnly=false");
+  document.getElementById("main").innerHTML = `
+    <div class="toolbar"><button class="primary" onclick="openPromoForm()">+ New promo</button>
+      <span style="color: var(--muted); font-size: 12px;">Active promos auto-fill the Payments tab and the customer-facing PDF quote.</span>
+    </div>
+    <table><thead><tr><th>ID</th><th>Model</th><th>Kind</th><th>Term</th><th>Rate</th><th>From</th><th>To</th><th>Notes</th><th></th></tr></thead>
+    <tbody>${promos.map(p => `<tr>
+      <td>${p.id}</td><td><code>${p.modelSlug || '—'}</code></td>
+      <td><span class="badge">${p.kind}</span></td><td>${p.termMonths} mo</td>
+      <td>${p.kind === 'FINANCE' ? (p.aprPercent ?? '—')+'% APR' : 'MF '+p.moneyFactor+' / '+p.residualPercent+'% residual'}</td>
+      <td>${new Date(p.effectiveFrom).toLocaleDateString()}</td>
+      <td>${p.effectiveTo ? new Date(p.effectiveTo).toLocaleDateString() : '—'}</td>
+      <td>${escapeHtml((p.notesMd || '').slice(0, 50))}</td>
+      <td class="row-actions">
+        <button class="secondary" onclick='openPromoForm(${JSON.stringify(p)})'>edit</button>
+        <button class="secondary danger" onclick="delItem('promos', ${p.id})">del</button>
+      </td></tr>`).join("")}</tbody></table>
+    <div id="promoForm"></div>`;
+}
+function openPromoForm(p = {}) {
+  document.getElementById("promoForm").innerHTML = `
+    <div class="edit-form"><h3>${p.id ? "Edit promo #"+p.id : "New promo"}</h3>
+      <div class="grid">
+        <label>Model slug<input id="pr_model" value="${escapeHtml(p.modelSlug)}" placeholder="rav4"></label>
+        <label>Kind<select id="pr_kind"><option ${p.kind==='FINANCE'?'selected':''}>FINANCE</option><option ${p.kind==='LEASE'?'selected':''}>LEASE</option></select></label>
+        <label>Term months<input id="pr_term" type="number" value="${p.termMonths || 60}"></label>
+        <label>APR %<input id="pr_apr" type="number" step="0.01" value="${p.aprPercent || ''}"></label>
+        <label>Money Factor<input id="pr_mf" type="number" step="0.00001" value="${p.moneyFactor || ''}"></label>
+        <label>Residual %<input id="pr_residual" type="number" step="0.1" value="${p.residualPercent || ''}"></label>
+        <label>Effective from<input id="pr_from" type="date" value="${p.effectiveFrom ? p.effectiveFrom.slice(0,10) : new Date().toISOString().slice(0,10)}"></label>
+        <label>Effective to<input id="pr_to" type="date" value="${p.effectiveTo ? p.effectiveTo.slice(0,10) : ''}"></label>
+      </div>
+      <label style="margin-top:10px">Notes<textarea id="pr_notes">${escapeHtml(p.notesMd)}</textarea></label>
+      <div class="actions">
+        <button class="primary" onclick="savePromo(${p.id || 'null'})">${p.id ? 'Save' : 'Create'}</button>
+        <button class="secondary" onclick="document.getElementById('promoForm').innerHTML=''">Cancel</button>
+      </div></div>`;
+}
+async function savePromo(id) {
+  const num = (id) => document.getElementById(id).value ? Number(document.getElementById(id).value) : null;
+  const data = {
+    modelSlug: document.getElementById("pr_model").value.trim() || null,
+    kind: document.getElementById("pr_kind").value,
+    termMonths: Number(document.getElementById("pr_term").value),
+    aprPercent: num("pr_apr"),
+    moneyFactor: num("pr_mf"),
+    residualPercent: num("pr_residual"),
+    effectiveFrom: document.getElementById("pr_from").value,
+    effectiveTo: document.getElementById("pr_to").value || null,
+    notesMd: document.getElementById("pr_notes").value || null,
+  };
+  await api(id ? `/promos/${id}` : "/promos", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+  render();
+}
+
+// ---------- Incentives ----------
+async function renderIncentives() {
+  const { incentives } = await api("/incentives?activeOnly=false");
+  document.getElementById("main").innerHTML = `
+    <div class="toolbar"><button class="primary" onclick="openIncentiveForm()">+ New incentive</button>
+      <span style="color: var(--muted); font-size: 12px;">Surfaced in the AI context, the PDF quote, and Payments tab.</span>
+    </div>
+    <table><thead><tr><th>ID</th><th>Slug</th><th>Name</th><th>Kind</th><th>Amount</th><th>Stackable</th><th>Eligible</th><th></th></tr></thead>
+    <tbody>${incentives.map(i => `<tr>
+      <td>${i.id}</td><td><code>${i.slug}</code></td><td>${escapeHtml(i.name)}</td>
+      <td><span class="badge">${i.kind}</span></td>
+      <td>${i.amountCad ? '$'+Number(i.amountCad).toLocaleString('en-CA') : '—'}</td>
+      <td>${i.stackable ? 'yes' : 'no'}</td>
+      <td>${[(i.eligibleMakes || []).join(','), (i.eligibleSlugs || []).join(',')].filter(Boolean).join(' / ') || 'all'}</td>
+      <td class="row-actions">
+        <button class="secondary" onclick='openIncentiveForm(${JSON.stringify(i)})'>edit</button>
+        <button class="secondary danger" onclick="delItem('incentives', ${i.id})">del</button>
+      </td></tr>`).join("")}</tbody></table>
+    <div id="incForm"></div>`;
+}
+function openIncentiveForm(i = {}) {
+  const kinds = ["LOYALTY","CONQUEST","CASH_REBATE","FINANCE_RATE","LEASE_RATE","STUDENT_GRAD","MILITARY","FIRST_RESPONDER","OTHER"];
+  document.getElementById("incForm").innerHTML = `
+    <div class="edit-form"><h3>${i.id ? "Edit incentive #"+i.id : "New incentive"}</h3>
+      <div class="grid">
+        <label>Slug<input id="in_slug" value="${escapeHtml(i.slug)}"></label>
+        <label>Name<input id="in_name" value="${escapeHtml(i.name)}"></label>
+        <label>Kind<select id="in_kind">${kinds.map(k => `<option ${k===i.kind?'selected':''}>${k}</option>`).join("")}</select></label>
+        <label>Amount $<input id="in_amount" type="number" value="${i.amountCad || ''}"></label>
+        <label>Stackable<select id="in_stack"><option value="true" ${i.stackable!==false?'selected':''}>yes</option><option value="false" ${i.stackable===false?'selected':''}>no</option></select></label>
+        <label>Eligible makes (comma)<input id="in_makes" value="${(i.eligibleMakes||[]).join(',')}"></label>
+        <label>Eligible model slugs (comma)<input id="in_slugs" value="${(i.eligibleSlugs||[]).join(',')}"></label>
+        <label>Effective from<input id="in_from" type="date" value="${i.effectiveFrom ? i.effectiveFrom.slice(0,10) : new Date().toISOString().slice(0,10)}"></label>
+        <label>Effective to<input id="in_to" type="date" value="${i.effectiveTo ? i.effectiveTo.slice(0,10) : ''}"></label>
+      </div>
+      <label style="margin-top:10px">Notes<textarea id="in_notes">${escapeHtml(i.notesMd)}</textarea></label>
+      <div class="actions">
+        <button class="primary" onclick="saveIncentive(${i.id || 'null'})">${i.id ? 'Save' : 'Create'}</button>
+        <button class="secondary" onclick="document.getElementById('incForm').innerHTML=''">Cancel</button>
+      </div></div>`;
+}
+async function saveIncentive(id) {
+  const cap = (s) => s.value.split(",").map(t => t.trim()).filter(Boolean);
+  const data = {
+    slug: document.getElementById("in_slug").value.trim(),
+    name: document.getElementById("in_name").value.trim(),
+    kind: document.getElementById("in_kind").value,
+    amountCad: document.getElementById("in_amount").value ? Number(document.getElementById("in_amount").value) : null,
+    stackable: document.getElementById("in_stack").value === "true",
+    eligibleMakes: cap(document.getElementById("in_makes")),
+    eligibleSlugs: cap(document.getElementById("in_slugs")),
+    effectiveFrom: document.getElementById("in_from").value,
+    effectiveTo: document.getElementById("in_to").value || null,
+    notesMd: document.getElementById("in_notes").value || null,
+  };
+  await api(id ? `/incentives/${id}` : "/incentives", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+  render();
+}
+
+// ---------- Option packages ----------
+async function renderOptions() {
+  const [{ packages }, { trims }] = await Promise.all([api("/options"), api("/trims")]);
+  window._allTrims = trims;
+  window._packages = packages;
+  const trimOpts = trims.map(t => `<option value="${t.id}">${t.year} ${escapeHtml(t.model.name)} ${escapeHtml(t.name)}</option>`).join("");
+  document.getElementById("main").innerHTML = `
+    <div class="toolbar">
+      <button class="primary" onclick="openOptionForm()">+ New package</button>
+      <select id="opt_pickTrim" style="width: 320px;"><option value="">— pick a trim to manage its options —</option>${trimOpts}</select>
+      <button class="secondary" onclick="loadTrimOptions()">Load</button>
+    </div>
+    <table><thead><tr><th>ID</th><th>Slug</th><th>Name</th><th>Features</th><th></th></tr></thead>
+    <tbody>${packages.map(p => `<tr>
+      <td>${p.id}</td><td><code>${p.slug}</code></td><td>${escapeHtml(p.name)}</td>
+      <td>${escapeHtml((p.descriptionMd || '').slice(0, 60))}</td>
+      <td class="row-actions">
+        <button class="secondary" onclick='openOptionForm(${JSON.stringify(p)})'>edit</button>
+        <button class="secondary danger" onclick="delItem('options', ${p.id})">del</button>
+      </td></tr>`).join("")}</tbody></table>
+    <div id="optFormArea"></div>
+    <div id="trimOptArea"></div>`;
+}
+function openOptionForm(p = {}) {
+  document.getElementById("optFormArea").innerHTML = `
+    <div class="edit-form"><h3>${p.id ? "Edit package #"+p.id : "New package"}</h3>
+      <div class="grid">
+        <label>Slug<input id="op_slug" value="${escapeHtml(p.slug)}"></label>
+        <label>Name<input id="op_name" value="${escapeHtml(p.name)}"></label>
+      </div>
+      <label style="margin-top:10px">Description<textarea id="op_desc">${escapeHtml(p.descriptionMd)}</textarea></label>
+      <label style="margin-top:10px">Features JSON<textarea id="op_features">${escapeHtml(p.featuresJson ? JSON.stringify(p.featuresJson, null, 2) : '')}</textarea></label>
+      <div class="actions">
+        <button class="primary" onclick="saveOption(${p.id || 'null'})">${p.id ? 'Save' : 'Create'}</button>
+        <button class="secondary" onclick="document.getElementById('optFormArea').innerHTML=''">Cancel</button>
+      </div></div>`;
+}
+async function saveOption(id) {
+  let featuresJson = null;
+  const raw = document.getElementById("op_features").value.trim();
+  if (raw) { try { featuresJson = JSON.parse(raw); } catch (e) { alert("Invalid JSON"); return; } }
+  const data = {
+    slug: document.getElementById("op_slug").value.trim(),
+    name: document.getElementById("op_name").value.trim(),
+    descriptionMd: document.getElementById("op_desc").value || null,
+    featuresJson,
+  };
+  await api(id ? `/options/${id}` : "/options", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+  render();
+}
+async function loadTrimOptions() {
+  const trimId = document.getElementById("opt_pickTrim").value;
+  if (!trimId) return;
+  const trim = window._allTrims.find(t => t.id === Number(trimId));
+  const { trimOptions } = await api(`/options/trim/${trimId}`);
+  const assigned = new Map(trimOptions.map(to => [to.optionPackageId, to]));
+  document.getElementById("trimOptArea").innerHTML = `
+    <div class="edit-form">
+      <h3>Options for ${trim.year} ${escapeHtml(trim.model.name)} ${escapeHtml(trim.name)}</h3>
+      <table>
+        <thead><tr><th>Package</th><th>Available</th><th>Price $</th><th></th></tr></thead>
+        <tbody>${window._packages.map(p => {
+          const to = assigned.get(p.id);
+          return `<tr>
+            <td>${escapeHtml(p.name)}</td>
+            <td><input type="checkbox" id="to_a_${p.id}" ${to?.available !== false && to ? 'checked' : (to ? '' : '')}></td>
+            <td><input id="to_p_${p.id}" type="number" step="1" value="${to?.priceCad || ''}" style="width:90px"></td>
+            <td><button class="secondary" onclick="saveTrimOption(${trimId}, ${p.id})">Save</button></td>
+          </tr>`;
+        }).join("")}</tbody>
+      </table>
+    </div>`;
+}
+async function saveTrimOption(trimId, optionPackageId) {
+  const available = document.getElementById(`to_a_${optionPackageId}`).checked;
+  const price = document.getElementById(`to_p_${optionPackageId}`).value;
+  await api(`/options/trim`, { method: "PUT", body: JSON.stringify({
+    trimId: Number(trimId),
+    optionPackageId,
+    available,
+    priceCad: price ? Number(price) : null,
+  })});
+  loadTrimOptions();
+}
+
+// ---------- Customers ----------
+async function renderCustomers() {
+  const { customers } = await api("/customers");
+  document.getElementById("main").innerHTML = `
+    <div class="toolbar">
+      <button class="primary" onclick="openCustomerForm()">+ New customer</button>
+      <span style="color: var(--muted); font-size: 12px;">Track leads, test drives, and follow-ups.</span>
+    </div>
+    <table><thead><tr><th>ID</th><th>Name</th><th>Contact</th><th>Status</th><th>Vehicle</th><th>Budget</th><th>Follow-up</th><th>Notes/Activity</th><th></th></tr></thead>
+    <tbody>${customers.map(c => {
+      const overdue = c.followUpDate && new Date(c.followUpDate) <= new Date();
+      return `<tr>
+        <td>${c.id}</td>
+        <td><strong>${escapeHtml(c.name)}</strong></td>
+        <td>${[c.email, c.phone].filter(Boolean).map(escapeHtml).join('<br>')}</td>
+        <td><span class="badge">${c.status}</span></td>
+        <td>${c.vehicleOfInterest ? `${c.vehicleOfInterest.year} ${escapeHtml(c.vehicleOfInterest.model.name)} ${escapeHtml(c.vehicleOfInterest.name)}` : '—'}</td>
+        <td>${c.budgetCad ? '$'+Number(c.budgetCad).toLocaleString('en-CA') : '—'}</td>
+        <td style="${overdue ? 'color: var(--accent); font-weight: 600;' : ''}">${c.followUpDate ? new Date(c.followUpDate).toLocaleDateString() : '—'}</td>
+        <td>${c._count?.interactions || 0} interaction(s)</td>
+        <td class="row-actions">
+          <button class="secondary" onclick="openCustomer(${c.id})">open</button>
+          <button class="secondary danger" onclick="delItem('customers', ${c.id})">del</button>
+        </td></tr>`;
+    }).join("")}</tbody></table>
+    <div id="customerArea"></div>`;
+}
+function openCustomerForm(c = {}) {
+  const statuses = ["LEAD","TEST_DRIVE_BOOKED","QUOTED","NEGOTIATING","SOLD","LOST","FOLLOW_UP"];
+  const trimOpts = (window._allTrims || []).map(t => `<option value="${t.id}" ${t.id===c.vehicleOfInterestTrimId?'selected':''}>${t.year} ${escapeHtml(t.model.name)} ${escapeHtml(t.name)}</option>`).join("");
+  document.getElementById("customerArea").innerHTML = `
+    <div class="edit-form"><h3>${c.id ? "Edit "+escapeHtml(c.name) : "New customer"}</h3>
+      <div class="grid">
+        <label>Name<input id="cu_name" value="${escapeHtml(c.name)}"></label>
+        <label>Email<input id="cu_email" value="${escapeHtml(c.email)}"></label>
+        <label>Phone<input id="cu_phone" value="${escapeHtml(c.phone)}"></label>
+        <label>Status<select id="cu_status">${statuses.map(s => `<option ${s===c.status?'selected':''}>${s}</option>`).join("")}</select></label>
+        <label>Budget $<input id="cu_budget" type="number" value="${c.budgetCad || ''}"></label>
+        <label>Follow-up<input id="cu_follow" type="date" value="${c.followUpDate ? c.followUpDate.slice(0,10) : ''}"></label>
+        <label style="grid-column: 1/-1">Vehicle of interest<select id="cu_trim"><option value="">— none —</option>${trimOpts}</select></label>
+      </div>
+      <label style="margin-top:10px">Notes<textarea id="cu_notes">${escapeHtml(c.notesMd)}</textarea></label>
+      <div class="actions">
+        <button class="primary" onclick="saveCustomer(${c.id || 'null'})">${c.id ? 'Save' : 'Create'}</button>
+        <button class="secondary" onclick="document.getElementById('customerArea').innerHTML=''">Cancel</button>
+      </div></div>`;
+}
+async function saveCustomer(id) {
+  // Load trims for the dropdown if not cached
+  if (!window._allTrims) {
+    const { trims } = await api("/trims");
+    window._allTrims = trims;
+  }
+  const data = {
+    name: document.getElementById("cu_name").value.trim(),
+    email: document.getElementById("cu_email").value.trim() || null,
+    phone: document.getElementById("cu_phone").value.trim() || null,
+    status: document.getElementById("cu_status").value,
+    budgetCad: document.getElementById("cu_budget").value ? Number(document.getElementById("cu_budget").value) : null,
+    followUpDate: document.getElementById("cu_follow").value || null,
+    vehicleOfInterestTrimId: document.getElementById("cu_trim").value ? Number(document.getElementById("cu_trim").value) : null,
+    notesMd: document.getElementById("cu_notes").value || null,
+  };
+  await api(id ? `/customers/${id}` : "/customers", { method: id ? "PATCH" : "POST", body: JSON.stringify(data) });
+  render();
+}
+async function openCustomer(id) {
+  if (!window._allTrims) {
+    const { trims } = await api("/trims");
+    window._allTrims = trims;
+  }
+  const c = await api(`/customers/${id}`);
+  const kinds = ["CALL","EMAIL","TEXT","IN_PERSON","TEST_DRIVE","QUOTE_SENT","NOTE"];
+  document.getElementById("customerArea").innerHTML = `
+    <div class="edit-form">
+      <h3>${escapeHtml(c.name)} (${c.status})</h3>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">
+        ${[c.email,c.phone].filter(Boolean).map(escapeHtml).join(' · ')}<br>
+        ${c.vehicleOfInterest ? 'Interested in: '+c.vehicleOfInterest.year+' '+escapeHtml(c.vehicleOfInterest.model.name)+' '+escapeHtml(c.vehicleOfInterest.name) : ''}
+      </div>
+      ${c.notesMd ? `<div class="ai-answer" style="margin:0 0 16px">${escapeHtml(c.notesMd)}</div>` : ''}
+      <h4 style="margin:14px 0 6px;font-size:13px;">Log new interaction</h4>
+      <div style="display:flex;gap:8px;align-items:start">
+        <select id="ci_kind">${kinds.map(k => `<option>${k}</option>`).join("")}</select>
+        <textarea id="ci_body" style="flex:1;min-height:60px" placeholder="Test drove RAV4 XLE Hybrid. Concerned about resale value. Showed warranty differentiator."></textarea>
+        <button class="primary" onclick="logInteraction(${id})">Log</button>
+      </div>
+      <h4 style="margin:18px 0 6px;font-size:13px;">History</h4>
+      <table><thead><tr><th>When</th><th>Kind</th><th>Notes</th></tr></thead>
+      <tbody>${c.interactions.map(i => `<tr>
+        <td style="white-space:nowrap">${new Date(i.createdAt).toLocaleString()}</td>
+        <td><span class="badge">${i.kind}</span></td>
+        <td>${escapeHtml(i.bodyMd)}</td>
+      </tr>`).join("")}</tbody></table>
+      <div class="actions" style="margin-top:14px">
+        <button class="secondary" onclick='openCustomerForm(${JSON.stringify(c)})'>Edit</button>
+        <button class="secondary" onclick="document.getElementById('customerArea').innerHTML=''">Close</button>
+      </div>
+    </div>`;
+}
+async function logInteraction(customerId) {
+  const kind = document.getElementById("ci_kind").value;
+  const bodyMd = document.getElementById("ci_body").value.trim();
+  if (!bodyMd) return;
+  await api(`/customers/${customerId}/interactions`, { method: "POST", body: JSON.stringify({ kind, bodyMd }) });
+  openCustomer(customerId);
+}
+
+// ---------- Maintenance ----------
+async function renderMaintenance() {
+  const { models } = await api("/models");
+  const opts = models.map(m => `<option value="${m.slug}">${escapeHtml(m.make || 'Toyota')} ${escapeHtml(m.name)}</option>`).join("");
+  document.getElementById("main").innerHTML = `
+    <div class="edit-form">
+      <h3 style="margin-top:0">Maintenance cost projection</h3>
+      <div class="grid">
+        <label>Model<select id="mt_model">${opts}</select></label>
+        <label>Starting km<input id="mt_start" type="number" value="0"></label>
+        <label>Target km<input id="mt_target" type="number" value="200000"></label>
+        <label>Labour rate $/hr<input id="mt_rate" type="number" value="180"></label>
+      </div>
+      <div class="actions">
+        <button class="primary" onclick="projectMaintenance()">Project</button>
+      </div>
+      <div id="mtOut"></div>
+    </div>`;
+}
+async function projectMaintenance() {
+  const r = await api("/maintenance/project", { method: "POST", body: JSON.stringify({
+    modelSlug: document.getElementById("mt_model").value,
+    startingKm: Number(document.getElementById("mt_start").value || 0),
+    targetKm: Number(document.getElementById("mt_target").value),
+    labourRateCad: Number(document.getElementById("mt_rate").value || 180),
+  })});
+  const fmt = (n) => "$" + Number(n).toLocaleString("en-CA", { minimumFractionDigits: 2 });
+  document.getElementById("mtOut").innerHTML = `
+    <div style="margin-top:16px">
+      <div style="display:flex;gap:18px;margin-bottom:14px;">
+        <div><span style="color:var(--muted);font-size:11px;text-transform:uppercase">Visits</span><div style="font-size:22px;font-weight:700">${r.totals.visits}</div></div>
+        <div><span style="color:var(--muted);font-size:11px;text-transform:uppercase">Parts</span><div style="font-size:22px;font-weight:700">${fmt(r.totals.parts)}</div></div>
+        <div><span style="color:var(--muted);font-size:11px;text-transform:uppercase">Labour</span><div style="font-size:22px;font-weight:700">${fmt(r.totals.labour)}</div></div>
+        <div><span style="color:var(--muted);font-size:11px;text-transform:uppercase">Total</span><div style="font-size:22px;font-weight:700;color:var(--accent)">${fmt(r.totals.total)}</div></div>
+      </div>
+      <table>
+        <thead><tr><th>At km</th><th>Interval</th><th>Services</th><th>Parts</th><th>Labour</th></tr></thead>
+        <tbody>${r.lineItems.map(li => `<tr>
+          <td>${li.km.toLocaleString("en-CA")}</td>
+          <td>${li.intervalKm.toLocaleString("en-CA")} km</td>
+          <td>${escapeHtml(li.services.join(", "))}</td>
+          <td>${fmt(li.partsCost)}</td>
+          <td>${fmt(li.labourCost)}</td>
+        </tr>`).join("")}</tbody>
+      </table>
+    </div>`;
 }
 
 // ---------- Scraper ----------

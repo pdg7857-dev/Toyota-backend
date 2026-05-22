@@ -70,6 +70,43 @@ enum ConversationRole {
   ASSISTANT
 }
 
+enum FinancePromoKind {
+  FINANCE
+  LEASE
+}
+
+enum IncentiveKind {
+  LOYALTY
+  CONQUEST
+  CASH_REBATE
+  FINANCE_RATE
+  LEASE_RATE
+  STUDENT_GRAD
+  MILITARY
+  FIRST_RESPONDER
+  OTHER
+}
+
+enum CustomerStatus {
+  LEAD
+  TEST_DRIVE_BOOKED
+  QUOTED
+  NEGOTIATING
+  SOLD
+  LOST
+  FOLLOW_UP
+}
+
+enum CustomerInteractionKind {
+  CALL
+  EMAIL
+  TEXT
+  IN_PERSON
+  TEST_DRIVE
+  QUOTE_SENT
+  NOTE
+}
+
 model Model {
   id         Int      @id @default(autoincrement())
   slug       String   @unique
@@ -117,6 +154,9 @@ model Trim {
   slug            String   @unique
   msrpCad         Decimal  @map("msrp_cad") @db.Decimal(10, 2)
   notesMd         String?  @map("notes_md")
+  towRatingLbs    Int?     @map("tow_rating_lbs")
+  payloadLbs      Int?     @map("payload_lbs")
+  gvwrLbs         Int?     @map("gvwr_lbs")
   previousTrimId  Int?     @unique @map("previous_trim_id")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
@@ -127,6 +167,9 @@ model Trim {
   nextTrim        Trim?       @relation("TrimLineage")
   fees            Fee[]
   colors          TrimColor[]
+  options         TrimOption[]
+  promos          FinancePromo[]
+  customers       Customer[]
 
   @@unique([modelId, year, name, powertrainId])
   @@index([year])
@@ -288,6 +331,131 @@ model ConversationMessage {
 
   @@index([conversationId])
   @@map("conversation_messages")
+}
+
+model OptionPackage {
+  id           Int          @id @default(autoincrement())
+  slug         String       @unique
+  name         String
+  descriptionMd String?     @map("description_md")
+  featuresJson Json?        @map("features_json")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  trimOptions  TrimOption[]
+
+  @@map("option_packages")
+}
+
+model TrimOption {
+  id              Int           @id @default(autoincrement())
+  trimId          Int           @map("trim_id")
+  optionPackageId Int           @map("option_package_id")
+  priceCad        Decimal?      @map("price_cad") @db.Decimal(10, 2)
+  available       Boolean       @default(true)
+  required        Boolean       @default(false)
+  notesMd         String?       @map("notes_md")
+
+  trim            Trim          @relation(fields: [trimId], references: [id], onDelete: Cascade)
+  optionPackage   OptionPackage @relation(fields: [optionPackageId], references: [id], onDelete: Cascade)
+
+  @@unique([trimId, optionPackageId])
+  @@index([trimId])
+  @@index([optionPackageId])
+  @@map("trim_options")
+}
+
+model FinancePromo {
+  id                 Int              @id @default(autoincrement())
+  trimId             Int?             @map("trim_id")
+  modelSlug          String?          @map("model_slug")
+  kind               FinancePromoKind
+  termMonths         Int              @map("term_months")
+  aprPercent         Decimal?         @map("apr_percent") @db.Decimal(5, 3)
+  moneyFactor        Decimal?         @map("money_factor") @db.Decimal(7, 5)
+  residualPercent    Decimal?         @map("residual_percent") @db.Decimal(5, 2)
+  effectiveFrom      DateTime         @map("effective_from") @db.Date
+  effectiveTo        DateTime?        @map("effective_to") @db.Date
+  notesMd            String?          @map("notes_md")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+
+  trim               Trim?            @relation(fields: [trimId], references: [id], onDelete: Cascade)
+
+  @@index([trimId])
+  @@index([modelSlug])
+  @@index([effectiveFrom, effectiveTo])
+  @@map("finance_promos")
+}
+
+model Incentive {
+  id              Int           @id @default(autoincrement())
+  slug            String        @unique
+  name            String
+  kind            IncentiveKind
+  amountCad       Decimal?      @map("amount_cad") @db.Decimal(10, 2)
+  stackable       Boolean       @default(true)
+  eligibleMakes   String[]      @map("eligible_makes")
+  eligibleSlugs   String[]      @map("eligible_slugs")
+  eligibleYears   Int[]         @map("eligible_years")
+  effectiveFrom   DateTime      @map("effective_from") @db.Date
+  effectiveTo     DateTime?     @map("effective_to") @db.Date
+  notesMd         String?       @map("notes_md")
+  active          Boolean       @default(true)
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  @@index([effectiveFrom, effectiveTo])
+  @@index([active])
+  @@map("incentives")
+}
+
+model MaintenanceInterval {
+  id              Int       @id @default(autoincrement())
+  modelSlug       String?   @map("model_slug")
+  powertrainType  String?   @map("powertrain_type")
+  intervalKm      Int       @map("interval_km")
+  servicesJson    Json      @map("services_json")
+  partsCostCad    Decimal?  @map("parts_cost_cad") @db.Decimal(10, 2)
+  labourMinutes   Int?      @map("labour_minutes")
+  notesMd         String?   @map("notes_md")
+
+  @@index([modelSlug, intervalKm])
+  @@map("maintenance_intervals")
+}
+
+model Customer {
+  id              Int        @id @default(autoincrement())
+  name            String
+  email           String?
+  phone           String?
+  status          CustomerStatus @default(LEAD)
+  vehicleOfInterestTrimId Int? @map("vehicle_of_interest_trim_id")
+  followUpDate    DateTime?  @map("follow_up_date") @db.Date
+  budgetCad       Decimal?   @map("budget_cad") @db.Decimal(10, 2)
+  notesMd         String?    @map("notes_md")
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  vehicleOfInterest Trim?    @relation(fields: [vehicleOfInterestTrimId], references: [id], onDelete: SetNull)
+  interactions    CustomerInteraction[]
+
+  @@index([status])
+  @@index([followUpDate])
+  @@map("customers")
+}
+
+model CustomerInteraction {
+  id          Int                       @id @default(autoincrement())
+  customerId  Int                       @map("customer_id")
+  kind        CustomerInteractionKind
+  bodyMd      String                    @map("body_md")
+  createdAt   DateTime                  @default(now()) @map("created_at")
+
+  customer    Customer                  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("customer_interactions")
 }
 
 // Single-row table used to invalidate the AI prompt cache when the catalog changes.

@@ -38,8 +38,11 @@ npm run dev
 - `GET /models` (optional `?year=2026`, `?make=Toyota|Lexus`)
 - `GET /models/:slug`
 - `GET /trims` (filters: `?model=`, `?make=Toyota|Lexus`, `?year=`, `?powertrain=GAS|HYBRID|PHEV|BEV`, `?maxPrice=`)
-- `GET /trims/:slug` — includes color availability for the trim
+- `GET /trims/:slug` — includes color availability + tow/payload for the trim
 - `GET /trims/:slug/quote` — out-the-door price with HST breakdown. Optional `?color=<slug>` adds the configured premium for that color.
+- `GET /trims/:slug/quote.html` — printable customer-facing quote with auto-attached promo payments + eligible incentives. Optional `?color=&down=`.
+- `GET /trims/:slug/quote.pdf` — same content rendered to PDF via Playwright.
+- `GET /walkaround/:slug` — trim-specific walk-around talking points (rep_notes tagged "walkaround") plus model notes.
 - `GET /powertrains`
 - `GET /warranties` (filters: `?model=`, `?year=`)
 - `GET /finance-products` (filter: `?category=EXTENDED_WARRANTY|TIRE_RIM|...`)
@@ -52,8 +55,23 @@ npm run dev
 - `POST /search` — filter by `make`, `year`, `bodyStyles[]`, `segments[]`, `powertrains[]`, `drivetrainContains`, `colorSlugs[]` (returns trims that have any of those colors available), `minHp/maxHp`, `maxComboL100`, `minElectricRangeKm`, `maxMsrpCad`, `maxTotalCad` (after HST), `hybridOnly`, `awdOnly`. Sort by `msrp | total | fuel_economy | horsepower | electric_range`.
 
 ### Payments
-- `POST /payments/finance` — body `{ trimSlug?, amountFinancedCad?, aprPercent, termMonths, downPaymentCad?, tradeEquityCad?, includeFeesAndHst? }`. With `trimSlug`, the OTD (incl. HST) is computed and used as the financed amount unless overridden. Returns monthly before-tax + tax-in, total interest, total paid.
-- `POST /payments/lease` — body `{ trimSlug?, msrpCad?, capCostCad?, residualPercent, moneyFactor, termMonths, downPaymentCad?, tradeEquityCad?, acquisitionFeeCad? }`. With `trimSlug`, MSRP and pre-tax cap cost (MSRP + all fees) are auto-populated. Returns adjusted cap cost, residual value, depreciation/mo, rent charge/mo, base monthly, HST in, effective APR.
+- `POST /payments/finance` — `{ trimSlug?, amountFinancedCad?, aprPercent?, termMonths, downPaymentCad?, tradeEquityCad?, usePromoRate? }`. With `trimSlug` and no `aprPercent`, the active promo APR for that model+term is auto-applied (set `usePromoRate: false` to opt out). Returns monthly before-tax + tax-in, total interest, total paid, and `promoUsed` if a promo matched.
+- `POST /payments/lease` — `{ trimSlug?, msrpCad?, capCostCad?, residualPercent?, moneyFactor?, termMonths, downPaymentCad?, tradeEquityCad?, acquisitionFeeCad?, usePromoRate? }`. With `trimSlug` and no residual/MF, the active promo lease terms auto-fill. Returns full breakdown + `promoUsed`.
+
+### Promos, incentives, options
+- `GET /promos` — list active finance/lease promos (filters: `?modelSlug=`, `?kind=FINANCE|LEASE`, `?activeOnly=false` to see expired). Full CRUD.
+- `GET /incentives` — list active incentives (loyalty, conquest, iZEV, student grad, military, first responder, etc.). Full CRUD.
+- `GET /incentives/for-trim/:slug` — eligible stackable + non-stackable incentives for a specific trim, with max stackable total computed.
+- `GET /options` / `GET /options/trim/:trimId` — option-package catalog and per-trim availability. `PUT /options/trim` to upsert.
+
+### Maintenance projection
+- `GET /maintenance` — list seeded service intervals.
+- `POST /maintenance/project` — `{ modelSlug?, startingKm, targetKm, labourRateCad }`. Returns per-visit line items + totals (parts + labour + grand total + number of visits) — used in total-cost-of-ownership pitches vs Germans.
+
+### Customer / lead tracking
+- `GET /customers` — list (filters: `?status=`, `?dueOnly=true` for follow-ups due today). Full CRUD.
+- `GET /customers/:id` — detail with full interaction history.
+- `POST /customers/:id/interactions` — log a call/email/test-drive/quote-sent/note against a customer.
 
 ### Comparison
 - `POST /compare` — body `{ "trimSlugs": [...] }` (2–6 trims). Returns each trim's specs, quote (with HST), and the warranty rows that apply to each model-year.
@@ -122,12 +140,14 @@ curl -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
 
 Open `http://localhost:3000/admin` in a browser. Paste your API token (it's stored in localStorage). Tabs:
 
-- **AI Q&A** — multi-turn conversations with the catalog (Toyota + Lexus). Sidebar lists prior conversations; click to resume. Each reply records token usage (cached vs uncached) and citations. Color availability is included in the context block when a model is in scope.
+- **AI Q&A** — multi-turn conversations with the catalog (Toyota + Lexus). Sidebar lists prior conversations; click to resume. Color availability included in context.
 - **Search** — budget+needs filter: make, max OTD, hybrid/AWD only, body style, fuel economy, electric range, horsepower, available colors. Sortable results.
-- **Compare** — pick 2–4 trims, see a side-by-side spec + price + warranty table.
-- **Payments** — finance and lease calculators side by side. Pick a trim, enter APR/term/down payment or residual/money factor, get the Ontario tax-in monthly payment.
-- **Models / Trims / Powertrains / Warranties / F&I Products / Colors / Rep Notes** — list and edit. Trims tab includes a "fees" button to upsert the per-trim fee schedule. Colors tab includes a per-trim availability matrix (check the box, set premium upcharge, save per row).
-- **Scraper** — trigger toyota.ca scrape, review field-level diffs against the live catalog, accept/reject each one before applying.
+- **Compare** — pick 2–4 trims, side-by-side spec + price + warranty.
+- **Payments** — finance and lease calculators. Pick a trim, get the Ontario tax-in monthly payment. Auto-applies the current promo rate from the Promos tab.
+- **Customers** — lead tracker. List view shows status, vehicle of interest, follow-up date (overdue rows highlighted). Open a customer to log call/email/test-drive interactions.
+- **Models / Trims / Options / Powertrains / Warranties / F&I Products / Promos / Incentives / Colors / Rep Notes** — list and edit. Trims tab has "fees" (Ontario fee schedule) and "quote" (opens the printable HTML quote in a new tab) buttons per row. Colors and Options both have per-trim availability matrices.
+- **Maintenance** — pick a model, set starting/target km and labour rate. Get a per-visit breakdown of expected service costs from intervals seeded from the Toyota Express Maintenance schedule.
+- **Scraper** — trigger toyota.ca scrape, review field-level diffs, accept/reject each before applying.
 
 ## Seed data accuracy
 
