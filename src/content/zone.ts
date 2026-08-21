@@ -20,6 +20,11 @@ export interface SpawnPoint {
   guardOf?: string;
 }
 
+export interface VendorPlacement {
+  vendorId: string;
+  pos: Vec2;
+}
+
 export interface ZoneDef {
   id: string;
   name: string;
@@ -27,6 +32,12 @@ export interface ZoneDef {
   halfSize: number;
   playerStart: Vec2;
   spawns: SpawnPoint[];
+  /**
+   * Traders. Placed clear of every camp's aggro radius — a vendor you have to
+   * fight your way to and then get pulled off is not a shop, and a test
+   * enforces the clearance.
+   */
+  vendors: VendorPlacement[];
 }
 
 /**
@@ -118,6 +129,12 @@ export const FENMARCH: ZoneDef = {
     // nothing else on the screen.
     { mobId: 'old_scar', pos: { x: 0, z: -118 } },
   ],
+  vendors: [
+    // At the standing stones, where you start and where you come back to.
+    { vendorId: 'maeve', pos: { x: 0, z: 96 } },
+    // Off the road east of the outlaw watch, for the second half of the zone.
+    { vendorId: 'bryn', pos: { x: 52, z: -30 } },
+  ],
 };
 
 export interface ClassDef {
@@ -160,31 +177,37 @@ export const CLASSES: Record<ClassId, ClassDef> = {
   ranger: {
     id: 'ranger',
     name: 'Ranger',
-    description: 'Kills at range before it reaches you. Not yet implemented.',
-    playstyle: 'Dexterity · ranged',
-    implemented: false,
-    baseAttributes: { strength: 5, dexterity: 9, focus: 4, vitality: 5 },
-    startingWeapon: 'rusted_blade',
+    description:
+      'Kills at range before it reaches you. Trades armour for distance and ' +
+      'the longest reach of any class.',
+    playstyle: 'Dexterity · ranged · steady pressure',
+    implemented: true,
+    baseAttributes: { strength: 5, dexterity: 9, focus: 4, vitality: 6 },
+    startingWeapon: 'frayed_shortbow',
     color: 0x7ab87a,
   },
   rogue: {
     id: 'rogue',
     name: 'Rogue',
-    description: 'Bursts a target down fast. Not yet implemented.',
-    playstyle: 'Dexterity · melee burst',
-    implemented: false,
-    baseAttributes: { strength: 6, dexterity: 10, focus: 3, vitality: 4 },
-    startingWeapon: 'rusted_blade',
+    description:
+      'Bursts a target down before it can answer. Fast blades, thin margins, ' +
+      'and the best evasion in the game when it matters.',
+    playstyle: 'Dexterity · melee · burst',
+    implemented: true,
+    baseAttributes: { strength: 6, dexterity: 10, focus: 3, vitality: 5 },
+    startingWeapon: 'chipped_dirk',
     color: 0x9a7ab8,
   },
   mage: {
     id: 'mage',
     name: 'Mage',
-    description: 'Heavy elemental damage, fragile. Not yet implemented.',
-    playstyle: 'Focus · caster burst',
-    implemented: false,
-    baseAttributes: { strength: 2, dexterity: 4, focus: 12, vitality: 4 },
-    startingWeapon: 'rusted_blade',
+    description:
+      'The heaviest damage in the game and the least health to survive a ' +
+      'mistake. Kill it before it reaches you.',
+    playstyle: 'Focus · caster · burst',
+    implemented: true,
+    baseAttributes: { strength: 2, dexterity: 4, focus: 12, vitality: 5 },
+    startingWeapon: 'cracked_wand',
     color: 0x7a9ad9,
   },
 };

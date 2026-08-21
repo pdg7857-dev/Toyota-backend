@@ -27,6 +27,7 @@ Add `?fresh` to the URL to discard your save and start over.
 | `1`–`7` | Skills |
 | `T` | Toggle auto-attack |
 | `F` | Loot a nearby corpse |
+| `E` | Trade with a nearby vendor |
 | `C` / `I` | Character / Inventory |
 | `Esc` | Clear target |
 
@@ -61,12 +62,16 @@ Grey mobs give almost nothing, so pushing south is the only way forward.
 Pick one on first launch. Add `?fresh` to the URL to re-choose, or
 `?class=priest` to skip the screen.
 
-**Warrior** — Strength, melee, durable. Strike, Rend, Rally, Bulwark, Sunder,
-**Bash** (interrupt, lv12), Onslaught.
+| Class | Scales off | Plays like |
+|---|---|---|
+| **Warrior** | Strength | Melee, durable, steady damage |
+| **Priest** | Focus | Ranged, sustains through damage, best interrupt |
+| **Ranger** | Dexterity | Longest reach in the game, steady pressure |
+| **Rogue** | Dexterity | Fast blades, burst, strong evasion |
+| **Mage** | Focus | Heaviest damage, least health |
 
-**Priest** — Focus, caster, sustain. Smite, Mend Wounds, Searing Word,
-**Rebuke** (interrupt, lv7 — longer range and a longer lockout than Bash),
-Spirit Shield, Judgement. Kills more slowly than the Warrior and survives more.
+Every class gets an interrupt and a way to survive a spike. Weapon ladders are
+held in DPS parity tier for tier, so the differences are in *feel*, not power.
 
 Weapons are class-locked — a Priest cannot swing a greatsword — but armour and
 rings are shared. **Each boss drops a guaranteed epic weapon matched to whoever
@@ -83,6 +88,11 @@ only escaped. Heals and summons *can* be interrupted, and should be — let
 Cadfael finish binding his wounds and you will be there a while. A missed
 interrupt still burns its cooldown.
 
+**Vendors close the economy.** Maeve trades at the standing stones, Bryn off
+the road further south. They pay full value for merchant goods and a quarter for
+gear, sell at 4x, and never stock above uncommon — a gold sink and a safety net,
+not a shortcut past the grind.
+
 **Loot gets better, not more frequent.** Gold and merchant goods scale steeply
 with difficulty and are the reliable income. Equipment stays rare at every tier
 — what improves is the quality of what drops. Epics come only from bosses.
@@ -93,19 +103,19 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 - Tab-target combat: swing timers, hit/crit rolls, armour mitigation, level-gap
   scaling, global cooldown
 - Two playable classes with separate skill trees, weapon ladders and identities
-- 13 skills across the two classes — instant, cast-time, damage-over-time,
+- 31 skills across five classes — instant, cast-time, damage-over-time,
   heal, buff and interrupt — unlocking across the whole 1–25 band
 - Mob abilities: telegraphed dodgeable AoEs, interruptible heals and summons,
   enrage thresholds, adds that despawn with their summoner and drop no loot
 - Mob AI: aggro radius, threat tables, chase, leash-and-heal, respawn timers
-- 12 mob types across ★1–★6, 41 items, 12 loot tables, class-aware boss drops
+- 12 mob types across ★1–★6, 65 items, 12 loot tables, class-aware boss drops
 - Levelling to 25, spendable attribute points, skill unlocks
 - Death and respawn, save/load via full world serialization
 
 ## Development
 
 ```bash
-npm run verify     # typecheck + 83 unit and balance tests
+npm run verify     # typecheck + 104 unit and balance tests
 npm run smoke      # plays the game in real Chromium, writes screenshots/
 ```
 

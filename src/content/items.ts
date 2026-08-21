@@ -1,4 +1,4 @@
-import type { ItemDef, ItemQuality } from '../sim/types.js';
+import type { Attributes, ClassId, DamageType, ItemDef, ItemQuality } from '../sim/types.js';
 
 /**
  * Item registry. Data only — no behaviour. Adding gear should never require
@@ -380,6 +380,132 @@ export const ITEMS: Record<string, ItemDef> = {
   chieftains_seal: { id: 'chieftains_seal', name: "Chieftain's Seal", slot: null, quality: 'rare', value: 900, stackable: true, merchantGood: true },
   ancient_bear_skull: { id: 'ancient_bear_skull', name: 'Ancient Bear Skull', slot: null, quality: 'epic', value: 2200, stackable: true, merchantGood: true },
 };
+
+
+// === GENERATED WEAPON LADDERS ============================================
+//
+// Warrior and Priest ladders above are hand-written and are the reference.
+// The remaining three classes are generated against the same per-tier DPS
+// budget so no class can silently end up ahead of the others: only the
+// *feel* differs (a Rogue swings fast for little, a Ranger slowly from
+// range), never the throughput. A test asserts the parity holds.
+
+/** Per-tier DPS budget, read off the hand-tuned Warrior and Priest ladders. */
+const WEAPON_TIERS: Array<{
+  dps: number;
+  quality: ItemQuality;
+  value: number;
+}> = [
+  { dps: 2.2, quality: 'common', value: 4 },
+  { dps: 5.1, quality: 'common', value: 18 },
+  { dps: 7.9, quality: 'uncommon', value: 55 },
+  { dps: 12.3, quality: 'uncommon', value: 120 },
+  { dps: 18.4, quality: 'rare', value: 260 },
+  { dps: 22.1, quality: 'rare', value: 380 },
+  { dps: 28.5, quality: 'epic', value: 900 },
+  { dps: 36.9, quality: 'epic', value: 1800 },
+];
+
+interface WeaponArchetype {
+  classId: ClassId;
+  /** Attribute the class scales off; weapons grant it. */
+  primary: keyof Attributes;
+  swingMs: number;
+  attackRange: number;
+  damageType: DamageType;
+  /** Ids and display names, tier 1 to tier 8. */
+  entries: Array<[id: string, name: string]>;
+}
+
+const ARCHETYPES: WeaponArchetype[] = [
+  {
+    classId: 'ranger',
+    primary: 'dexterity',
+    swingMs: 2400,
+    attackRange: 12,
+    damageType: 'physical',
+    entries: [
+      ['frayed_shortbow', 'Frayed Shortbow'],
+      ['hunters_bow', "Hunter's Bow"],
+      ['yew_longbow', 'Yew Longbow'],
+      ['rangers_recurve', "Ranger's Recurve"],
+      ['outlaw_crossbow', 'Outlaw Crossbow'],
+      ['fenstalker_bow', 'Fenstalker Bow'],
+      ['cadfaels_hunting_bow', "Cadfael's Hunting Bow"],
+      ['scarred_longbow', 'Scarred Longbow'],
+    ],
+  },
+  {
+    classId: 'rogue',
+    primary: 'dexterity',
+    swingMs: 1400,
+    attackRange: 2.3,
+    damageType: 'physical',
+    entries: [
+      ['chipped_dirk', 'Chipped Dirk'],
+      ['bronze_dagger', 'Bronze Dagger'],
+      ['poachers_knife', "Poacher's Knife"],
+      ['twin_fangs', 'Twin Fangs'],
+      ['outlaw_stiletto', 'Outlaw Stiletto'],
+      ['fenblade', 'Fenblade'],
+      ['cadfaels_skinning_knife', "Cadfael's Skinning Knife"],
+      ['scarred_kris', 'Scarred Kris'],
+    ],
+  },
+  {
+    classId: 'mage',
+    primary: 'focus',
+    swingMs: 2000,
+    attackRange: 10,
+    damageType: 'fire',
+    entries: [
+      ['cracked_wand', 'Cracked Wand'],
+      ['rowan_wand', 'Rowan Wand'],
+      ['emberwood_rod', 'Emberwood Rod'],
+      ['stormcaller_rod', 'Stormcaller Rod'],
+      ['outlaws_focus', "Outlaw's Focus"],
+      ['fenlight_rod', 'Fenlight Rod'],
+      ['cadfaels_talisman', "Cadfael's Talisman"],
+      ['scarred_heartwood', 'Scarred Heartwood'],
+    ],
+  },
+];
+
+/** Attribute points a weapon of this tier grants, matching the hand-built ladders. */
+const TIER_PRIMARY_BONUS = [0, 2, 4, 7, 10, 13, 17, 22];
+const TIER_VITALITY_BONUS = [0, 0, 2, 3, 5, 6, 9, 12];
+
+function buildWeaponLadders(): Record<string, ItemDef> {
+  const out: Record<string, ItemDef> = {};
+  for (const arch of ARCHETYPES) {
+    arch.entries.forEach(([id, name], i) => {
+      const tier = WEAPON_TIERS[i]!;
+      // Convert the tier's DPS budget into a damage range for this swing speed.
+      const avg = (tier.dps * arch.swingMs) / 1000;
+      const attributes: Partial<Attributes> = {};
+      if (TIER_PRIMARY_BONUS[i]!) attributes[arch.primary] = TIER_PRIMARY_BONUS[i]!;
+      if (TIER_VITALITY_BONUS[i]!) attributes.vitality = TIER_VITALITY_BONUS[i]!;
+
+      out[id] = {
+        id,
+        name,
+        slot: 'weapon',
+        quality: tier.quality,
+        classes: [arch.classId],
+        value: tier.value,
+        damageMin: Math.round(avg * 0.78),
+        damageMax: Math.round(avg * 1.22),
+        damageType: arch.damageType,
+        swingMs: arch.swingMs,
+        attackRange: arch.attackRange,
+        ...(Object.keys(attributes).length ? { attributes } : {}),
+      };
+    });
+  }
+  return out;
+}
+
+Object.assign(ITEMS, buildWeaponLadders());
 
 export function getItem(id: string): ItemDef {
   const item = ITEMS[id];

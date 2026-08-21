@@ -135,6 +135,9 @@ export const LOOT_TABLES: Record<string, LootTable> = {
     classWeapons: {
       warrior: 'cadfaels_cleaver',
       priest: 'chieftains_reliquary',
+      ranger: 'cadfaels_hunting_bow',
+      rogue: 'cadfaels_skinning_knife',
+      mage: 'cadfaels_talisman',
     },
     entries: [
       { itemId: 'chieftains_seal', chance: 1, min: 1, max: 1 },
@@ -149,6 +152,9 @@ export const LOOT_TABLES: Record<string, LootTable> = {
     classWeapons: {
       warrior: 'scarred_fang',
       priest: 'bonecarved_stave',
+      ranger: 'scarred_longbow',
+      rogue: 'scarred_kris',
+      mage: 'scarred_heartwood',
     },
     entries: [
       { itemId: 'ancient_bear_skull', chance: 1, min: 1, max: 1 },
@@ -280,7 +286,7 @@ export const MOBS: Record<string, MobDef> = {
     level: 1,
     stars: 1,
     attributes: { strength: 2, dexterity: 5, focus: 1, vitality: 2 },
-    baseHealth: 60,
+    baseHealth: 78,
     damageMin: 2,
     damageMax: 4,
     damageType: 'physical',

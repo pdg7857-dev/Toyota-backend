@@ -6,6 +6,9 @@ import type { SceneRig } from './scene.js';
 
 const LOOT_RANGE = 4.5;
 
+/** Must match VENDOR_RANGE in the sim, or the UI offers trades it will refuse. */
+const VENDOR_RANGE = 5.5;
+
 /**
  * Translates raw browser input into sim Commands. Nothing here touches world
  * state — it only ever calls `emit`.
@@ -66,6 +69,9 @@ export class InputController {
       case 'KeyF':
         this.lootNearest();
         break;
+      case 'KeyE':
+        this.talkToNearestVendor();
+        break;
       case 'KeyC':
         this.hud.toggleCharacter();
         break;
@@ -73,7 +79,9 @@ export class InputController {
         this.hud.toggleInventory();
         break;
       case 'Escape':
-        this.emit({ t: 'target', id: null });
+        // Close the shop first — Esc should back out one layer at a time.
+        if (this.hud.vendorOpen) this.hud.closeVendor();
+        else this.emit({ t: 'target', id: null });
         break;
     }
   }
@@ -94,9 +102,14 @@ export class InputController {
     for (const hit of hits) {
       const id = hit.object.userData.entityId as EntityId | undefined;
       if (id === undefined || id === this.world.playerId) continue;
+      const entity = this.world.entity(id);
+
+      if (entity?.kind === 'vendor') {
+        this.hud.openVendor(id);
+        return;
+      }
       this.emit({ t: 'target', id });
       // Clicking a corpse in range loots it — one less keypress in the common case.
-      const entity = this.world.entity(id);
       if (entity?.dead) this.lootNearest();
       else this.emit({ t: 'autoAttack', on: true });
       return;
@@ -131,6 +144,26 @@ export class InputController {
     const currentIdx = candidates.findIndex((c) => c.e.id === player.targetId);
     this.tabIndex = currentIdx >= 0 ? (currentIdx + 1) % candidates.length : 0;
     this.emit({ t: 'target', id: candidates[this.tabIndex]!.e.id });
+  }
+
+  /** Open the shop for the closest trader in reach. */
+  private talkToNearestVendor(): void {
+    if (this.hud.vendorOpen) {
+      this.hud.closeVendor();
+      return;
+    }
+    const player = this.world.player;
+    let best: EntityId | null = null;
+    let bestDist = VENDOR_RANGE;
+    for (const e of this.world.entities.values()) {
+      if (e.kind !== 'vendor') continue;
+      const d = Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z);
+      if (d <= bestDist) {
+        bestDist = d;
+        best = e.id;
+      }
+    }
+    if (best !== null) this.hud.openVendor(best);
   }
 
   private lootNearest(): void {

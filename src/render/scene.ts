@@ -88,6 +88,10 @@ export class SceneRig {
       // Wide enough to keep the whole telegraph circle readable.
       out.push({ x: spawn.pos.x, z: spawn.pos.z, r: 18 });
     }
+    // Traders need room to stand in and be walked up to.
+    for (const vendor of zone.vendors ?? []) {
+      out.push({ x: vendor.pos.x, z: vendor.pos.z, r: 9 });
+    }
     return out;
   }
 

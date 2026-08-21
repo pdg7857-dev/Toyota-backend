@@ -49,10 +49,14 @@ import type {
 import { canEquip, getItem } from '../content/items.js';
 import { getLootTable, getMob } from '../content/mobs.js';
 import { getSkill, skillsForClass } from '../content/skills.js';
+import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
 import { CLASSES, type ZoneDef } from '../content/zone.js';
 
 /** Distance within which a corpse can be looted. */
 const LOOT_RANGE = 4.5;
+
+/** Distance within which a player can trade with a vendor. */
+const VENDOR_RANGE = 5.5;
 
 /** Time since last damage dealt/taken that still counts as "in combat". */
 const COMBAT_TIMEOUT_MS = 6000;
@@ -85,6 +89,7 @@ export class World {
     this.rng = new Rng(opts.seed);
     this.spawnPlayer(opts.classId, opts.playerName ?? 'Wanderer');
     for (const sp of this.zone.spawns) this.spawnMob(sp.mobId, sp.pos);
+    for (const v of this.zone.vendors ?? []) this.spawnVendor(v.vendorId, v.pos);
   }
 
   // ------------------------------------------------------------------ setup
@@ -159,6 +164,35 @@ export class World {
     this.entities.set(id, mob);
     mob.health = this.statsOf(mob).maxHealth;
     return mob;
+  }
+
+  /**
+   * A trader. Inert by design: no AI, no threat, cannot be damaged. It exists
+   * so the economy has a counterparty.
+   */
+  private spawnVendor(vendorId: string, pos: Vec2): Entity {
+    const def = getVendor(vendorId);
+    const id = this.nextId++;
+    const vendor: Entity = {
+      id,
+      kind: 'vendor',
+      name: def.name,
+      level: 0,
+      pos: { ...pos },
+      facing: Math.PI,
+      health: 1,
+      energy: 1,
+      dead: false,
+      respawnInMs: 0,
+      targetId: null,
+      autoAttack: false,
+      swingCooldownMs: 0,
+      effects: [],
+      cast: null,
+      vendorId,
+    };
+    this.entities.set(id, vendor);
+    return vendor;
   }
 
   // --------------------------------------------------------------- accessors
@@ -307,6 +341,12 @@ export class World {
           e.attributes[cmd.attr] += 1;
           e.unspentPoints = (e.unspentPoints ?? 0) - 1;
         }
+        break;
+      case 'sell':
+        this.trySell(e, cmd.vendorId, cmd.itemId, cmd.qty);
+        break;
+      case 'buy':
+        this.tryBuy(e, cmd.vendorId, cmd.itemId);
         break;
       case 'respawn':
         if (e.dead && e.kind === 'player') this.respawnPlayer(e);
@@ -653,7 +693,7 @@ export class World {
     const limit = this.zone.halfSize;
 
     for (const e of this.entities.values()) {
-      if (e.dead) continue;
+      if (e.dead || e.kind === 'vendor') continue;
       const stats = this.statsOf(e);
 
       if (e.kind === 'player') {
@@ -734,7 +774,7 @@ export class World {
   private tickRegen(): void {
     const dt = TICK_MS / 1000;
     for (const e of this.entities.values()) {
-      if (e.dead) continue;
+      if (e.dead || e.kind === 'vendor') continue;
       const stats = this.statsOf(e);
       const combat = this.inCombat(e.id);
       e.health = Math.min(stats.maxHealth, e.health + healthRegenPerSec(stats, combat) * dt);
@@ -786,6 +826,8 @@ export class World {
     abilityId: string | null,
   ): void {
     if (target.dead) return;
+    // Traders are scenery with a shop attached, not combatants.
+    if (target.kind === 'vendor') return;
     target.health -= amount;
     this.events.push({
       t: 'damage',
@@ -1146,6 +1188,55 @@ export class World {
     corpse.corpseLoot = [];
     corpse.corpseGold = 0;
     this.events.push({ t: 'lootGained', entityId: player.id, items, gold });
+  }
+
+  // ------------------------------------------------------------------ trade
+
+  /** Resolve a vendor the player is standing close enough to deal with. */
+  private vendorInReach(player: Entity, vendorId: EntityId): Entity | null {
+    const vendor = this.entities.get(vendorId);
+    if (!vendor || vendor.kind !== 'vendor') return null;
+    if (dist(player.pos.x, player.pos.z, vendor.pos.x, vendor.pos.z) > VENDOR_RANGE) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'Too far from the trader.' });
+      return null;
+    }
+    return vendor;
+  }
+
+  private trySell(player: Entity, vendorId: EntityId, itemId: string, qty: number): void {
+    if (player.kind !== 'player' || qty <= 0) return;
+    if (!this.vendorInReach(player, vendorId)) return;
+
+    const held = player.inventory?.find((s) => s.itemId === itemId);
+    if (!held) return;
+    // Sell what they actually have rather than rejecting an over-count.
+    const selling = Math.min(qty, held.qty);
+    if (!this.removeItem(player, itemId, selling)) return;
+
+    const gold = sellPrice(getItem(itemId)) * selling;
+    player.gold = (player.gold ?? 0) + gold;
+    this.events.push({ t: 'sold', entityId: player.id, itemId, qty: selling, gold });
+  }
+
+  private tryBuy(player: Entity, vendorId: EntityId, itemId: string): void {
+    if (player.kind !== 'player') return;
+    const vendor = this.vendorInReach(player, vendorId);
+    if (!vendor) return;
+
+    const def = getVendor(vendor.vendorId!);
+    if (!def.stock.includes(itemId)) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'That is not for sale.' });
+      return;
+    }
+    const item = getItem(itemId);
+    const price = buyPrice(item);
+    if ((player.gold ?? 0) < price) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'You cannot afford that.' });
+      return;
+    }
+    player.gold = (player.gold ?? 0) - price;
+    this.addItem(player, { itemId, qty: 1 });
+    this.events.push({ t: 'bought', entityId: player.id, itemId, gold: price });
   }
 
   addItem(player: Entity, stack: ItemStack): void {

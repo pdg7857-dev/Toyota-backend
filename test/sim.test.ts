@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { World } from '../src/sim/world.js';
 import { MAX_LEVEL, TICK_MS, xpToNext } from '../src/sim/formulas.js';
 import { FENMARCH } from '../src/content/zone.js';
-import { countEvents, duelZone, emptyZone, levelPlayer, simulateFight } from './helpers.js';
+import { countEvents, duelZone, emptyZone, levelPlayer, simulateFight, vendorZone } from './helpers.js';
+import { buyPrice, sellPrice } from '../src/content/vendors.js';
 import { skillBarFor, getSkill } from '../src/content/skills.js';
 import { canEquip, getItem } from '../src/content/items.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
@@ -718,4 +719,122 @@ describe('boss class weapons', () => {
       expect(canEquip(drop, classId)).toBe(true);
     });
   }
+});
+
+// --------------------------------------------------------------------------
+// Vendors. The counterparty that turns gold and merchant goods into decisions.
+// --------------------------------------------------------------------------
+
+describe('vendors', () => {
+  function shop(seed = 91, distance = 2) {
+    const world = new World({ seed, zone: vendorZone('maeve', distance), classId: 'warrior' });
+    const vendor = [...world.entities.values()].find((e) => e.kind === 'vendor')!;
+    return { world, player: world.player, vendor };
+  }
+
+  it('buys merchant goods at their full listed value', () => {
+    const { world, player, vendor } = shop();
+    world.addItem(player, { itemId: 'bear_claw', qty: 3 });
+    player.gold = 0;
+
+    world.submit(player.id, { t: 'sell', vendorId: vendor.id, itemId: 'bear_claw', qty: 3 });
+    const events = world.tick();
+
+    const sold = events.find((e) => e.t === 'sold');
+    expect(sold).toBeDefined();
+    expect(player.gold).toBe(getItem('bear_claw').value * 3);
+    expect(player.inventory?.some((s) => s.itemId === 'bear_claw')).toBe(false);
+  });
+
+  it('pays only a fraction for equipment', () => {
+    const { world, player, vendor } = shop();
+    world.addItem(player, { itemId: 'outlaw_mail', qty: 1 });
+    player.gold = 0;
+    world.submit(player.id, { t: 'sell', vendorId: vendor.id, itemId: 'outlaw_mail', qty: 1 });
+    world.tick();
+    expect(player.gold).toBe(sellPrice(getItem('outlaw_mail')));
+    expect(player.gold).toBeLessThan(getItem('outlaw_mail').value / 2);
+  });
+
+  it('sells only what the player actually holds', () => {
+    const { world, player, vendor } = shop();
+    world.addItem(player, { itemId: 'wolf_pelt', qty: 2 });
+    player.gold = 0;
+    world.submit(player.id, { t: 'sell', vendorId: vendor.id, itemId: 'wolf_pelt', qty: 99 });
+    world.tick();
+    expect(player.gold).toBe(getItem('wolf_pelt').value * 2);
+  });
+
+  it('sells stock for gold', () => {
+    const { world, player, vendor } = shop();
+    const price = buyPrice(getItem('bronze_shortsword'));
+    player.gold = price + 10;
+
+    world.submit(player.id, { t: 'buy', vendorId: vendor.id, itemId: 'bronze_shortsword' });
+    const events = world.tick();
+
+    expect(events.some((e) => e.t === 'bought')).toBe(true);
+    expect(player.gold).toBe(10);
+    expect(player.inventory?.some((s) => s.itemId === 'bronze_shortsword')).toBe(true);
+  });
+
+  it('refuses a purchase the player cannot afford', () => {
+    const { world, player, vendor } = shop();
+    player.gold = 1;
+    world.submit(player.id, { t: 'buy', vendorId: vendor.id, itemId: 'bronze_shortsword' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /afford/i.test(e.message))).toBe(true);
+    expect(player.gold).toBe(1);
+    expect(player.inventory?.length ?? 0).toBe(0);
+  });
+
+  it('refuses to sell something it does not stock', () => {
+    const { world, player, vendor } = shop();
+    player.gold = 999999;
+    world.submit(player.id, { t: 'buy', vendorId: vendor.id, itemId: 'scarred_fang' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /not for sale/i.test(e.message))).toBe(true);
+    expect(player.gold).toBe(999999);
+  });
+
+  it('refuses to trade from across the zone', () => {
+    const { world, player, vendor } = shop(92, 40);
+    world.addItem(player, { itemId: 'bear_claw', qty: 1 });
+    player.gold = 999999;
+
+    world.submit(player.id, { t: 'sell', vendorId: vendor.id, itemId: 'bear_claw', qty: 1 });
+    world.submit(player.id, { t: 'buy', vendorId: vendor.id, itemId: 'bronze_shortsword' });
+    const events = world.tick();
+
+    expect(events.filter((e) => e.t === 'error' && /too far/i.test(e.message))).toHaveLength(2);
+    expect(player.inventory?.some((s) => s.itemId === 'bear_claw')).toBe(true);
+    expect(player.gold).toBe(999999);
+  });
+
+  it('cannot be attacked', () => {
+    const { world, player, vendor } = shop();
+    world.submit(player.id, { t: 'target', id: vendor.id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+    const events = world.advance(8000);
+
+    expect(events.some((e) => e.t === 'damage' && e.targetId === vendor.id)).toBe(false);
+    expect(vendor.dead).toBe(false);
+  });
+
+  it('survives a save/load round trip', () => {
+    const { world, player, vendor } = shop();
+    world.addItem(player, { itemId: 'bear_claw', qty: 1 });
+    const restored = World.deserialize(world.serialize(), world.zone);
+    const restoredVendor = restored.entity(vendor.id);
+    expect(restoredVendor?.kind).toBe('vendor');
+    expect(restoredVendor?.vendorId).toBe('maeve');
+
+    restored.submit(restored.playerId, {
+      t: 'sell',
+      vendorId: vendor.id,
+      itemId: 'bear_claw',
+      qty: 1,
+    });
+    expect(restored.tick().some((e) => e.t === 'sold')).toBe(true);
+  });
 });

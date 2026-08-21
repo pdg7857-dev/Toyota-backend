@@ -82,20 +82,28 @@ reach 25, rising from ~6 kills for the first level to ~150+ near the cap. If
 someone asks to "make levelling faster", change `XP_CURVE_BASE` — do not
 quietly flatten the exponent, the ramp is the design.
 
-## Two classes, two answers
+## Five classes, one formula
 
-**Warrior** scales off Strength, **Priest** off Focus. That is the only branch in
-combat maths: `PRIMARY_ATTRIBUTE` selects which attribute feeds attack rating,
-and both classes then run the identical formula, so they are balanced against the
-same numbers.
+All five are playable: Warrior, Priest, Ranger, Rogue, Mage.
+
+`PRIMARY_ATTRIBUTE` is the **only** branch in combat maths — it selects which
+attribute feeds attack rating (Strength, Focus or Dexterity). Every class then
+runs the identical formula, so they are balanced against the same numbers rather
+than five hand-tuned systems drifting apart.
 
 Weapons are class-locked via `ItemDef.classes`; armour and rings are shared.
+Warrior and Priest ladders are hand-written and act as the **reference**; the
+other three are generated in `items.ts` from a shared per-tier DPS budget, so a
+new class cannot quietly end up ahead. Only the *feel* differs — a Rogue swings
+fast for little, a Ranger slowly from range. A test prints the parity table and
+fails if any tier spreads more than 40%.
+
 Every boss declares `classWeapons` on its loot table, resolved against whoever
 lands the kill, so the guaranteed epic is always something you can actually use.
 
-**Both classes get an interrupt** (Warrior `bash` at 12, Priest `rebuke` at 7,
-longer range and longer lockout — cutting casts is the Priest's identity). The
-answer to a mechanic is split deliberately:
+**Every class gets an interrupt** and a way to survive a spike (a heal or a
+defence buff) — both asserted by test, because a class missing either cannot
+answer content the others can. The answer to a mechanic is split deliberately:
 
 | Boss does | Player answers with |
 |---|---|
@@ -121,6 +129,19 @@ A loot-table `goldMultiplier` is a flavour bonus (outlaws carry coin). A test
 asserts the dominance relation — if one mob is no easier on both level and stars
 and strictly harder on one, it must pay more — which already caught an outlaw
 bonus letting a level-16 mob out-earn a level-21 one.
+
+## Vendors close the economy
+
+Two traders (`content/vendors.ts`), placed clear of every camp's aggro radius —
+a shop you get pulled off mid-trade is not a shop, and a test enforces it.
+
+- **Selling**: merchant goods fetch their full listed value (that is their whole
+  purpose); equipment fetches 25%, so vendoring drops never out-earns playing.
+- **Buying**: 4x value, and stock is capped at *uncommon* — vendors are a gold
+  sink and a safety net for a bad drop streak, never a shortcut past the grind.
+  Rares and epics are killed for.
+- A test asserts `buyPrice > sellPrice` on every item, so no buy-and-resell loop
+  can ever print money.
 
 ## Bosses must be decided by play, not stats
 
@@ -177,7 +198,7 @@ file changes** — the events that drive animation (`swing`, `castBegin`,
 ## Verifying a change
 
 ```bash
-npm run verify        # typecheck + 83 unit and balance tests
+npm run verify        # typecheck + 104 unit and balance tests
 npm run build && npm run preview &
 npm run smoke         # real browser, plays the game, writes screenshots/
 ```
@@ -190,5 +211,6 @@ debug handle exposed in `main.ts`.
 ## Deliberately not built yet
 
 Quests, dialogue, crafting, vendors, a second zone, the four unimplemented
-classes (data stubs exist in `content/zone.ts`, flagged `implemented: false`),
-real terrain height, pathfinding (mobs walk straight lines), and entity collision.
+real terrain height, pathfinding (mobs walk straight lines), and entity
+collision. Vendor stock is also static — traders never run out and never restock,
+which is fine while there is one zone but wants inventory if that changes.

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { getSkill, skillBarFor } from '../content/skills.js';
 import { QUALITY_COLORS, canEquip, getItem } from '../content/items.js';
 import { getMob } from '../content/mobs.js';
+import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
 import { xpToNext } from '../sim/formulas.js';
 import { BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
 import type { Attributes, Command, Entity, EntityId, SimEvent } from '../sim/types.js';
@@ -67,7 +68,16 @@ export class Hud {
     deathOverlay: HTMLElement;
     overlays: HTMLElement;
     telegraph: HTMLElement;
+    vendorWindow: HTMLElement;
+    vendorName: HTMLElement;
+    vendorGreeting: HTMLElement;
+    vendorStock: HTMLElement;
+    vendorBags: HTMLElement;
+    vendorGold: HTMLElement;
   };
+
+  /** Entity id of the trader whose shop is open, or null. */
+  private openVendorId: EntityId | null = null;
 
   private telegraphTimer: number | null = null;
 
@@ -92,6 +102,7 @@ export class Hud {
     this.root.querySelector('#respawn-btn')!.addEventListener('click', () => {
       this.emit({ t: 'respawn' });
     });
+    this.root.querySelector('#vendor-close')!.addEventListener('click', () => this.closeVendor());
   }
 
   private q<T extends HTMLElement>(sel: string): T {
@@ -127,6 +138,12 @@ export class Hud {
       deathOverlay: this.q('#death-overlay'),
       overlays: this.q('#overlays'),
       telegraph: this.q('#telegraph-banner'),
+      vendorWindow: this.q('#vendor-window'),
+      vendorName: this.q('#vendor-name'),
+      vendorGreeting: this.q('#vendor-greeting'),
+      vendorStock: this.q('#vendor-stock'),
+      vendorBags: this.q('#vendor-bags'),
+      vendorGold: this.q('#vendor-gold'),
     };
   }
 
@@ -214,6 +231,20 @@ export class Hud {
         case 'skillUnlocked':
           this.log(`New skill learned: ${getSkill(ev.skillId).name}.`, 'log-good');
           break;
+        case 'sold': {
+          const item = getItem(ev.itemId);
+          this.log(
+            `Sold ${item.name}${ev.qty > 1 ? ` x${ev.qty}` : ''} for ${ev.gold} gold.`,
+            'log-loot',
+          );
+          this.renderVendor();
+          break;
+        }
+        case 'bought': {
+          this.log(`Bought ${getItem(ev.itemId).name} for ${ev.gold} gold.`, 'log-loot');
+          this.renderVendor();
+          break;
+        }
         case 'lootGained': {
           const names = ev.items.map(
             (s) => `${getItem(s.itemId).name}${s.qty > 1 ? ` x${s.qty}` : ''}`,
@@ -369,6 +400,15 @@ export class Hud {
 
     this.els.deathOverlay.style.display = player.dead ? 'flex' : 'none';
 
+    if (this.openVendorId !== null) {
+      const vendor = this.world.entity(this.openVendorId);
+      const d = vendor
+        ? Math.hypot(vendor.pos.x - player.pos.x, vendor.pos.z - player.pos.z)
+        : Infinity;
+      // Walking away ends the conversation, rather than leaving a shop open
+      // across the map that would reject every click.
+      if (!vendor || d > 7 || player.dead) this.closeVendor();
+    }
     if (this.els.characterWindow.style.display === 'block') this.renderCharacter();
     if (this.els.inventoryWindow.style.display === 'block') this.renderInventory();
   }
@@ -432,6 +472,10 @@ export class Hud {
     const player = this.world.player;
     for (const entity of this.world.entities.values()) {
       if (entity.id === player.id) continue;
+      if (entity.kind === 'vendor') {
+        this.updateVendorPlate(camera, entity, player);
+        continue;
+      }
       let plate = this.nameplates.get(entity.id);
       if (!plate) {
         plate = document.createElement('div');
@@ -497,7 +541,121 @@ export class Hud {
     }
   }
 
+  /**
+   * Traders read differently from mobs: no health bar, a gold label, and a
+   * prompt once you are close enough to actually trade.
+   */
+  private updateVendorPlate(camera: THREE.Camera, entity: Entity, player: Entity): void {
+    let plate = this.nameplates.get(entity.id);
+    if (!plate) {
+      plate = document.createElement('div');
+      plate.innerHTML = `<div class="np-name"></div><div class="np-bar"><div class="np-fill"></div></div>`;
+      this.els.overlays.appendChild(plate);
+      this.nameplates.set(entity.id, plate);
+    }
+    plate.className = 'nameplate vendor';
+
+    const screen = this.toScreen(camera, entity.pos.x, 2.9, entity.pos.z);
+    const distance = Math.hypot(entity.pos.x - player.pos.x, entity.pos.z - player.pos.z);
+    // Traders are landmarks, so they stay legible from much further than a mob.
+    if (!screen || distance > 55) {
+      plate.style.display = 'none';
+      return;
+    }
+    plate.style.display = 'block';
+    plate.style.left = `${screen.x}px`;
+    plate.style.top = `${screen.y}px`;
+    plate.style.opacity = '1';
+    plate.querySelector<HTMLElement>('.np-bar')!.style.display = 'none';
+    plate.querySelector<HTMLElement>('.np-name')!.textContent =
+      distance <= 5.5 ? `${entity.name} — press E to trade` : entity.name;
+  }
+
   // ------------------------------------------------------------------ panels
+
+  /** Open the shop for a trader. Returns false if there is nobody to talk to. */
+  openVendor(vendorEntityId: EntityId): boolean {
+    const vendor = this.world.entity(vendorEntityId);
+    if (!vendor || vendor.kind !== 'vendor') return false;
+    this.openVendorId = vendorEntityId;
+    this.els.vendorWindow.style.display = 'block';
+    const def = getVendor(vendor.vendorId!);
+    this.els.vendorName.textContent = def.name;
+    this.els.vendorGreeting.textContent = def.greeting;
+    this.renderVendor();
+    return true;
+  }
+
+  closeVendor(): void {
+    this.openVendorId = null;
+    this.els.vendorWindow.style.display = 'none';
+  }
+
+  get vendorOpen(): boolean {
+    return this.openVendorId !== null;
+  }
+
+  private renderVendor(): void {
+    if (this.openVendorId === null) return;
+    const vendor = this.world.entity(this.openVendorId);
+    if (!vendor?.vendorId) return;
+    const player = this.world.player;
+    const gold = player.gold ?? 0;
+    this.els.vendorGold.textContent = `${gold}g`;
+
+    // --- stock ---
+    const stock = this.els.vendorStock;
+    stock.innerHTML = '';
+    for (const itemId of getVendor(vendor.vendorId).stock) {
+      const item = getItem(itemId);
+      const price = buyPrice(item);
+      const usable = canEquip(item, player.classId);
+      const afford = gold >= price;
+      const row = document.createElement('div');
+      row.className = `vendor-row${afford && usable ? ' clickable' : ' unusable'}`;
+      row.innerHTML =
+        `<span style="color:${QUALITY_COLORS[item.quality]}">${item.name}</span>` +
+        `<span class="${afford ? 'price' : 'price too-dear'}">${price}g</span>`;
+      row.title = usable
+        ? `${describeItem(itemId)} — costs ${price} gold`
+        : `${item.classes?.join('/')} only`;
+      if (afford && usable) {
+        row.addEventListener('click', () =>
+          this.emit({ t: 'buy', vendorId: this.openVendorId!, itemId }),
+        );
+      }
+      stock.appendChild(row);
+    }
+
+    // --- what you can sell ---
+    const bags = this.els.vendorBags;
+    bags.innerHTML = '';
+    const inv = player.inventory ?? [];
+    if (inv.length === 0) {
+      const none = document.createElement('div');
+      none.className = 'empty';
+      none.textContent = 'Nothing to sell';
+      bags.appendChild(none);
+    }
+    for (const stack of inv) {
+      const item = getItem(stack.itemId);
+      const unit = sellPrice(item);
+      const row = document.createElement('div');
+      row.className = 'vendor-row clickable';
+      row.innerHTML =
+        `<span style="color:${QUALITY_COLORS[item.quality]}">${item.name}` +
+        `${stack.qty > 1 ? ` <span class="muted">x${stack.qty}</span>` : ''}</span>` +
+        `<span class="price sell">+${unit * stack.qty}g</span>`;
+      row.title =
+        stack.qty > 1
+          ? `Click to sell all ${stack.qty} for ${unit * stack.qty} gold (${unit} each)`
+          : `Click to sell for ${unit} gold`;
+      row.addEventListener('click', () =>
+        this.emit({ t: 'sell', vendorId: this.openVendorId!, itemId: stack.itemId, qty: stack.qty }),
+      );
+      bags.appendChild(row);
+    }
+  }
 
   toggleCharacter(): void {
     const visible = this.els.characterWindow.style.display === 'block';
@@ -702,6 +860,21 @@ const TEMPLATE = `
     </div>
   </div>
 
+  <div id="vendor-window" class="panel clickable">
+    <h3><span id="vendor-name"></span><span id="vendor-close">✕</span></h3>
+    <div id="vendor-greeting"></div>
+    <div id="vendor-cols">
+      <div>
+        <div class="vendor-col-head">For sale</div>
+        <div id="vendor-stock"></div>
+      </div>
+      <div>
+        <div class="vendor-col-head">Your bags <span id="vendor-gold"></span></div>
+        <div id="vendor-bags"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="death-overlay">
     <h2>YOU DIED</h2>
     <button id="respawn-btn" class="clickable">Return to the standing stones</button>
@@ -709,7 +882,7 @@ const TEMPLATE = `
 
   <div id="help">
     <b>WASD</b> move &nbsp; <b>Right-drag</b> look &nbsp; <b>Scroll</b> zoom<br />
-    <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–6</b> skills &nbsp; <b>T</b> auto-attack<br />
-    <b>F</b> loot &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
+    <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–7</b> skills &nbsp; <b>T</b> auto-attack<br />
+    <b>F</b> loot &nbsp; <b>E</b> trade &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
   </div>
 `;

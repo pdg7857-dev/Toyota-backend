@@ -100,6 +100,39 @@ async function main() {
   await page.keyboard.press('c');
   await page.keyboard.press('i');
 
+  // --- vendor scene -------------------------------------------------------
+  // Put a sellable good in the bags, stand next to Maeve, and open the shop.
+  const vendorReady = await page.evaluate(() => {
+    const g = window.__game;
+    if (!g) return false;
+    const player = g.world.player;
+    const vendor = [...g.world.entities.values()].find((e) => e.kind === 'vendor');
+    if (!vendor) return false;
+    g.world.addItem(player, { itemId: 'bear_claw', qty: 3 });
+    g.world.addItem(player, { itemId: 'wolf_pelt', qty: 5 });
+    player.gold = 900;
+    player.pos.x = vendor.pos.x + 2;
+    player.pos.z = vendor.pos.z + 2;
+    return true;
+  });
+  if (!vendorReady) throw new Error('no vendor found in the zone');
+  await wait(500);
+  await page.keyboard.press('e');
+  await wait(600);
+  await page.screenshot({ path: join(OUT, '06-vendor.png') });
+  const vendorOpened = await page.evaluate(
+    () => getComputedStyle(document.querySelector('#vendor-window')).display !== 'none',
+  );
+
+  const goldBefore = await page.evaluate(() => window.__game.world.player.gold);
+  // Sell the first thing in the bags column.
+  await page.click('#vendor-bags .vendor-row');
+  await wait(400);
+  const goldAfter = await page.evaluate(() => window.__game.world.player.gold);
+  const soldSomething = goldAfter > goldBefore;
+  await page.keyboard.press('Escape');
+  await wait(300);
+
   // --- boss scene ---------------------------------------------------------
   // Jump straight to Old Scar via the debug handle so we can actually see a
   // telegraph render. Reaching him legitimately is a 25-level grind.
@@ -137,7 +170,7 @@ async function main() {
       () => getComputedStyle(document.querySelector('#telegraph-banner')).display !== 'none',
     );
   }
-  await page.screenshot({ path: join(OUT, '06-boss-telegraph.png') });
+  await page.screenshot({ path: join(OUT, '07-boss-telegraph.png') });
 
   // Pull gameplay state straight out of the running page for assertions.
   const state = await page.evaluate(() => {
@@ -169,6 +202,8 @@ async function main() {
     ['a target was acquired', state.targetVisible && state.target.length > 0],
     ['nameplates rendering', state.nameplates > 0],
     ['combat happened', state.log.some((l) => /hit|slain|died/i.test(l ?? ''))],
+    ['vendor shop opened', vendorOpened],
+    ['selling paid gold', soldSomething],
     ['boss telegraph rendered', sawTelegraph],
     ['no page errors', errors.length === 0],
   ];

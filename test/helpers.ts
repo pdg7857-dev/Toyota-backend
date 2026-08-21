@@ -12,12 +12,32 @@ export function duelZone(mobId: string, distance = 2.5): ZoneDef {
     halfSize: 120,
     playerStart: { x: 0, z: 0 },
     spawns: [{ mobId, pos: { x: distance, z: 0 } }],
+    vendors: [],
   };
 }
 
 /** An empty arena, for tests that don't want anything attacking them. */
 export function emptyZone(): ZoneDef {
-  return { id: 'test-empty', name: 'Test Empty', halfSize: 120, playerStart: { x: 0, z: 0 }, spawns: [] };
+  return {
+    id: 'test-empty',
+    name: 'Test Empty',
+    halfSize: 120,
+    playerStart: { x: 0, z: 0 },
+    spawns: [],
+    vendors: [],
+  };
+}
+
+/** An arena with one trader a couple of metres away and nothing hostile. */
+export function vendorZone(vendorId: string, distance = 2): ZoneDef {
+  return {
+    id: 'test-vendor',
+    name: 'Test Vendor',
+    halfSize: 120,
+    playerStart: { x: 0, z: 0 },
+    spawns: [],
+    vendors: [{ vendorId, pos: { x: distance, z: 0 } }],
+  };
 }
 
 /**

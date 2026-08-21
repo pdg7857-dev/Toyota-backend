@@ -10,10 +10,12 @@ import {
   xpForKill,
   xpToNext,
 } from '../src/sim/formulas.js';
-import { BOSS_STARS, type MobDef } from '../src/sim/types.js';
+import { BOSS_STARS, type ClassId, type MobDef } from '../src/sim/types.js';
 import { LOOT_TABLES, MOBS } from '../src/content/mobs.js';
 import { FENMARCH, PLAYABLE_CLASSES } from '../src/content/zone.js';
-import { canEquip, getItem } from '../src/content/items.js';
+import { ITEMS, canEquip, getItem } from '../src/content/items.js';
+import { MAX_STOCK_QUALITY, VENDORS, buyPrice, sellPrice } from '../src/content/vendors.js';
+import { skillBarFor, skillsForClass } from '../src/content/skills.js';
 
 /**
  * Balance is measured, not guessed.
@@ -33,7 +35,7 @@ interface Encounter {
   mobId: string;
   skills: string[];
   dodge?: boolean;
-  classId?: 'warrior' | 'priest';
+  classId?: ClassId;
   interruptSkill?: string;
 }
 
@@ -675,5 +677,210 @@ describe('the Priest holds its own', () => {
     expect(punish.interrupts).toBeGreaterThan(0);
     expect(ignore.mobHealed).toBeGreaterThan(0);
     expect(punish.mobHealed).toBeLessThan(ignore.mobHealed);
+  });
+});
+
+// --------------------------------------------------------------------------
+// Five classes must be five ways to play, not four handicaps and one answer.
+// --------------------------------------------------------------------------
+
+describe('every class is viable', () => {
+  /** The kit a class actually has by `level`, minus its self-heal-on-cast. */
+  function kitFor(classId: ClassId, level: number): string[] {
+    return skillsForClass(classId, level).map((s) => s.id);
+  }
+
+  /** Tier-appropriate weapon for a class, picked off its own ladder. */
+  function weaponFor(classId: ClassId, tier: number): string {
+    const ladder = Object.values(ITEMS)
+      .filter((i) => i.slot === 'weapon' && i.classes?.includes(classId))
+      .sort((a, b) => a.value - b.value);
+    return ladder[tier]!.id;
+  }
+
+  it('keeps every class weapon ladder in DPS parity, tier for tier', () => {
+    const dps = (item: (typeof ITEMS)[string]): number =>
+      (((item.damageMin! + item.damageMax!) / 2) / item.swingMs!) * 1000;
+
+    const rows: string[] = [];
+    for (let tier = 0; tier < 8; tier++) {
+      const perClass = PLAYABLE_CLASSES.map((c) => ({
+        id: c.id,
+        dps: dps(ITEMS[weaponFor(c.id, tier)]!),
+      }));
+      const lo = Math.min(...perClass.map((x) => x.dps));
+      const hi = Math.max(...perClass.map((x) => x.dps));
+      rows.push(
+        `  tier ${tier + 1}  ` +
+          perClass.map((x) => `${x.id.slice(0, 3)} ${x.dps.toFixed(1)}`).join('  ') +
+          `   spread ${((hi / lo - 1) * 100).toFixed(0)}%`,
+      );
+      // A class whose weapons are quietly 40% better than everyone else's is
+      // not a different playstyle, it is the correct choice.
+      expect(hi / lo).toBeLessThan(1.4);
+    }
+    console.log('\nWEAPON LADDER PARITY\n' + rows.join('\n'));
+  });
+
+  it('gives every class an interrupt and a way to heal or mitigate', () => {
+    for (const cls of PLAYABLE_CLASSES) {
+      const kit = skillBarFor(cls.id);
+      expect(kit.some((s) => s.kind === 'interrupt'), `${cls.id} has no interrupt`).toBe(true);
+      expect(
+        kit.some((s) => s.kind === 'heal' || (s.kind === 'buff' && s.defenseBonus)),
+        `${cls.id} has no way to survive a spike`,
+      ).toBe(true);
+      // And something to open with from level 1.
+      expect(kit.some((s) => s.reqLevel === 1 && s.kind === 'damage')).toBe(true);
+    }
+  });
+
+  it('clears the first fight on every class', () => {
+    for (const cls of PLAYABLE_CLASSES) {
+      const s = runEncounter({
+        name: `lv1 ${cls.name}`,
+        level: 1,
+        gear: [],
+        mobId: 'moor_hare',
+        skills: kitFor(cls.id, 1),
+        classId: cls.id,
+      });
+      report(`lv1 ${cls.name} vs Moor Hare ★1 (1)`, s);
+      expect(s.winRate, `${cls.id} loses its first fight`).toBe(1);
+      expect(s.medianTtk, `${cls.id} first fight too fast`).toBeGreaterThan(3);
+      expect(s.medianTtk, `${cls.id} first fight too slow`).toBeLessThan(22);
+    }
+  });
+
+  it('clears a mid-band fight on every class', () => {
+    for (const cls of PLAYABLE_CLASSES) {
+      const s = runEncounter({
+        name: cls.name,
+        level: 17,
+        gear: [weaponFor(cls.id, 4), 'outlaw_mail', 'outlaw_hood', 'reaver_legguards'],
+        mobId: 'outlaw_reaver',
+        skills: kitFor(cls.id, 17),
+        classId: cls.id,
+      });
+      report(`lv17 ${cls.name} vs Outlaw Reaver ★3 (16)`, s);
+      expect(s.winRate, `${cls.id} cannot handle its own level`).toBeGreaterThanOrEqual(0.9);
+      expect(s.medianTtk).toBeGreaterThan(4);
+      expect(s.medianTtk).toBeLessThan(45);
+      expect(s.timeouts).toBe(0);
+    }
+  });
+
+  it('clears the endgame on every class', () => {
+    for (const cls of PLAYABLE_CLASSES) {
+      const s = runEncounter({
+        name: cls.name,
+        level: 25,
+        gear: [
+          weaponFor(cls.id, 6),
+          'bearhide_cuirass',
+          'bearhide_helm',
+          'fenhide_leggings',
+          'outlaws_signet',
+        ],
+        mobId: 'outlaw_marauder',
+        skills: kitFor(cls.id, 25),
+        classId: cls.id,
+      });
+      report(`lv25 ${cls.name} vs Outlaw Marauder ★4 (23)`, s);
+      expect(s.winRate, `${cls.id} falls off at the cap`).toBeGreaterThanOrEqual(0.9);
+      expect(s.timeouts).toBe(0);
+    }
+  });
+
+  it('gives every class a guaranteed weapon from both bosses', () => {
+    for (const bossId of ['cadfael', 'old_scar'] as const) {
+      const table = LOOT_TABLES[MOBS[bossId]!.lootTableId]!;
+      for (const cls of PLAYABLE_CLASSES) {
+        const weaponId = table.classWeapons?.[cls.id];
+        expect(weaponId, `${bossId} has no weapon for ${cls.id}`).toBeDefined();
+        const weapon = getItem(weaponId!);
+        expect(weapon.quality).toBe('epic');
+        expect(canEquip(weapon, cls.id)).toBe(true);
+      }
+    }
+  });
+});
+
+// --------------------------------------------------------------------------
+// Vendors close the economy: gold gets a sink, merchant goods get a buyer.
+// --------------------------------------------------------------------------
+
+describe('the vendor economy', () => {
+  it('pays full value for merchant goods and a fraction for gear', () => {
+    // Merchant goods exist to be sold, so they fetch their listed value.
+    expect(sellPrice(getItem('bear_claw'))).toBe(getItem('bear_claw').value);
+    expect(sellPrice(getItem('ancient_bear_skull'))).toBe(getItem('ancient_bear_skull').value);
+    // Gear must not be worth more vendored than worn, or nothing is a reward.
+    const mail = getItem('outlaw_mail');
+    expect(sellPrice(mail)).toBeLessThan(mail.value * 0.5);
+    expect(sellPrice(mail)).toBeGreaterThan(0);
+  });
+
+  it('charges more than it pays, so trading is never a money loop', () => {
+    for (const item of Object.values(ITEMS)) {
+      expect(buyPrice(item), `${item.id} can be bought and resold at a profit`).toBeGreaterThan(
+        sellPrice(item),
+      );
+    }
+  });
+
+  it('never stocks anything above uncommon', () => {
+    // Rares and epics are earned by killing things, not bought.
+    const rank = { common: 0, uncommon: 1, rare: 2, epic: 3 };
+    for (const vendor of Object.values(VENDORS)) {
+      for (const itemId of vendor.stock) {
+        const item = getItem(itemId);
+        expect(
+          rank[item.quality],
+          `${vendor.name} stocks ${item.name} (${item.quality})`,
+        ).toBeLessThanOrEqual(rank[MAX_STOCK_QUALITY]);
+      }
+    }
+  });
+
+  it('stocks a weapon for every playable class between them', () => {
+    const stocked = Object.values(VENDORS).flatMap((v) => v.stock);
+    for (const cls of PLAYABLE_CLASSES) {
+      const has = stocked.some((id) => {
+        const item = getItem(id);
+        return item.slot === 'weapon' && item.classes?.includes(cls.id);
+      });
+      expect(has, `no vendor stocks a ${cls.id} weapon`).toBe(true);
+    }
+  });
+
+  it('prices stock within reach of the band it serves', () => {
+    // Maeve serves levels ~1-10. Her most expensive item should cost a sane
+    // number of kills at the rates a player in that band actually earns.
+    const wolf = MOBS.bog_wolf!;
+    const perKill =
+      (goldForKill(wolf.level, wolf.stars).min + goldForKill(wolf.level, wolf.stars).max) / 2;
+    const dearest = Math.max(...VENDORS.maeve!.stock.map((id) => buyPrice(getItem(id))));
+    const kills = dearest / perKill;
+    console.log(`  Maeve's dearest stock: ${dearest}g = ${kills.toFixed(0)} Bog Wolf kills`);
+    expect(kills).toBeGreaterThan(3);
+    expect(kills).toBeLessThan(40);
+  });
+
+  it('keeps traders clear of every camp', () => {
+    // A shop you get pulled off mid-trade is not a shop.
+    for (const placement of FENMARCH.vendors) {
+      for (const spawn of FENMARCH.spawns) {
+        const def = MOBS[spawn.mobId]!;
+        const d = Math.hypot(placement.pos.x - spawn.pos.x, placement.pos.z - spawn.pos.z);
+        const needed = def.aggroRadius + 4;
+        if (d < needed) {
+          throw new Error(
+            `${VENDORS[placement.vendorId]!.name} stands ${d.toFixed(1)}u from a ` +
+              `${def.name}; needs ${needed.toFixed(1)}u`,
+          );
+        }
+      }
+    }
   });
 });

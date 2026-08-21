@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { AnimStateMachine } from './anim.js';
 import { CLASSES } from '../content/zone.js';
 import { getMob } from '../content/mobs.js';
+import { getVendor } from '../content/vendors.js';
 import type { Entity, EntityId } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 
@@ -28,6 +29,8 @@ export class EntityView {
 
   /** Seconds of red flash remaining after taking damage. */
   private flash = 0;
+  /** Overhead "interact with me" marker; vendors only. */
+  private marker: THREE.Mesh | null = null;
 
   constructor(
     readonly id: EntityId,
@@ -36,7 +39,9 @@ export class EntityView {
     const view =
       entity.kind === 'mob'
         ? getMob(entity.defId!).view
-        : { color: CLASSES[entity.classId ?? 'warrior'].color, height: 1.8, radius: 0.42 };
+        : entity.kind === 'vendor'
+          ? getVendor(entity.vendorId!).view
+          : { color: CLASSES[entity.classId ?? 'warrior'].color, height: 1.8, radius: 0.42 };
 
     const geo = new THREE.CapsuleGeometry(view.radius, Math.max(0.1, view.height - view.radius * 2), 4, 12);
     this.material = new THREE.MeshStandardMaterial({ color: view.color, roughness: 0.7, metalness: 0.05 });
@@ -63,6 +68,18 @@ export class EntityView {
     this.selectionRing.position.y = 0.03;
     this.selectionRing.visible = false;
     this.group.add(this.selectionRing);
+
+    if (entity.kind === 'vendor') {
+      // A slowly turning gold marker overhead: the only thing on screen that
+      // says "walk here and press E".
+      const markerGeo = new THREE.OctahedronGeometry(0.28, 0);
+      this.marker = new THREE.Mesh(
+        markerGeo,
+        new THREE.MeshBasicMaterial({ color: 0xf0c94c, transparent: true, opacity: 0.95 }),
+      );
+      this.marker.position.y = view.height + 0.9;
+      this.group.add(this.marker);
+    }
 
     this.anim = new AnimStateMachine(this.body, view.height);
 
@@ -102,6 +119,10 @@ export class EntityView {
       this.material.color.setHex(0xff5555);
     } else {
       this.material.color.setHex(baseColor);
+    }
+    if (this.marker) {
+      this.marker.rotation.y += dtMs * 0.0022;
+      this.marker.position.y += Math.sin(performance.now() * 0.0022) * 0.0025;
     }
     this.anim.update(dtMs);
   }
@@ -257,7 +278,9 @@ export class ViewManager {
       const baseColor =
         entity.kind === 'mob'
           ? getMob(entity.defId!).view.color
-          : CLASSES[entity.classId ?? 'warrior'].color;
+          : entity.kind === 'vendor'
+            ? getVendor(entity.vendorId!).view.color
+            : CLASSES[entity.classId ?? 'warrior'].color;
       view.update(alpha, dtMs, entity.id === targetId, baseColor);
       // Corpses stay visible but sink out of the way until they respawn.
       view.group.visible = !entity.dead || entity.kind === 'mob';

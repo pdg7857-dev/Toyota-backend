@@ -215,6 +215,20 @@ export interface LootTable {
   classWeapons?: Partial<Record<ClassId, string>>;
 }
 
+/**
+ * A trader. Vendors are the sink for gold and the buyer for merchant goods,
+ * which is what makes those two reward streams mean anything.
+ */
+export interface VendorDef {
+  id: string;
+  name: string;
+  greeting: string;
+  /** Item ids this vendor keeps in stock, in the order they are listed. */
+  stock: string[];
+  /** Renderer hint. */
+  view: { color: number; height: number; radius: number };
+}
+
 export interface MobDef {
   id: string;
   name: string;
@@ -270,7 +284,7 @@ export interface CastState {
 
 export interface Entity {
   id: EntityId;
-  kind: 'player' | 'mob';
+  kind: 'player' | 'mob' | 'vendor';
   name: string;
   level: number;
   pos: Vec2;
@@ -300,6 +314,9 @@ export interface Entity {
   gcdMs?: number;
   /** Normalized movement intent, held until the client changes it. */
   moveDir?: Vec2;
+
+  // --- vendor-only ---
+  vendorId?: string;
 
   // --- mob-only ---
   defId?: string;
@@ -336,6 +353,8 @@ export type Command =
   | { t: 'equip'; itemId: string }
   | { t: 'unequip'; slot: EquipSlot }
   | { t: 'spendPoint'; attr: keyof Attributes }
+  | { t: 'sell'; vendorId: EntityId; itemId: string; qty: number }
+  | { t: 'buy'; vendorId: EntityId; itemId: string }
   | { t: 'respawn' };
 
 /** A command paired with the actor issuing it. Server-side, actorId is trusted. */
@@ -398,5 +417,7 @@ export type SimEvent =
   | { t: 'xpGained'; entityId: EntityId; amount: number }
   | { t: 'levelUp'; entityId: EntityId; level: number }
   | { t: 'lootGained'; entityId: EntityId; items: ItemStack[]; gold: number }
+  | { t: 'sold'; entityId: EntityId; itemId: string; qty: number; gold: number }
+  | { t: 'bought'; entityId: EntityId; itemId: string; gold: number }
   | { t: 'skillUnlocked'; entityId: EntityId; skillId: string }
   | { t: 'error'; entityId: EntityId; message: string };
