@@ -66,6 +66,41 @@ encounter can be made harder *without* raising its level — level gap drives xp
 rewards and hit chance, so inflating level to add difficulty distorts
 progression. Reach for stars first.
 
+## Four zones, deliberately overlapping
+
+| Zone | Band | Ends at |
+|---|---|---|
+| The Fenmarch | 1–25 | Cadfael ★5 (20), Old Scar ★6 (25) |
+| Ardmoor | 20–40 | Aonghus ★5 (30), Muireann ★6 (40) |
+| The Sunken Reach | 38–70 | Fiachra ★5 (55), Old Cauldron ★6 (70) |
+| Caer Dubh | 66–100 | Ruadhán ★5 (85), Donnchadh ★6 (100) |
+
+The bands **overlap on purpose**, and a test enforces it: the next zone opens
+before the last is exhausted, so moving on is a choice rather than an eviction.
+Exit `minLevel` sits at the bottom of the destination's band for the same reason.
+
+Only one zone is loaded at a time. `World.travelTo` keeps the player and rebuilds
+everything else from the zone definition — mobs respawn on timers anyway, so
+nothing meaningful is lost and a save stays one zone's worth of state.
+
+**The Fenmarch is hand-tuned and is the reference.** Everything from Ardmoor
+south — forty-plus creatures, twelve gear tiers, four armour slots — is
+generated from curves in `formulas.ts` fitted to it. Hand-writing seventy-five
+levels of content is seventy-five chances to mistype a number that a player only
+experiences as "this zone feels wrong".
+
+## Quests give a zone direction
+
+One chain per zone (`content/quests.ts`), each step `requires` the last, walking
+you band by band to the bosses and then pointing at the next zone. Vendors are
+the givers. Rewards are derived from `xpToNext` at the quest's level rather than
+hand-picked, because the same "feels big" number is a fortune at 20 and a
+rounding error at 90 — chains currently land at 22–43% of their band's grind.
+
+Collection objectives read the bags directly rather than counting pickups, so
+items gathered before accepting still count. That reads as a bug every time it
+does not work.
+
 ## The grind is intentional
 
 This game is deliberately grind-heavy, and kills-per-level must keep climbing
@@ -176,6 +211,17 @@ tests caught their absence:
 
 - **Global cooldown** (`GCD_MS`) — without it the optimal opener was "press
   every skill on the same tick", and fights collapsed to ~2 seconds.
+- **Cast pushback instead of cast cancellation** — damage used to cancel an
+  interruptible cast outright, which meant a mob swinging every 1.6s made a 1.8s
+  heal impossible and silently deleted every sustain class. Damage now delays a
+  cast, capped so it always eventually lands. Movement still cancels outright.
+- **Level-scaled mitigation and defensive buffs** — both were fixed constants
+  that worked to 25 and broke by 60. "+60 defence" is a third of your total at
+  level 10 and nothing at level 60; a fixed mitigation constant let a level-90
+  hit through at under 9%. Both now scale above level 25, leaving the Fenmarch
+  numerically untouched.
+- **Accuracy is level-gap only** — the old `(attack - defense)` term was a
+  double-dip on `defense` and, at the cap, had mobs landing 31% of swings.
 - **Rank/star modifiers** — so level scaling can stay gentle enough to leave a
   "close fight" band instead of flipping impossible-to-trivial in four levels.
 - **A weak stat term in `hitChance`** — `defense` already drives `mitigation()`,
@@ -198,10 +244,17 @@ file changes** — the events that drive animation (`swing`, `castBegin`,
 ## Verifying a change
 
 ```bash
-npm run verify        # typecheck + 104 unit and balance tests
+npm run verify        # typecheck + 127 unit and balance tests
 npm run build && npm run preview &
 npm run smoke         # real browser, plays the game, writes screenshots/
 ```
+
+The balance suite is also where four separate HARNESS bugs were caught, each of
+which had looked like a game balance problem: `levelPlayer` spending points into
+an attribute three classes do not use; the setup tick killing low-Vitality
+classes before the fight began; firing heals on cooldown at full health; and
+spamming the kit so the global cooldown was never free for an interrupt. When a
+class looks weak, suspect the harness before retuning content.
 
 Always run `smoke` for renderer or HUD changes. Unit tests cannot see a panel
 overlapping another panel, nameplate clutter, or a tree planted through a boss —

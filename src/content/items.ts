@@ -378,6 +378,19 @@ export const ITEMS: Record<string, ItemDef> = {
   lynx_fang: { id: 'lynx_fang', name: 'Lynx Fang', slot: null, quality: 'uncommon', value: 210, stackable: true, merchantGood: true },
   smugglers_ledger: { id: 'smugglers_ledger', name: "Smuggler's Ledger", slot: null, quality: 'rare', value: 420, stackable: true, merchantGood: true },
   chieftains_seal: { id: 'chieftains_seal', name: "Chieftain's Seal", slot: null, quality: 'rare', value: 900, stackable: true, merchantGood: true },
+  // --- Ardmoor, the Sunken Reach and Caer Dubh ---
+  goat_horn: { id: 'goat_horn', name: 'Crag Goat Horn', slot: null, quality: 'common', value: 207, stackable: true, merchantGood: true },
+  clan_torc: { id: 'clan_torc', name: 'Clan Torc', slot: null, quality: 'uncommon', value: 345, stackable: true, merchantGood: true },
+  eagle_feather: { id: 'eagle_feather', name: 'Moor Eagle Feather', slot: null, quality: 'uncommon', value: 517, stackable: true, merchantGood: true },
+  cattle_lords_ring: { id: 'cattle_lords_ring', name: 'Cattle-Lord\'s Ring', slot: null, quality: 'rare', value: 722, stackable: true, merchantGood: true },
+  eel_skin: { id: 'eel_skin', name: 'Reach Eel Skin', slot: null, quality: 'uncommon', value: 961, stackable: true, merchantGood: true },
+  wreckers_salvage: { id: 'wreckers_salvage', name: 'Wrecker\'s Salvage', slot: null, quality: 'uncommon', value: 1332, stackable: true, merchantGood: true },
+  pike_jaw: { id: 'pike_jaw', name: 'Great Pike Jaw', slot: null, quality: 'rare', value: 1760, stackable: true, merchantGood: true },
+  tidewatch_seal: { id: 'tidewatch_seal', name: 'Tidewatch Seal', slot: null, quality: 'rare', value: 2247, stackable: true, merchantGood: true },
+  mastiff_fang: { id: 'mastiff_fang', name: 'Fort Mastiff Fang', slot: null, quality: 'uncommon', value: 2649, stackable: true, merchantGood: true },
+  blackshield_boss: { id: 'blackshield_boss', name: 'Blackshield Boss', slot: null, quality: 'rare', value: 3237, stackable: true, merchantGood: true },
+  warden_signet: { id: 'warden_signet', name: 'Warden\'s Signet', slot: null, quality: 'rare', value: 4051, stackable: true, merchantGood: true },
+  caer_dubh_crown: { id: 'caer_dubh_crown', name: 'Crown of Caer Dubh', slot: null, quality: 'epic', value: 4766, stackable: true, merchantGood: true },
   ancient_bear_skull: { id: 'ancient_bear_skull', name: 'Ancient Bear Skull', slot: null, quality: 'epic', value: 2200, stackable: true, merchantGood: true },
 };
 
@@ -506,6 +519,238 @@ function buildWeaponLadders(): Record<string, ItemDef> {
 }
 
 Object.assign(ITEMS, buildWeaponLadders());
+
+
+// === LATE-GAME LADDERS (levels 26-100) ===================================
+//
+// Zones 2-4 span 75 levels. Hand-writing five weapon ladders and four armour
+// slots across that range would be hundreds of literals, every one a chance to
+// mistype a number that a player only notices as "this zone feels wrong".
+//
+// So the late tiers are generated from curves fitted to the hand-tuned 1-25
+// gear, which stays the reference. Twelve tiers, grouped four to a zone, so
+// each zone has its own uncommon -> rare -> epic arc rather than one flat climb.
+
+/** Level each late tier is built for. Four per zone: Ardmoor, Reach, Caer Dubh. */
+const LATE_TIER_LEVELS = [28, 32, 36, 40, 48, 56, 63, 70, 78, 86, 93, 100];
+
+/** Escalating names, one per late tier. */
+const LATE_TIER_ADJECTIVES = [
+  'Honed', 'Bloodiron', 'Stormforged', 'Gravebound',
+  'Sunken', 'Tidewrought', 'Duskforged', 'Wraithbound',
+  'Blackstone', 'Dread', 'Sovereign', 'Godsbane',
+];
+
+/** Weapon noun per class, changing every four tiers so a zone feels distinct. */
+const LATE_WEAPON_NOUNS: Record<ClassId, [string, string, string]> = {
+  warrior: ['Blade', 'Warblade', 'Greatsword'],
+  priest: ['Stave', 'Crozier', 'Reliquary'],
+  ranger: ['Bow', 'Longbow', 'Warbow'],
+  rogue: ['Dagger', 'Kris', 'Fang'],
+  mage: ['Rod', 'Scepter', 'Focus'],
+};
+
+const LATE_ARMOR_NOUNS: Record<'head' | 'chest' | 'legs' | 'ring', [string, string, string]> = {
+  head: ['Helm', 'Greathelm', 'Crown'],
+  chest: ['Hauberk', 'Cuirass', 'Aegis'],
+  legs: ['Greaves', 'Legguards', 'Warplate'],
+  ring: ['Band', 'Signet', 'Seal'],
+};
+
+/**
+ * Weapon DPS for a given level, fitted to the 1-25 ladders so tier 9 picks up
+ * exactly where the hand-written tier 8 left off.
+ */
+function curveWeaponDps(level: number): number {
+  return 0.62 * Math.pow(level, 1.28);
+}
+
+/**
+ * Total armour a fully geared player of this level should carry.
+ *
+ * Linear, because player defence also grows from Vitality and level; making
+ * armour superlinear too was what previously let high-level characters shrug
+ * off everything. 5 per level reproduces the hand-tuned level-25 set (~125).
+ */
+function curveArmorTotal(level: number): number {
+  return 5 * level;
+}
+
+/** How that total splits across slots, matching the hand-built level-25 set. */
+const ARMOR_SLOT_SHARE: Record<'head' | 'chest' | 'legs' | 'ring', number> = {
+  head: 0.22,
+  chest: 0.4,
+  legs: 0.31,
+  ring: 0.05,
+};
+
+/** Within a zone's four tiers: uncommon, uncommon, rare, epic. */
+function lateTierQuality(indexInZone: number): ItemQuality {
+  return (['uncommon', 'uncommon', 'rare', 'epic'] as const)[indexInZone]!;
+}
+
+function lateTierValue(level: number, quality: ItemQuality): number {
+  const qualityMultiplier = { common: 1, uncommon: 1.4, rare: 2.4, epic: 4.2 }[quality];
+  return Math.round(Math.pow(level, 1.9) * 0.9 * qualityMultiplier);
+}
+
+/**
+ * Weapon feel per class for the late tiers.
+ *
+ * Separate from ARCHETYPES because that table only covers the three classes
+ * whose EARLY ladders are generated — Warrior and Priest are hand-written down
+ * there and would otherwise silently have no gear past level 25.
+ */
+const LATE_WEAPON_FEEL: Record<
+  ClassId,
+  { primary: keyof Attributes; swingMs: number; attackRange: number; damageType: DamageType }
+> = {
+  warrior: { primary: 'strength', swingMs: 1850, attackRange: 2.7, damageType: 'physical' },
+  priest: { primary: 'focus', swingMs: 2100, attackRange: 2.9, damageType: 'nature' },
+  ranger: { primary: 'dexterity', swingMs: 2400, attackRange: 12, damageType: 'physical' },
+  rogue: { primary: 'dexterity', swingMs: 1400, attackRange: 2.3, damageType: 'physical' },
+  mage: { primary: 'focus', swingMs: 2000, attackRange: 10, damageType: 'fire' },
+};
+
+function buildLateLadders(): Record<string, ItemDef> {
+  const out: Record<string, ItemDef> = {};
+
+  LATE_TIER_LEVELS.forEach((level, i) => {
+    const adjective = LATE_TIER_ADJECTIVES[i]!;
+    const slug = adjective.toLowerCase();
+    const zoneIndex = Math.floor(i / 4);
+    const quality = lateTierQuality(i % 4);
+    const value = lateTierValue(level, quality);
+    // Attribute budget grows with the tier, split primary-heavy.
+    const primaryBonus = Math.round(level * 0.9);
+    const vitalityBonus = Math.round(level * 0.5);
+
+    // --- weapons, one per class ---
+    for (const classId of Object.keys(LATE_WEAPON_FEEL) as ClassId[]) {
+      const feel = LATE_WEAPON_FEEL[classId];
+      const noun = LATE_WEAPON_NOUNS[classId][zoneIndex]!;
+      const avg = (curveWeaponDps(level) * feel.swingMs) / 1000;
+      out[`${slug}_${classId}_weapon`] = {
+        id: `${slug}_${classId}_weapon`,
+        name: `${adjective} ${noun}`,
+        slot: 'weapon',
+        quality,
+        classes: [classId],
+        value,
+        damageMin: Math.round(avg * 0.78),
+        damageMax: Math.round(avg * 1.22),
+        damageType: feel.damageType,
+        swingMs: feel.swingMs,
+        attackRange: feel.attackRange,
+        attributes: { [feel.primary]: primaryBonus, vitality: vitalityBonus },
+      };
+    }
+
+    // --- armour, one per slot, usable by any class ---
+    for (const slot of ['head', 'chest', 'legs', 'ring'] as const) {
+      const noun = LATE_ARMOR_NOUNS[slot][zoneIndex]!;
+      out[`${slug}_${slot}`] = {
+        id: `${slug}_${slot}`,
+        name: `${adjective} ${noun}`,
+        slot,
+        quality,
+        value: Math.round(value * 0.8),
+        armor: Math.max(1, Math.round(curveArmorTotal(level) * ARMOR_SLOT_SHARE[slot])),
+        attributes: {
+          vitality: Math.round(level * 0.4),
+          strength: Math.round(level * 0.18),
+          focus: Math.round(level * 0.18),
+          dexterity: Math.round(level * 0.18),
+        },
+      };
+    }
+  });
+
+  return out;
+}
+
+Object.assign(ITEMS, buildLateLadders());
+
+/** The late-tier item id for a class weapon at a given tier index (0-11). */
+export function lateWeaponId(classId: ClassId, tierIndex: number): string {
+  return `${LATE_TIER_ADJECTIVES[tierIndex]!.toLowerCase()}_${classId}_weapon`;
+}
+
+/** The late-tier armour id for a slot at a given tier index (0-11). */
+export function lateArmorId(slot: 'head' | 'chest' | 'legs' | 'ring', tierIndex: number): string {
+  return `${LATE_TIER_ADJECTIVES[tierIndex]!.toLowerCase()}_${slot}`;
+}
+
+/** Every late tier's level, for content that needs to pick one. */
+export const LATE_TIERS = LATE_TIER_LEVELS;
+
+
+// === CANONICAL LADDERS ===================================================
+//
+// The explicit progression order for every class and armour slot, early tiers
+// then late. Content and tests read these rather than inferring order from
+// price — vendor value is a flavour number and does not sort reliably once
+// four zones' worth of gear share one registry.
+
+/** Hand-written early weapons (tiers 1-8), in progression order. */
+const EARLY_WEAPONS: Record<ClassId, string[]> = {
+  warrior: [
+    'rusted_blade', 'bronze_shortsword', 'ironbark_cudgel', 'iron_longsword',
+    'outlaw_saber', 'boar_spear', 'cadfaels_cleaver', 'scarred_fang',
+  ],
+  priest: [
+    'oaken_walking_staff', 'rowan_stave', 'blessed_mace', 'vigil_stave',
+    'reliquary_mace', 'prayerwood_stave', 'chieftains_reliquary', 'bonecarved_stave',
+  ],
+  ranger: ARCHETYPES.find((a) => a.classId === 'ranger')!.entries.map(([id]) => id),
+  rogue: ARCHETYPES.find((a) => a.classId === 'rogue')!.entries.map(([id]) => id),
+  mage: ARCHETYPES.find((a) => a.classId === 'mage')!.entries.map(([id]) => id),
+};
+
+/** Full 20-tier weapon progression per class. */
+export const WEAPON_LADDER: Record<ClassId, string[]> = {
+  warrior: [...EARLY_WEAPONS.warrior, ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_warrior_weapon`)],
+  priest: [...EARLY_WEAPONS.priest, ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_priest_weapon`)],
+  ranger: [...EARLY_WEAPONS.ranger, ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_ranger_weapon`)],
+  rogue: [...EARLY_WEAPONS.rogue, ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_rogue_weapon`)],
+  mage: [...EARLY_WEAPONS.mage, ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_mage_weapon`)],
+};
+
+/** Full armour progression per slot. */
+export const ARMOR_LADDER: Record<'head' | 'chest' | 'legs' | 'ring', string[]> = {
+  head: ['tattered_hood', 'leather_coif', 'outlaw_hood', 'bearhide_helm',
+    ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_head`)],
+  chest: ['boiled_leather_vest', 'studded_jerkin', 'outlaw_mail', 'bearhide_cuirass',
+    ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_chest`)],
+  legs: ['bogstrider_greaves', 'reaver_legguards', 'fenhide_leggings',
+    ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_legs`)],
+  ring: ['ring_of_the_fen', 'outlaws_signet', 'scarred_band',
+    ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_ring`)],
+};
+
+/** A full gear set appropriate to `level`, for tests and vendor stocking. */
+export function gearSetFor(classId: ClassId, level: number): string[] {
+  const pick = (ladder: string[]): string => {
+    // Early tiers cover 1-25 in eight steps; late tiers are LATE_TIER_LEVELS.
+    const earlyCount = ladder.length - LATE_TIER_LEVELS.length;
+    if (level <= 25) {
+      const i = Math.min(earlyCount - 1, Math.max(0, Math.floor((level / 25) * earlyCount) - 1));
+      return ladder[Math.max(0, i)]!;
+    }
+    let lateIndex = 0;
+    for (let i = 0; i < LATE_TIER_LEVELS.length; i++) {
+      if (level >= LATE_TIER_LEVELS[i]!) lateIndex = i;
+    }
+    return ladder[earlyCount + lateIndex]!;
+  };
+  return [
+    pick(WEAPON_LADDER[classId]),
+    pick(ARMOR_LADDER.head),
+    pick(ARMOR_LADDER.chest),
+    pick(ARMOR_LADDER.legs),
+    pick(ARMOR_LADDER.ring),
+  ];
+}
 
 export function getItem(id: string): ItemDef {
   const item = ITEMS[id];

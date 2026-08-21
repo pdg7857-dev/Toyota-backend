@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { World } from '../src/sim/world.js';
 import { MAX_LEVEL, TICK_MS, xpToNext } from '../src/sim/formulas.js';
-import { FENMARCH } from '../src/content/zone.js';
+import { FENMARCH, getZone } from '../src/content/zone.js';
 import { countEvents, duelZone, emptyZone, levelPlayer, simulateFight, vendorZone } from './helpers.js';
 import { buyPrice, sellPrice } from '../src/content/vendors.js';
+import { getQuest } from '../src/content/quests.js';
 import { skillBarFor, getSkill } from '../src/content/skills.js';
 import { canEquip, getItem } from '../src/content/items.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
@@ -120,15 +121,36 @@ describe('combat', () => {
     expect(dotHits.length).toBe(4);
   });
 
-  it('interrupts an interruptible cast when the caster takes damage', () => {
+  it('delays a cast when the caster takes damage, but still lands it', () => {
     const world = newWorld(14);
     const player = levelPlayer(world, { level: 6 });
+    player.health = world.statsOf(player).maxHealth * 0.5; // hurt, not dying
     world.submit(player.id, { t: 'useSkill', skillId: 'rally' });
 
-    // The boar is already in aggro range, so it can land a hit on the very tick
-    // the cast starts — assert on the event stream rather than on end state.
-    const events = world.advance(4000);
+    // Hold the boar alive so it keeps swinging through the whole cast.
+    const boar = theMob(world);
+    const events: SimEvent[] = [];
+    for (let i = 0; i < 120; i++) {
+      boar.health = world.statsOf(boar).maxHealth;
+      events.push(...world.tick());
+    }
     expect(events.some((e) => e.t === 'castBegin' && e.id === 'rally')).toBe(true);
+    expect(events.some((e) => e.t === 'castPushback' && e.id === 'rally')).toBe(true);
+    // Being hit must not stop a heal from ever completing — that would delete
+    // the whole point of every sustain class.
+    expect(events.some((e) => e.t === 'castComplete' && e.id === 'rally')).toBe(true);
+    expect(events.some((e) => e.t === 'heal' && e.targetId === player.id)).toBe(true);
+  });
+
+  it('still cancels a cast outright when the caster moves', () => {
+    const world = new World({ seed: 14, zone: emptyZone(), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 6 });
+    world.submit(player.id, { t: 'useSkill', skillId: 'rally' });
+    world.tick();
+    expect(player.cast).not.toBeNull();
+
+    world.submit(player.id, { t: 'move', dir: { x: 1, z: 0 } });
+    const events = world.tick();
     expect(events.some((e) => e.t === 'castInterrupted' && e.id === 'rally')).toBe(true);
     expect(player.cast).toBeNull();
   });
@@ -836,5 +858,204 @@ describe('vendors', () => {
       qty: 1,
     });
     expect(restored.tick().some((e) => e.t === 'sold')).toBe(true);
+  });
+});
+
+// --------------------------------------------------------------------------
+// Quests and travel: the systems that turn four fields of camps into a route.
+// --------------------------------------------------------------------------
+
+describe('quests', () => {
+  function questWorld(seed = 201) {
+    const world = new World({ seed, zone: getZone('fenmarch'), classId: 'warrior' });
+    const player = world.player;
+    // Stand next to Maeve so turn-ins are in reach.
+    const maeve = [...world.entities.values()].find(
+      (e) => e.kind === 'vendor' && e.vendorId === 'maeve',
+    )!;
+    player.pos = { x: maeve.pos.x + 1, z: maeve.pos.z };
+    return { world, player, maeve };
+  }
+
+  it('offers the first quest of a chain and nothing further', () => {
+    const { world, player } = questWorld();
+    const offered = world.questsOfferedBy(player, 'maeve').map((q) => q.id);
+    expect(offered).toContain('fen_01');
+    // fen_02 requires fen_01, so it must not be on the board yet.
+    expect(offered).not.toContain('fen_02');
+  });
+
+  it('tracks kills and reports the quest ready', () => {
+    const { world, player, maeve } = questWorld();
+    world.submit(player.id, { t: 'acceptQuest', vendorId: maeve.id, questId: 'fen_01' });
+    world.tick();
+    expect(player.quests?.[0]?.questId).toBe('fen_01');
+
+    // Kill the eight hares the quest asks for.
+    const hares = [...world.entities.values()].filter((e) => e.defId === 'moor_hare').slice(0, 8);
+    const events: SimEvent[] = [];
+    for (const hare of hares) {
+      hare.health = 1;
+      world.submit(player.id, { t: 'target', id: hare.id });
+      world.submit(player.id, { t: 'autoAttack', on: true });
+      const near = { ...hare.pos };
+      player.pos = { x: near.x + 1, z: near.z };
+      events.push(...world.advance(3000));
+    }
+
+    expect(events.some((e) => e.t === 'questProgress' && e.questId === 'fen_01')).toBe(true);
+    expect(events.some((e) => e.t === 'questReady' && e.questId === 'fen_01')).toBe(true);
+    expect(world.isQuestComplete(player, 'fen_01')).toBe(true);
+  });
+
+  it('pays out on turn-in and unlocks the next link in the chain', () => {
+    const { world, player, maeve } = questWorld();
+    player.level = 5; // fen_02 also gates on level, which is not what this tests
+    world.submit(player.id, { t: 'acceptQuest', vendorId: maeve.id, questId: 'fen_01' });
+    world.tick();
+    // Complete it directly; the kill path is covered above.
+    player.quests![0]!.counts = [8];
+
+    const goldBefore = player.gold ?? 0;
+    world.submit(player.id, { t: 'turnInQuest', vendorId: maeve.id, questId: 'fen_01' });
+    const events = world.tick();
+
+    const done = events.find((e) => e.t === 'questCompleted');
+    expect(done).toBeDefined();
+    expect(player.gold).toBe(goldBefore + getQuest('fen_01').rewards.gold);
+    expect(player.questsDone).toContain('fen_01');
+    expect(player.quests).toHaveLength(0);
+    expect(events.some((e) => e.t === 'xpGained')).toBe(true);
+    // The next step is now on the board, and the finished one is not repeatable.
+    const offered = world.questsOfferedBy(player, 'maeve').map((q) => q.id);
+    expect(offered).toContain('fen_02');
+    expect(offered).not.toContain('fen_01');
+  });
+
+  it('refuses to turn in unfinished work', () => {
+    const { world, player, maeve } = questWorld();
+    world.submit(player.id, { t: 'acceptQuest', vendorId: maeve.id, questId: 'fen_01' });
+    world.tick();
+    world.submit(player.id, { t: 'turnInQuest', vendorId: maeve.id, questId: 'fen_01' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /not finished/i.test(e.message))).toBe(true);
+    expect(player.questsDone ?? []).toHaveLength(0);
+  });
+
+  it('counts items already in the bags toward a collection step', () => {
+    const { world, player, maeve } = questWorld();
+    // Boar tusks gathered before anyone asked for them.
+    world.addItem(player, { itemId: 'boar_tusk', qty: 4 });
+    player.questsDone = ['fen_01'];
+    player.level = 5;
+
+    world.submit(player.id, { t: 'acceptQuest', vendorId: maeve.id, questId: 'fen_02' });
+    world.tick();
+
+    const progress = player.quests?.find((q) => q.questId === 'fen_02');
+    // Objective 1 is the collect step; it should already be satisfied.
+    expect(progress?.counts[1]).toBe(4);
+  });
+
+  it('gives a class-matched reward where the chain promises one', () => {
+    for (const classId of ['warrior', 'mage'] as const) {
+      const world = new World({ seed: 5, zone: getZone('fenmarch'), classId });
+      const player = world.player;
+      const maeve = [...world.entities.values()].find(
+        (e) => e.kind === 'vendor' && e.vendorId === 'maeve',
+      )!;
+      player.pos = { x: maeve.pos.x + 1, z: maeve.pos.z };
+      player.level = 20;
+      player.questsDone = ['fen_01', 'fen_02', 'fen_03', 'fen_04', 'fen_05'];
+
+      world.submit(player.id, { t: 'acceptQuest', vendorId: maeve.id, questId: 'fen_06' });
+      world.tick();
+      player.quests![0]!.counts = [1];
+      world.submit(player.id, { t: 'turnInQuest', vendorId: maeve.id, questId: 'fen_06' });
+      world.tick();
+
+      const reward = player.inventory?.find((s) => canEquip(getItem(s.itemId), classId));
+      expect(reward, `${classId} got no usable reward`).toBeDefined();
+      expect(getItem(reward!.itemId).slot).toBe('weapon');
+    }
+  });
+
+  it('abandons a quest without marking it done', () => {
+    const { world, player, maeve } = questWorld();
+    world.submit(player.id, { t: 'acceptQuest', vendorId: maeve.id, questId: 'fen_01' });
+    world.tick();
+    world.submit(player.id, { t: 'abandonQuest', questId: 'fen_01' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'questAbandoned')).toBe(true);
+    expect(player.quests).toHaveLength(0);
+    expect(world.questsOfferedBy(player, 'maeve').map((q) => q.id)).toContain('fen_01');
+  });
+});
+
+describe('zone travel', () => {
+  it('moves the player to another zone and rebuilds it', () => {
+    const world = new World({ seed: 301, zone: getZone('fenmarch'), classId: 'warrior' });
+    const player = world.player;
+    player.level = 20;
+    const exit = world.zone.exits[0]!;
+    player.pos = { ...exit.pos };
+
+    world.submit(player.id, { t: 'travel', toZoneId: 'ardmoor' });
+    const events = world.tick();
+
+    expect(events.some((e) => e.t === 'zoneChanged' && e.zoneId === 'ardmoor')).toBe(true);
+    expect(world.zone.id).toBe('ardmoor');
+    expect(player.pos).toEqual(getZone('ardmoor').playerStart);
+    // The old zone's creatures are gone and Ardmoor's are here.
+    expect([...world.entities.values()].some((e) => e.defId === 'moor_hare')).toBe(false);
+    expect([...world.entities.values()].some((e) => e.defId === 'crag_goat')).toBe(true);
+    // And its trader came with it.
+    expect([...world.entities.values()].some((e) => e.vendorId === 'sorcha')).toBe(true);
+  });
+
+  it('refuses to travel from the wrong place', () => {
+    const world = new World({ seed: 302, zone: getZone('fenmarch'), classId: 'warrior' });
+    world.player.level = 30;
+    world.player.pos = { x: 0, z: 0 };
+    world.submit(world.playerId, { t: 'travel', toZoneId: 'ardmoor' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /not on the road/i.test(e.message))).toBe(true);
+    expect(world.zone.id).toBe('fenmarch');
+  });
+
+  it('refuses to travel below the road level', () => {
+    const world = new World({ seed: 303, zone: getZone('fenmarch'), classId: 'warrior' });
+    const exit = world.zone.exits[0]!;
+    world.player.pos = { ...exit.pos };
+    world.player.level = 5;
+    world.submit(world.playerId, { t: 'travel', toZoneId: 'ardmoor' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /level 20/i.test(e.message))).toBe(true);
+    expect(world.zone.id).toBe('fenmarch');
+  });
+
+  it('satisfies a travel objective on arrival', () => {
+    const world = new World({ seed: 304, zone: getZone('fenmarch'), classId: 'warrior' });
+    const player = world.player;
+    player.level = 20;
+    player.questsDone = ['fen_01', 'fen_02', 'fen_03', 'fen_04', 'fen_05', 'fen_06', 'fen_07'];
+    const maeve = [...world.entities.values()].find((e) => e.vendorId === 'maeve')!;
+    player.pos = { x: maeve.pos.x + 1, z: maeve.pos.z };
+    world.submit(player.id, { t: 'acceptQuest', vendorId: maeve.id, questId: 'fen_08' });
+    world.tick();
+
+    player.pos = { ...world.zone.exits[0]!.pos };
+    world.submit(player.id, { t: 'travel', toZoneId: 'ardmoor' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'questReady' && e.questId === 'fen_08')).toBe(true);
+  });
+
+  it('remembers the zone across a save', () => {
+    const world = new World({ seed: 305, zone: getZone('fenmarch'), classId: 'warrior' });
+    world.player.level = 40;
+    world.travelTo('ardmoor');
+    const restored = World.deserialize(world.serialize(), getZone('fenmarch'));
+    expect(restored.zone.id).toBe('ardmoor');
+    expect([...restored.entities.values()].some((e) => e.defId === 'crag_goat')).toBe(true);
   });
 });

@@ -619,3 +619,113 @@ canvas { display: block; }
 .vendor-row .price.sell { color: #8fe08a; }
 
 .nameplate.vendor { color: #ffdc8a; font-size: 12px; font-weight: bold; }
+
+/* ----------------------------------------------------- quests, zone, travel */
+
+#zone-banner {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  transform: translateX(-50%);
+  font-size: 34px;
+  letter-spacing: 7px;
+  color: var(--gold);
+  text-shadow: 0 3px 18px #000;
+  text-transform: uppercase;
+  opacity: 0;
+  white-space: nowrap;
+}
+
+#zone-banner.show { animation: zoneFade 3.4s ease-out forwards; }
+
+@keyframes zoneFade {
+  0% { opacity: 0; letter-spacing: 16px; }
+  18% { opacity: 1; letter-spacing: 7px; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+#travel-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 200px;
+  transform: translateX(-50%);
+  display: none;
+  padding: 8px 18px;
+  font-size: 14px;
+  color: #f0e2bd;
+  background: rgba(16, 22, 18, 0.9);
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  text-shadow: 0 1px 3px #000;
+  white-space: nowrap;
+}
+
+#travel-prompt.barred { color: #c39a92; border-color: rgba(200, 110, 90, 0.7); }
+
+#quest-log {
+  position: absolute;
+  top: 90px;
+  right: 300px;
+  width: 300px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  display: none;
+}
+
+.quest-entry {
+  border-left: 2px solid rgba(190, 168, 110, 0.4);
+  padding: 6px 0 8px 9px;
+  margin-bottom: 10px;
+}
+
+.quest-entry.ready { border-left-color: var(--gold); }
+
+.quest-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: bold;
+  font-size: 12.5px;
+}
+
+.quest-state { color: var(--gold); font-weight: normal; font-size: 10px; }
+.quest-entry.ready .quest-state { color: #8fe08a; }
+
+.quest-summary {
+  color: #a8a091;
+  font-style: italic;
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 3px 0 5px;
+}
+
+.quest-obj { font-size: 11.5px; padding: 1.5px 0; color: #cfc7b6; }
+.quest-obj.done { color: #8fe08a; }
+.quest-count { color: var(--gold); font-variant-numeric: tabular-nums; }
+
+.quest-abandon {
+  display: inline-block;
+  margin-top: 5px;
+  font-size: 10px;
+  color: #96806f;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.quest-abandon:hover { color: #d98a7a; }
+
+#vendor-quests { margin-bottom: 12px; }
+
+.quest-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 5px;
+  border-radius: 2px;
+  font-size: 12px;
+}
+
+.quest-row.clickable:hover { background: rgba(200, 170, 90, 0.14); }
+.quest-row.ready { color: #8fe08a; }

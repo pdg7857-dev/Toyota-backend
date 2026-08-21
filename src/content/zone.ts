@@ -25,6 +25,20 @@ export interface VendorPlacement {
   pos: Vec2;
 }
 
+/**
+ * A road out of the zone.
+ *
+ * Zone bands deliberately overlap (1-25, 20-40, 40-70, 70-100), so `minLevel`
+ * is set at the bottom of the destination's band: you may leave as soon as the
+ * next zone has anything you can fight, not once you have exhausted this one.
+ */
+export interface ZoneExit {
+  toZoneId: string;
+  pos: Vec2;
+  label: string;
+  minLevel: number;
+}
+
 export interface ZoneDef {
   id: string;
   name: string;
@@ -38,6 +52,9 @@ export interface ZoneDef {
    * enforces the clearance.
    */
   vendors: VendorPlacement[];
+  exits: ZoneExit[];
+  /** Level band this zone is built for, shown in the UI and used by tests. */
+  levelRange: [number, number];
 }
 
 /**
@@ -135,7 +152,140 @@ export const FENMARCH: ZoneDef = {
     // Off the road east of the outlaw watch, for the second half of the zone.
     { vendorId: 'bryn', pos: { x: 52, z: -30 } },
   ],
+  exits: [
+    { toZoneId: 'ardmoor', pos: { x: 78, z: -60 }, label: 'The Hill Road to Ardmoor', minLevel: 20 },
+  ],
+  levelRange: [1, 25],
 };
+
+// --------------------------------------------------------------------------
+// Zones 2-4.
+//
+// Same shape as the Fenmarch — difficulty rising north to south in bands, a
+// trader near the arrival point, a boss at the two-thirds mark and another at
+// the far end. Built from a helper because four hand-written zone literals is
+// four chances for a camp to end up somewhere it should not be.
+// --------------------------------------------------------------------------
+
+interface BandSpec {
+  mobId: string;
+  z: number;
+  /** Camp centres are mirrored either side of the road plus one on it. */
+  wide?: boolean;
+}
+
+function bands(specs: BandSpec[]): SpawnPoint[] {
+  const out: SpawnPoint[] = [];
+  for (const { mobId, z, wide } of specs) {
+    out.push(...camp(mobId, -27, z, 9, 6));
+    out.push(...camp(mobId, 27, z - 2, 9, 6));
+    if (wide) out.push(...camp(mobId, 0, z - 9, 9, 5));
+  }
+  return out;
+}
+
+export const ARDMOOR: ZoneDef = {
+  id: 'ardmoor',
+  name: 'Ardmoor',
+  halfSize: 140,
+  playerStart: { x: 0, z: 104 },
+  levelRange: [20, 40],
+  spawns: [
+    ...bands([
+      { mobId: 'crag_goat', z: 88, wide: true },
+      { mobId: 'hill_wolf', z: 64, wide: true },
+      { mobId: 'cattle_raider', z: 40, wide: true },
+      { mobId: 'moor_eagle', z: 16 },
+    ]),
+    // Aonghus holds the cattle-fold, with his axemen posted around it.
+    ...camp('clan_axeman', 0, -6, 13, 4).map((sp) => ({ ...sp, guardOf: 'aonghus' })),
+    { mobId: 'aonghus', pos: { x: 0, z: -8 } },
+    ...bands([
+      { mobId: 'clan_axeman', z: -34 },
+      { mobId: 'highland_bear', z: -58 },
+      { mobId: 'clan_berserker', z: -82 },
+    ]),
+    { mobId: 'muireann', pos: { x: 0, z: -116 } },
+  ],
+  vendors: [{ vendorId: 'sorcha', pos: { x: 0, z: 112 } }],
+  exits: [
+    { toZoneId: 'fenmarch', pos: { x: -58, z: 112 }, label: 'The Hill Road to the Fenmarch', minLevel: 1 },
+    { toZoneId: 'reach', pos: { x: 80, z: -60 }, label: 'The Drowned Causeway', minLevel: 38 },
+  ],
+};
+
+export const SUNKEN_REACH: ZoneDef = {
+  id: 'reach',
+  name: 'The Sunken Reach',
+  halfSize: 140,
+  playerStart: { x: 0, z: 104 },
+  levelRange: [38, 70],
+  spawns: [
+    ...bands([
+      { mobId: 'reach_eel', z: 88, wide: true },
+      { mobId: 'wrecker_scavenger', z: 64, wide: true },
+      { mobId: 'marsh_heron', z: 40, wide: true },
+      { mobId: 'smuggler_enforcer', z: 16 },
+    ]),
+    ...camp('smuggler_enforcer', 0, -6, 13, 4).map((sp) => ({ ...sp, guardOf: 'fiachra' })),
+    { mobId: 'fiachra', pos: { x: 0, z: -8 } },
+    ...bands([
+      { mobId: 'tidewatch_marauder', z: -34 },
+      { mobId: 'great_pike', z: -58 },
+      { mobId: 'grey_seal_bull', z: -82 },
+    ]),
+    { mobId: 'old_cauldron', pos: { x: 0, z: -116 } },
+  ],
+  vendors: [{ vendorId: 'odhran', pos: { x: 0, z: 112 } }],
+  exits: [
+    { toZoneId: 'ardmoor', pos: { x: -58, z: 112 }, label: 'The Causeway to Ardmoor', minLevel: 1 },
+    { toZoneId: 'caer_dubh', pos: { x: 80, z: -60 }, label: 'The Black Road to Caer Dubh', minLevel: 66 },
+  ],
+};
+
+export const CAER_DUBH: ZoneDef = {
+  id: 'caer_dubh',
+  name: 'Caer Dubh',
+  halfSize: 140,
+  playerStart: { x: 0, z: 104 },
+  levelRange: [66, 100],
+  spawns: [
+    ...bands([
+      { mobId: 'fort_mastiff', z: 88, wide: true },
+      { mobId: 'warband_levy', z: 64, wide: true },
+      { mobId: 'blackshield_spearman', z: 40, wide: true },
+      { mobId: 'siege_engineer', z: 16 },
+    ]),
+    ...camp('blackshield_spearman', 0, -6, 13, 4).map((sp) => ({ ...sp, guardOf: 'ruadhan' })),
+    { mobId: 'ruadhan', pos: { x: 0, z: -8 } },
+    ...bands([
+      { mobId: 'warhound_alpha', z: -34 },
+      { mobId: 'blackshield_champion', z: -58 },
+      { mobId: 'fort_warden', z: -82 },
+    ]),
+    { mobId: 'donnchadh', pos: { x: 0, z: -116 } },
+  ],
+  vendors: [{ vendorId: 'aoife', pos: { x: 0, z: 112 } }],
+  exits: [
+    { toZoneId: 'reach', pos: { x: -58, z: 112 }, label: 'The Black Road to the Reach', minLevel: 1 },
+  ],
+};
+
+/** Every zone, keyed by id. Save files store a zone id, not a zone. */
+export const ZONES: Record<string, ZoneDef> = {
+  fenmarch: FENMARCH,
+  ardmoor: ARDMOOR,
+  reach: SUNKEN_REACH,
+  caer_dubh: CAER_DUBH,
+};
+
+export function getZone(id: string): ZoneDef {
+  const zone = ZONES[id];
+  if (!zone) throw new Error(`Unknown zone: ${id}`);
+  return zone;
+}
+
+export const STARTING_ZONE_ID = 'fenmarch';
 
 export interface ClassDef {
   id: ClassId;

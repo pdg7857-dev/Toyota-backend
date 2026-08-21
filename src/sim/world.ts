@@ -27,6 +27,7 @@ import {
   PRIMARY_ATTRIBUTE,
   goldForKill,
   resolveAttack,
+  scaledDefenseBonus,
   threatFromDamage,
   xpForKill,
   xpToNext,
@@ -42,6 +43,7 @@ import type {
   EquipSlot,
   ItemStack,
   MobAbilityDef,
+  QuestObjective,
   SimEvent,
   SkillDef,
   Vec2,
@@ -50,7 +52,8 @@ import { canEquip, getItem } from '../content/items.js';
 import { getLootTable, getMob } from '../content/mobs.js';
 import { getSkill, skillsForClass } from '../content/skills.js';
 import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
-import { CLASSES, type ZoneDef } from '../content/zone.js';
+import { CLASSES, ZONES, getZone, type ZoneDef } from '../content/zone.js';
+import { getQuest, questsAvailableFrom } from '../content/quests.js';
 
 /** Distance within which a corpse can be looted. */
 const LOOT_RANGE = 4.5;
@@ -58,11 +61,24 @@ const LOOT_RANGE = 4.5;
 /** Distance within which a player can trade with a vendor. */
 const VENDOR_RANGE = 5.5;
 
+/** Distance within which a zone exit can be used. */
+const TRAVEL_RANGE = 6;
+
+/** How much each incoming hit delays an interruptible cast. */
+const CAST_PUSHBACK_MS = 400;
+
+/** How many counts an objective needs. Reach/level steps are one-and-done. */
+function neededFor(objective: QuestObjective): number {
+  if (objective.kind === 'kill') return objective.count;
+  if (objective.kind === 'collect') return objective.count;
+  return 1;
+}
+
 /** Time since last damage dealt/taken that still counts as "in combat". */
 const COMBAT_TIMEOUT_MS = 6000;
 
 /** Save format version. Bump when the Entity shape changes. */
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 
 export interface WorldOptions {
   seed: number;
@@ -72,7 +88,8 @@ export interface WorldOptions {
 }
 
 export class World {
-  readonly zone: ZoneDef;
+  /** The zone currently loaded. Mutable: `travelTo` swaps it. */
+  zone: ZoneDef;
   rng: Rng;
   tickCount = 0;
   entities = new Map<EntityId, Entity>();
@@ -259,7 +276,7 @@ export class World {
     let damageMultiplier = 1;
     for (const eff of e.effects) {
       if (eff.kind !== 'buff') continue;
-      stats.defense += eff.defenseBonus ?? 0;
+      stats.defense += scaledDefenseBonus(eff.defenseBonus ?? 0, e.level);
       damageMultiplier *= eff.damageMultiplier ?? 1;
     }
     if (damageMultiplier !== 1) {
@@ -347,6 +364,18 @@ export class World {
         break;
       case 'buy':
         this.tryBuy(e, cmd.vendorId, cmd.itemId);
+        break;
+      case 'acceptQuest':
+        this.tryAcceptQuest(e, cmd.vendorId, cmd.questId);
+        break;
+      case 'turnInQuest':
+        this.tryTurnInQuest(e, cmd.vendorId, cmd.questId);
+        break;
+      case 'abandonQuest':
+        this.abandonQuest(e, cmd.questId);
+        break;
+      case 'travel':
+        this.tryTravel(e, cmd.toZoneId);
         break;
       case 'respawn':
         if (e.dead && e.kind === 'player') this.respawnPlayer(e);
@@ -612,6 +641,7 @@ export class World {
           }
           const result = resolveAttack(this.rng, stats, this.statsOf(target), {
             levelDiff: mob.level - target.level,
+            attackerLevel: mob.level,
             weaponMultiplier: ability.damageMultiplier ?? 2,
             flatPower: 0,
             alwaysHits: true,
@@ -758,6 +788,7 @@ export class World {
 
       const result = resolveAttack(this.rng, stats, this.statsOf(target), {
         levelDiff: e.level - target.level,
+        attackerLevel: e.level,
         weaponMultiplier: 1,
         flatPower: 0,
       });
@@ -851,17 +882,28 @@ export class World {
       }
     }
 
-    // Damage breaks interruptible player casts. Mob abilities are not
-    // interruptible by damage — there is no interrupt skill in the game yet, so
-    // making them so would just mean they never resolve.
+    // Damage DELAYS an interruptible player cast rather than cancelling it.
+    //
+    // Full cancellation reads fine on paper and is unplayable in practice: a mob
+    // swinging every 1.6s means a 1.8s heal never once completes, which silently
+    // deleted the Priest's entire reason to exist. Pushback keeps the tension —
+    // casting while being hit is worse — without making it impossible. Movement
+    // still cancels outright, and mob interrupts still cancel outright; this is
+    // only about incidental damage.
     if (target.cast && target.cast.kind === 'skill' && getSkill(target.cast.id).interruptible) {
-      this.events.push({
-        t: 'castInterrupted',
-        sourceId: target.id,
-        kind: 'skill',
-        id: target.cast.id,
-      });
-      target.cast = null;
+      const already = target.cast.pushbackMs ?? 0;
+      // A cast can be delayed by at most its own duration, so it always lands.
+      const delay = Math.min(CAST_PUSHBACK_MS, Math.max(0, target.cast.totalMs - already));
+      if (delay > 0) {
+        target.cast.remainingMs += delay;
+        target.cast.pushbackMs = already + delay;
+        this.events.push({
+          t: 'castPushback',
+          sourceId: target.id,
+          id: target.cast.id,
+          delayMs: delay,
+        });
+      }
     }
 
     if (target.health <= 0) this.kill(target, sourceId);
@@ -887,6 +929,7 @@ export class World {
 
       if (killer && killer.kind === 'player') {
         this.awardXp(killer, xpForKill(def.xp, def.level, killer.level));
+        this.advanceQuests(killer, (o) => (o.kind === 'kill' && o.mobId === def.id ? 1 : 0));
       }
     } else {
       // Player death: everything currently hunting them goes home.
@@ -938,6 +981,7 @@ export class World {
       player.health = stats.maxHealth;
       player.energy = stats.maxEnergy;
       this.events.push({ t: 'levelUp', entityId: player.id, level: player.level });
+      this.advanceQuests(player, (o) => (o.kind === 'level' && player.level >= o.level ? 1 : 0));
 
       for (const skill of skillsForClass(player.classId!, player.level)) {
         if (skill.reqLevel === player.level) {
@@ -1047,6 +1091,7 @@ export class World {
         }
         const result = resolveAttack(this.rng, stats, this.statsOf(target), {
           levelDiff: source.level - target.level,
+          attackerLevel: source.level,
           weaponMultiplier: skill.weaponMultiplier ?? 1,
           flatPower: skill.flatPower ?? 0,
         });
@@ -1185,9 +1230,215 @@ export class World {
 
     for (const stack of items) this.addItem(player, stack);
     player.gold = (player.gold ?? 0) + gold;
+    this.syncCollectionQuests(player);
     corpse.corpseLoot = [];
     corpse.corpseGold = 0;
     this.events.push({ t: 'lootGained', entityId: player.id, items, gold });
+  }
+
+
+  // ------------------------------------------------------------------ quests
+
+  /** Quests this vendor can offer the player right now. */
+  questsOfferedBy(player: Entity, vendorId: string): ReturnType<typeof questsAvailableFrom> {
+    return questsAvailableFrom(
+      vendorId,
+      player.level,
+      player.questsDone ?? [],
+      (player.quests ?? []).map((q) => q.questId),
+    );
+  }
+
+  /** True when every objective of an accepted quest is satisfied. */
+  isQuestComplete(player: Entity, questId: string): boolean {
+    const progress = player.quests?.find((q) => q.questId === questId);
+    if (!progress) return false;
+    return getQuest(questId).objectives.every((o, i) => (progress.counts[i] ?? 0) >= neededFor(o));
+  }
+
+  private tryAcceptQuest(player: Entity, vendorId: EntityId, questId: string): void {
+    if (player.kind !== 'player') return;
+    const vendor = this.vendorInReach(player, vendorId);
+    if (!vendor) return;
+    const offered = this.questsOfferedBy(player, vendor.vendorId!);
+    if (!offered.some((q) => q.id === questId)) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'That work is not on offer.' });
+      return;
+    }
+    player.quests = [...(player.quests ?? []), { questId, counts: getQuest(questId).objectives.map(() => 0) }];
+    this.events.push({ t: 'questAccepted', entityId: player.id, questId });
+
+    // A "reach this zone" step is already satisfied if you are standing there,
+    // and collection steps count what you are already carrying.
+    this.advanceQuests(player, (o) => (o.kind === 'reach' && o.zoneId === this.zone.id ? 1 : 0));
+    this.syncCollectionQuests(player);
+  }
+
+  private tryTurnInQuest(player: Entity, vendorId: EntityId, questId: string): void {
+    if (player.kind !== 'player') return;
+    const vendor = this.vendorInReach(player, vendorId);
+    if (!vendor) return;
+    const quest = getQuest(questId);
+    if (vendor.vendorId !== quest.giverVendorId) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'That is not their business.' });
+      return;
+    }
+    if (!this.isQuestComplete(player, questId)) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'That work is not finished.' });
+      return;
+    }
+
+    player.quests = (player.quests ?? []).filter((q) => q.questId !== questId);
+    player.questsDone = [...(player.questsDone ?? []), questId];
+
+    const items = [...(quest.rewards.items ?? [])];
+    const classItem = player.classId ? quest.rewards.classItems?.[player.classId] : undefined;
+    if (classItem) items.push(classItem);
+    for (const itemId of items) this.addItem(player, { itemId, qty: 1 });
+    player.gold = (player.gold ?? 0) + quest.rewards.gold;
+
+    this.events.push({
+      t: 'questCompleted',
+      entityId: player.id,
+      questId,
+      xp: quest.rewards.xp,
+      gold: quest.rewards.gold,
+      items,
+    });
+    this.awardXp(player, quest.rewards.xp);
+  }
+
+  private abandonQuest(player: Entity, questId: string): void {
+    if (!player.quests?.some((q) => q.questId === questId)) return;
+    player.quests = player.quests.filter((q) => q.questId !== questId);
+    this.events.push({ t: 'questAbandoned', entityId: player.id, questId });
+  }
+
+  /**
+   * Push progress into every active quest. `gain` reports how much a given
+   * objective advanced, which keeps the event hooks above to one line each.
+   */
+  private advanceQuests(player: Entity, gain: (o: QuestObjective) => number): void {
+    for (const progress of player.quests ?? []) {
+      const quest = getQuest(progress.questId);
+      let changed = false;
+      quest.objectives.forEach((objective, i) => {
+        const needed = neededFor(objective);
+        const current = progress.counts[i] ?? 0;
+        if (current >= needed) return;
+        const added = gain(objective);
+        if (added <= 0) return;
+        progress.counts[i] = Math.min(needed, current + added);
+        changed = true;
+        this.events.push({
+          t: 'questProgress',
+          entityId: player.id,
+          questId: quest.id,
+          objectiveIndex: i,
+          count: progress.counts[i]!,
+          needed,
+        });
+      });
+      if (changed && this.isQuestComplete(player, quest.id)) {
+        this.events.push({ t: 'questReady', entityId: player.id, questId: quest.id });
+      }
+    }
+  }
+
+  /**
+   * Collection objectives read the bags directly rather than counting pickups.
+   * Counting pickups would mean items gathered before accepting the quest never
+   * counted, which reads as a bug every single time.
+   */
+  private syncCollectionQuests(player: Entity): void {
+    for (const progress of player.quests ?? []) {
+      const quest = getQuest(progress.questId);
+      let changed = false;
+      quest.objectives.forEach((objective, i) => {
+        if (objective.kind !== 'collect') return;
+        const held = player.inventory?.find((s) => s.itemId === objective.itemId)?.qty ?? 0;
+        const capped = Math.min(objective.count, held);
+        if (capped === (progress.counts[i] ?? 0)) return;
+        progress.counts[i] = capped;
+        changed = true;
+        this.events.push({
+          t: 'questProgress',
+          entityId: player.id,
+          questId: quest.id,
+          objectiveIndex: i,
+          count: capped,
+          needed: objective.count,
+        });
+      });
+      if (changed && this.isQuestComplete(player, quest.id)) {
+        this.events.push({ t: 'questReady', entityId: player.id, questId: quest.id });
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ travel
+
+  /** The exit the player is currently standing on, if any. */
+  exitInReach(player: Entity): ZoneDef['exits'][number] | null {
+    for (const exit of this.zone.exits) {
+      if (dist(player.pos.x, player.pos.z, exit.pos.x, exit.pos.z) <= TRAVEL_RANGE) return exit;
+    }
+    return null;
+  }
+
+  private tryTravel(player: Entity, toZoneId: string): void {
+    if (player.kind !== 'player') return;
+    const exit = this.zone.exits.find((e) => e.toZoneId === toZoneId);
+    if (!exit) return;
+    if (dist(player.pos.x, player.pos.z, exit.pos.x, exit.pos.z) > TRAVEL_RANGE) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'You are not on the road.' });
+      return;
+    }
+    if (player.level < exit.minLevel) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `${exit.label} is no place for you yet. Return at level ${exit.minLevel}.`,
+      });
+      return;
+    }
+    this.travelTo(toZoneId);
+  }
+
+  /**
+   * Load a different zone.
+   *
+   * Only the player survives — every mob and trader is rebuilt from the zone
+   * definition. Mobs respawn on a timer anyway, so nothing meaningful is lost,
+   * and it keeps a save to one zone's worth of state instead of four.
+   */
+  travelTo(zoneId: string): void {
+    const zone = getZone(zoneId);
+    const player = this.player;
+
+    for (const id of [...this.entities.keys()]) {
+      if (id !== player.id) this.entities.delete(id);
+    }
+    this.zone = zone;
+    this.lastCombatTick.clear();
+
+    player.pos = { ...zone.playerStart };
+    player.targetId = null;
+    player.autoAttack = false;
+    player.moveDir = { x: 0, z: 0 };
+    player.cast = null;
+    player.effects = [];
+
+    for (const sp of zone.spawns) this.spawnMob(sp.mobId, sp.pos);
+    for (const v of zone.vendors) this.spawnVendor(v.vendorId, v.pos);
+
+    this.events.push({
+      t: 'zoneChanged',
+      entityId: player.id,
+      zoneId: zone.id,
+      zoneName: zone.name,
+    });
+    this.advanceQuests(player, (o) => (o.kind === 'reach' && o.zoneId === zone.id ? 1 : 0));
   }
 
   // ------------------------------------------------------------------ trade
@@ -1326,13 +1577,19 @@ export class World {
       tickCount: number;
       nextId: number;
       playerId: EntityId;
+      zoneId?: string;
       entities: Entity[];
     };
     if (data.version !== SAVE_VERSION) {
       throw new Error(`Unsupported save version: ${data.version}`);
     }
 
-    const world = new World({ seed: data.seed, zone, classId: 'warrior' });
+    // Saves record which zone the player was standing in. Resolve it against
+    // the registry when possible, but fall back to the zone handed in so ad-hoc
+    // zones (tests, anything not in ZONES) still round-trip.
+    const resolved =
+      data.zoneId && data.zoneId !== zone.id && ZONES[data.zoneId] ? ZONES[data.zoneId]! : zone;
+    const world = new World({ seed: data.seed, zone: resolved, classId: 'warrior' });
     world.entities.clear();
     world.rng = Rng.fromState(data.seed);
     world.tickCount = data.tickCount;

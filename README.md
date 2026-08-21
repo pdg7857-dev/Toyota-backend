@@ -28,10 +28,33 @@ Add `?fresh` to the URL to discard your save and start over.
 | `T` | Toggle auto-attack |
 | `F` | Loot a nearby corpse |
 | `E` | Trade with a nearby vendor |
+| `G` | Take the road to the next zone |
+| `J` | Quest log |
 | `C` / `I` | Character / Inventory |
 | `Esc` | Clear target |
 
 Progress autosaves to `localStorage` every 10 seconds.
+
+## The world
+
+Four zones, levels 1 to 100. The bands **overlap** — the next zone opens before
+the last one is done with you, so pushing on is a choice, not an eviction.
+
+| Zone | Levels | Ends at |
+|---|---|---|
+| **The Fenmarch** | 1–25 | Cadfael, the Outlaw Chief ★5 · Old Scar ★6 |
+| **Ardmoor** | 20–40 | Aonghus the Cattle-Lord ★5 · Muireann of the Nine Scars ★6 |
+| **The Sunken Reach** | 38–70 | Fiachra the Wrecker ★5 · Old Cauldron ★6 |
+| **Caer Dubh** | 66–100 | Ruadhán the Blackshield ★5 · Donnchadh, Lord of Caer Dubh ★6 |
+
+Each zone has a trader who also hands out work. Their quest chain walks you band
+by band toward the bosses and then points at the road onward — that is what
+turns a field of camps into a route. Follow it and you will never wonder where
+to go next.
+
+Roughly **26,000 kills** to reach 100, and the cost per level keeps climbing the
+whole way: about 6 kills for your first level, 90 a level through the twenties,
+435 a level near the cap.
 
 ## The Fenmarch
 
@@ -108,14 +131,17 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 - Mob abilities: telegraphed dodgeable AoEs, interruptible heals and summons,
   enrage thresholds, adds that despawn with their summoner and drop no loot
 - Mob AI: aggro radius, threat tables, chase, leash-and-heal, respawn timers
-- 12 mob types across ★1–★6, 65 items, 12 loot tables, class-aware boss drops
-- Levelling to 25, spendable attribute points, skill unlocks
+- 39 creatures across ★1–★6 including 8 bosses, 142 items, class-aware boss drops
+- Four zones with overlapping level bands and travel between them
+- Quest chains per zone: kill, collect and travel objectives, chained by
+  prerequisite, with class-matched rewards
+- Levelling to 100, spendable attribute points, skill unlocks
 - Death and respawn, save/load via full world serialization
 
 ## Development
 
 ```bash
-npm run verify     # typecheck + 104 unit and balance tests
+npm run verify     # typecheck + 127 unit and balance tests
 npm run smoke      # plays the game in real Chromium, writes screenshots/
 ```
 

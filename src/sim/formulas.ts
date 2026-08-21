@@ -30,11 +30,21 @@ export const GCD_MS = 1500;
 export const POINTS_PER_LEVEL = 3;
 
 /**
- * Level cap for the current content release. The Fenmarch is built for 1–25;
- * raise this when a second zone lands, not before — a cap above the content
- * just leaves players stranded with nothing level-appropriate to fight.
+ * Level cap for the current content release.
+ *
+ * Four zones cover it, and their bands deliberately OVERLAP so you are never
+ * forced out of a zone the moment you outgrow one camp — you choose whether to
+ * finish the old zone or push into the new one:
+ *
+ *   The Fenmarch      1–25
+ *   Ardmoor           20–40
+ *   The Sunken Reach  40–70
+ *   Caer Dubh         70–100
+ *
+ * Never raise this above what the zones actually cover; a cap beyond the
+ * content just strands players with nothing level-appropriate to fight.
  */
-export const MAX_LEVEL = 25;
+export const MAX_LEVEL = 100;
 
 // --------------------------------------------------------------------------
 // The grind dials.
@@ -47,10 +57,15 @@ export const MAX_LEVEL = 25;
 // To make the whole game shorter or longer, change XP_CURVE_BASE.
 // To change how *steeply* the grind ramps, change XP_CURVE_EXPONENT.
 // `test/balance.test.ts` prints the resulting kills-per-level table.
+//
+// The exponent was eased from 2.15 to 1.92 when the cap moved from 25 to 100.
+// At 2.15 the curve was fine to 25 but demanded ~1,800 kills for a single level
+// in the nineties, which is not a grind, it is a wall. 1.92 keeps kills-per-
+// level climbing the whole way while landing the last levels in the hundreds.
 // --------------------------------------------------------------------------
 
 export const XP_CURVE_BASE = 48;
-export const XP_CURVE_EXPONENT = 2.15;
+export const XP_CURVE_EXPONENT = 1.92;
 
 /** XP required to go from `level` to `level + 1`. */
 export function xpToNext(level: number): number {
@@ -221,6 +236,34 @@ export function deriveStats(input: DeriveInput): DerivedStats {
   };
 }
 
+// --------------------------------------------------------------------------
+// Mob stat curves.
+//
+// The Fenmarch bestiary (levels 1-25) is hand-tuned and is the REFERENCE. These
+// curves are fitted to it, and every mob in the later zones is generated from
+// them. That is what keeps three more zones balanced without re-tuning forty
+// creatures by hand — and it means a new mob cannot accidentally be a wall or a
+// pushover just because someone typed the wrong health.
+//
+// Both return the ★1-equivalent value; STAR_MODIFIERS is applied on top.
+// --------------------------------------------------------------------------
+
+/** Base health for a mob of this level, before star scaling. */
+export function curveMobHealth(level: number): number {
+  return Math.round(68 + level * 13);
+}
+
+/** Average hit for a mob of this level, before star scaling. */
+export function curveMobDamage(level: number): number {
+  return 2 + level * 1.2 + Math.pow(level, 1.6) * 0.27;
+}
+
+/** Base xp is already curved by `baseMobXp`; this is the damage spread. */
+export function curveMobDamageRange(level: number): { min: number; max: number } {
+  const avg = curveMobDamage(level);
+  return { min: Math.round(avg * 0.78), max: Math.round(avg * 1.22) };
+}
+
 /** Mob stat block, derived the same way so player and mob math stay symmetric. */
 export function deriveMobStats(def: MobDef): DerivedStats {
   const star = STAR_MODIFIERS[def.stars];
@@ -246,14 +289,16 @@ export function deriveMobStats(def: MobDef): DerivedStats {
  * low-level player with a good weapon farm content far above them, which
  * flattens the whole progression curve.
  */
-export function hitChance(attack: number, defense: number, levelDiff: number): number {
-  // The stat term is deliberately weak. `defense` already reduces damage via
-  // `mitigation()`, so letting it also drive avoidance makes armour double-dip:
-  // by level 25 a fully geared player had ~280 defence against a mob attack
-  // rating of ~140, which pushed incoming hit chance under 60% on top of 74%
-  // mitigation. Level gap is meant to be the dominant term here, not gear.
-  const raw = 0.9 + (attack - defense) * 0.0006 + levelDiff * 0.04;
-  return Math.min(0.95, Math.max(0.15, raw));
+export function hitChance(levelDiff: number): number {
+  // Accuracy is purely a function of the level gap.
+  //
+  // It used to carry a small (attack - defense) term as well, which was already
+  // a double-dip — `defense` reduces damage through `mitigation()` — and it
+  // broke outright once the cap moved to 100. Player defence grows far faster
+  // than a mob's attack rating, so by the nineties mobs landed 31% of swings on
+  // top of 91% mitigation and endgame fights cost no health at all. Gear
+  // belongs in mitigation; level belongs here.
+  return Math.min(0.95, Math.max(0.15, 0.9 + levelDiff * 0.04));
 }
 
 /**
@@ -268,9 +313,35 @@ export function levelDamageModifier(levelDiff: number): number {
   return Math.min(1.5, Math.max(0.25, 1 + levelDiff * 0.04));
 }
 
-/** Diminishing-returns mitigation: 100 defense halves incoming damage. */
-export function mitigation(defense: number): number {
-  return 100 / (100 + Math.max(0, defense));
+/**
+ * Diminishing-returns mitigation, measured against the threat.
+ *
+ * The softening constant scales with the ATTACKER's level rather than being
+ * fixed at 100. With a fixed constant, armour that felt right at level 25
+ * (~28% of damage getting through) reduced a level-90 hit to under 9%, because
+ * player defence outgrows any constant across a hundred levels. Scaling the
+ * constant keeps a level-appropriate hit landing for a level-appropriate share
+ * of your health at every point on the curve.
+ *
+ * It only starts scaling above level 25, so the hand-tuned Fenmarch band is
+ * numerically untouched.
+ */
+export function mitigation(defense: number, attackerLevel = 1): number {
+  const softening = 100 + Math.max(0, attackerLevel - 25) * 5.5;
+  return softening / (softening + Math.max(0, defense));
+}
+
+/**
+ * A defensive buff's effective value at a given level.
+ *
+ * The listed bonus is flat, which is readable on a tooltip but useless past the
+ * band it was written for: "+60 defence" is a third of your total at level 10
+ * and a rounding error at level 60, so every class's panic button quietly
+ * stopped working halfway through the game. Scaling above 25 keeps the Fenmarch
+ * tuning exact while letting the same skill still matter at the cap.
+ */
+export function scaledDefenseBonus(base: number, level: number): number {
+  return base * (1 + Math.max(0, level - 25) * 0.06);
 }
 
 export const CRIT_MULTIPLIER = 1.5;
@@ -284,6 +355,8 @@ export interface AttackResult {
 export interface AttackOptions {
   /** attackerLevel - defenderLevel. */
   levelDiff: number;
+  /** The attacker's absolute level, which scales mitigation. */
+  attackerLevel: number;
   /** 1 for an auto-attack, otherwise whatever the skill or ability declares. */
   weaponMultiplier: number;
   /** Added pre-mitigation. */
@@ -299,7 +372,7 @@ export function resolveAttack(
   defender: DerivedStats,
   opts: AttackOptions,
 ): AttackResult {
-  if (!opts.alwaysHits && !rng.chance(hitChance(attacker.attack, defender.defense, opts.levelDiff))) {
+  if (!opts.alwaysHits && !rng.chance(hitChance(opts.levelDiff))) {
     return { hit: false, crit: false, amount: 0 };
   }
   const roll = rng.range(attacker.damageMin, attacker.damageMax);
@@ -310,7 +383,7 @@ export function resolveAttack(
   const crit = rng.chance(attacker.critChance);
   if (crit) raw *= CRIT_MULTIPLIER;
 
-  const amount = Math.max(1, Math.round(raw * mitigation(defender.defense)));
+  const amount = Math.max(1, Math.round(raw * mitigation(defender.defense, opts.attackerLevel)));
   return { hit: true, crit, amount };
 }
 

@@ -3,8 +3,10 @@ import { getSkill, skillBarFor } from '../content/skills.js';
 import { QUALITY_COLORS, canEquip, getItem } from '../content/items.js';
 import { getMob } from '../content/mobs.js';
 import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
+import { getQuest } from '../content/quests.js';
 import { xpToNext } from '../sim/formulas.js';
 import { BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
+import { ZONES } from '../content/zone.js';
 import type { Attributes, Command, Entity, EntityId, SimEvent } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 
@@ -68,6 +70,11 @@ export class Hud {
     deathOverlay: HTMLElement;
     overlays: HTMLElement;
     telegraph: HTMLElement;
+    zoneBanner: HTMLElement;
+    travelPrompt: HTMLElement;
+    questLog: HTMLElement;
+    questLogBody: HTMLElement;
+    vendorQuests: HTMLElement;
     vendorWindow: HTMLElement;
     vendorName: HTMLElement;
     vendorGreeting: HTMLElement;
@@ -138,6 +145,11 @@ export class Hud {
       deathOverlay: this.q('#death-overlay'),
       overlays: this.q('#overlays'),
       telegraph: this.q('#telegraph-banner'),
+      zoneBanner: this.q('#zone-banner'),
+      travelPrompt: this.q('#travel-prompt'),
+      questLog: this.q('#quest-log'),
+      questLogBody: this.q('#quest-log-body'),
+      vendorQuests: this.q('#vendor-quests'),
       vendorWindow: this.q('#vendor-window'),
       vendorName: this.q('#vendor-name'),
       vendorGreeting: this.q('#vendor-greeting'),
@@ -230,6 +242,34 @@ export class Hud {
           break;
         case 'skillUnlocked':
           this.log(`New skill learned: ${getSkill(ev.skillId).name}.`, 'log-good');
+          break;
+        case 'questAccepted':
+          this.log(`Quest accepted: ${getQuest(ev.questId).name}`, 'log-good');
+          this.renderVendor();
+          break;
+        case 'questProgress': {
+          const objective = getQuest(ev.questId).objectives[ev.objectiveIndex]!;
+          this.log(`${objective.text}: ${ev.count}/${ev.needed}`, 'log-xp');
+          break;
+        }
+        case 'questReady':
+          this.log(`${getQuest(ev.questId).name} — return to the one who asked.`, 'log-good');
+          this.renderVendor();
+          break;
+        case 'questCompleted': {
+          const quest = getQuest(ev.questId);
+          this.log(`Completed: ${quest.name} (+${ev.xp} xp, +${ev.gold} gold)`, 'log-good');
+          for (const itemId of ev.items) this.log(`Received ${getItem(itemId).name}.`, 'log-loot');
+          this.renderVendor();
+          break;
+        }
+        case 'questAbandoned':
+          this.log(`Abandoned: ${getQuest(ev.questId).name}`, 'log-warn');
+          break;
+        case 'zoneChanged':
+          this.log(`You arrive in ${ev.zoneName}.`, 'log-good');
+          this.showZoneBanner(ev.zoneName);
+          this.closeVendor();
           break;
         case 'sold': {
           const item = getItem(ev.itemId);
@@ -409,6 +449,8 @@ export class Hud {
       // across the map that would reject every click.
       if (!vendor || d > 7 || player.dead) this.closeVendor();
     }
+    this.updateTravelPrompt(player);
+    if (this.els.questLog.style.display === 'block') this.renderQuestLog();
     if (this.els.characterWindow.style.display === 'block') this.renderCharacter();
     if (this.els.inventoryWindow.style.display === 'block') this.renderInventory();
   }
@@ -600,6 +642,7 @@ export class Hud {
     const vendor = this.world.entity(this.openVendorId);
     if (!vendor?.vendorId) return;
     const player = this.world.player;
+    this.renderVendorQuests(vendor.vendorId, player);
     const gold = player.gold ?? 0;
     this.els.vendorGold.textContent = `${gold}g`;
 
@@ -654,6 +697,126 @@ export class Hud {
         this.emit({ t: 'sell', vendorId: this.openVendorId!, itemId: stack.itemId, qty: stack.qty }),
       );
       bags.appendChild(row);
+    }
+  }
+
+  toggleQuestLog(): void {
+    const visible = this.els.questLog.style.display === 'block';
+    this.els.questLog.style.display = visible ? 'none' : 'block';
+    if (!visible) this.renderQuestLog();
+  }
+
+  private showZoneBanner(name: string): void {
+    const banner = this.els.zoneBanner;
+    banner.textContent = name;
+    banner.classList.remove('show');
+    // Restart the animation rather than letting a second arrival be silent.
+    void banner.offsetWidth;
+    banner.classList.add('show');
+  }
+
+  /** The road out, shown only when you are actually standing on it. */
+  private updateTravelPrompt(player: Entity): void {
+    const exit = this.world.exitInReach(player);
+    if (!exit || player.dead) {
+      this.els.travelPrompt.style.display = 'none';
+      return;
+    }
+    const canGo = player.level >= exit.minLevel;
+    this.els.travelPrompt.style.display = 'block';
+    this.els.travelPrompt.className = canGo ? '' : 'barred';
+    this.els.travelPrompt.textContent = canGo
+      ? `${exit.label} — press G to travel`
+      : `${exit.label} — return at level ${exit.minLevel}`;
+  }
+
+  private renderQuestLog(): void {
+    const player = this.world.player;
+    const body = this.els.questLogBody;
+    body.innerHTML = '';
+    const active = player.quests ?? [];
+
+    if (active.length === 0) {
+      const none = document.createElement('div');
+      none.className = 'empty';
+      none.textContent = 'No work in hand. Traders have some.';
+      body.appendChild(none);
+      return;
+    }
+
+    for (const progress of active) {
+      const quest = getQuest(progress.questId);
+      const ready = this.world.isQuestComplete(player, quest.id);
+      const entry = document.createElement('div');
+      entry.className = `quest-entry${ready ? ' ready' : ''}`;
+      entry.innerHTML =
+        `<div class="quest-head"><span>${quest.name}</span>` +
+        `<span class="quest-state">${ready ? 'Ready' : ZONES[quest.zoneId]?.name ?? ''}</span></div>` +
+        `<div class="quest-summary">${quest.summary}</div>` +
+        quest.objectives
+          .map((objective, i) => {
+            const needed =
+              objective.kind === 'kill' || objective.kind === 'collect' ? objective.count : 1;
+            const count = Math.min(needed, progress.counts[i] ?? 0);
+            const done = count >= needed;
+            return (
+              `<div class="quest-obj${done ? ' done' : ''}">` +
+              `${done ? '✔' : '○'} ${objective.text} ` +
+              `<span class="quest-count">${count}/${needed}</span></div>`
+            );
+          })
+          .join('');
+
+      const abandon = document.createElement('span');
+      abandon.className = 'quest-abandon clickable';
+      abandon.textContent = 'Abandon';
+      abandon.addEventListener('click', () => this.emit({ t: 'abandonQuest', questId: quest.id }));
+      entry.appendChild(abandon);
+      body.appendChild(entry);
+    }
+  }
+
+  /** Work this trader has on offer, and work of theirs you have finished. */
+  private renderVendorQuests(vendorId: string, player: Entity): void {
+    const host = this.els.vendorQuests;
+    host.innerHTML = '';
+
+    const offers = this.world.questsOfferedBy(player, vendorId);
+    const ready = (player.quests ?? [])
+      .map((q) => getQuest(q.questId))
+      .filter((q) => q.giverVendorId === vendorId && this.world.isQuestComplete(player, q.id));
+
+    if (offers.length === 0 && ready.length === 0) return;
+
+    const head = document.createElement('div');
+    head.className = 'vendor-col-head';
+    head.textContent = 'Work';
+    host.appendChild(head);
+
+    for (const quest of ready) {
+      const row = document.createElement('div');
+      row.className = 'quest-row ready clickable';
+      row.innerHTML =
+        `<span>✔ ${quest.name}</span>` +
+        `<span class="price">+${quest.rewards.xp.toLocaleString()} xp</span>`;
+      row.title = 'Click to hand in';
+      row.addEventListener('click', () =>
+        this.emit({ t: 'turnInQuest', vendorId: this.openVendorId!, questId: quest.id }),
+      );
+      host.appendChild(row);
+    }
+
+    for (const quest of offers) {
+      const row = document.createElement('div');
+      row.className = 'quest-row clickable';
+      row.innerHTML =
+        `<span>! ${quest.name} <span class="muted">lv${quest.minLevel}</span></span>` +
+        `<span class="price">+${quest.rewards.xp.toLocaleString()} xp</span>`;
+      row.title = quest.summary;
+      row.addEventListener('click', () =>
+        this.emit({ t: 'acceptQuest', vendorId: this.openVendorId!, questId: quest.id }),
+      );
+      host.appendChild(row);
     }
   }
 
@@ -860,9 +1023,19 @@ const TEMPLATE = `
     </div>
   </div>
 
+  <div id="zone-banner"></div>
+
+  <div id="travel-prompt"></div>
+
+  <div id="quest-log" class="window panel clickable">
+    <h3>Quest Log</h3>
+    <div id="quest-log-body"></div>
+  </div>
+
   <div id="vendor-window" class="panel clickable">
     <h3><span id="vendor-name"></span><span id="vendor-close">✕</span></h3>
     <div id="vendor-greeting"></div>
+    <div id="vendor-quests"></div>
     <div id="vendor-cols">
       <div>
         <div class="vendor-col-head">For sale</div>
@@ -883,6 +1056,7 @@ const TEMPLATE = `
   <div id="help">
     <b>WASD</b> move &nbsp; <b>Right-drag</b> look &nbsp; <b>Scroll</b> zoom<br />
     <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–7</b> skills &nbsp; <b>T</b> auto-attack<br />
-    <b>F</b> loot &nbsp; <b>E</b> trade &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
+    <b>F</b> loot &nbsp; <b>E</b> trade &nbsp; <b>G</b> travel &nbsp; <b>J</b> quests<br />
+    <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
   </div>
 `;

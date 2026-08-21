@@ -124,6 +124,15 @@ async function main() {
     () => getComputedStyle(document.querySelector('#vendor-window')).display !== 'none',
   );
 
+  // Accept the first quest on offer from the trader.
+  const questAccepted = await page.evaluate(() => {
+    const row = document.querySelector('#vendor-quests .quest-row');
+    if (!row) return false;
+    row.click();
+    return true;
+  });
+  await wait(300);
+
   const goldBefore = await page.evaluate(() => window.__game.world.player.gold);
   // Sell the first thing in the bags column.
   await page.click('#vendor-bags .vendor-row');
@@ -133,12 +142,35 @@ async function main() {
   await page.keyboard.press('Escape');
   await wait(300);
 
+  // Quest log, then travel to the next zone.
+  await page.keyboard.press('j');
+  await wait(400);
+  await page.screenshot({ path: join(OUT, '06b-quest-log.png') });
+  await page.keyboard.press('j');
+
+  const travelled = await page.evaluate(async () => {
+    const g = window.__game;
+    const player = g.world.player;
+    player.level = 25;
+    const exit = g.world.zone.exits[0];
+    player.pos.x = exit.pos.x;
+    player.pos.z = exit.pos.z;
+    await new Promise((r) => setTimeout(r, 300));
+    g.world.submit(player.id, { t: 'travel', toZoneId: exit.toZoneId });
+    await new Promise((r) => setTimeout(r, 500));
+    return g.world.zone.id;
+  });
+  await wait(900);
+  await page.screenshot({ path: join(OUT, '06c-new-zone.png') });
+
   // --- boss scene ---------------------------------------------------------
   // Jump straight to Old Scar via the debug handle so we can actually see a
   // telegraph render. Reaching him legitimately is a 25-level grind.
   const bossReady = await page.evaluate(() => {
     const g = window.__game;
     if (!g) return false;
+    // The travel step above left us in Ardmoor; Old Scar lives in the Fenmarch.
+    if (g.world.zone.id !== 'fenmarch') g.world.travelTo('fenmarch');
     const player = g.world.player;
     player.level = 25;
     player.attributes = { strength: 51, dexterity: 4, focus: 2, vitality: 37 };
@@ -203,6 +235,8 @@ async function main() {
     ['nameplates rendering', state.nameplates > 0],
     ['combat happened', state.log.some((l) => /hit|slain|died/i.test(l ?? ''))],
     ['vendor shop opened', vendorOpened],
+    ['quest accepted from trader', questAccepted],
+    ['travelled to a second zone', travelled === 'ardmoor'],
     ['selling paid gold', soldSomething],
     ['boss telegraph rendered', sawTelegraph],
     ['no page errors', errors.length === 0],

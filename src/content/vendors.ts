@@ -71,6 +71,49 @@ export const VENDORS: Record<string, VendorDef> = {
   },
 };
 
+/** Late-zone traders. Stock is the zone's uncommon tier — never above it. */
+function lateVendor(
+  id: string,
+  name: string,
+  greeting: string,
+  tierAdjectives: [string, string],
+  color: number,
+): VendorDef {
+  const stock: string[] = [];
+  for (const adjective of tierAdjectives) {
+    const slug = adjective.toLowerCase();
+    for (const classId of ['warrior', 'priest', 'ranger', 'rogue', 'mage']) {
+      stock.push(`${slug}_${classId}_weapon`);
+    }
+    for (const slot of ['head', 'chest', 'legs', 'ring']) stock.push(`${slug}_${slot}`);
+  }
+  return { id, name, greeting, stock, view: { color, height: 1.82, radius: 0.45 } };
+}
+
+Object.assign(VENDORS, {
+  sorcha: lateVendor(
+    'sorcha',
+    'Sorcha of the Hill Road',
+    'The clans up here trade in cattle and grudges. I prefer coin.',
+    ['Honed', 'Bloodiron'],
+    0xc9b98d,
+  ),
+  odhran: lateVendor(
+    'odhran',
+    'Odhrán the Salvager',
+    'Everything the tide takes, it gives back to somebody. Usually me.',
+    ['Sunken', 'Tidewrought'],
+    0x9fb3a8,
+  ),
+  aoife: lateVendor(
+    'aoife',
+    'Sister Aoife',
+    'I follow the warband and bury what it leaves. Buy something useful.',
+    ['Blackstone', 'Dread'],
+    0xb0a8bc,
+  ),
+});
+
 export function getVendor(id: string): VendorDef {
   const vendor = VENDORS[id];
   if (!vendor) throw new Error(`Unknown vendor: ${id}`);

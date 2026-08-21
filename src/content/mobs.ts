@@ -1,4 +1,4 @@
-import { baseMobXp } from '../sim/formulas.js';
+import { baseMobXp, curveMobDamageRange, curveMobHealth } from '../sim/formulas.js';
 import type { LootTable, MobAbilityDef, MobDef, StarRating } from '../sim/types.js';
 
 /**
@@ -125,6 +125,137 @@ export const LOOT_TABLES: Record<string, LootTable> = {
       { itemId: 'reliquary_mace', chance: 0.05, min: 1, max: 1 },
       { itemId: 'outlaw_mail', chance: 0.06, min: 1, max: 1 },
       { itemId: 'outlaws_signet', chance: 0.04, min: 1, max: 1 },
+    ],
+  },
+
+  // --- Ardmoor, the Sunken Reach and Caer Dubh ---
+  crag_goat_loot: generatedLoot('crag_goat_loot', 'goat_horn', ['honed_head', 'honed_chest', 'honed_legs', 'honed_ring']),
+  hill_wolf_loot: generatedLoot('hill_wolf_loot', 'clan_torc', ['honed_head', 'honed_chest', 'honed_legs', 'honed_ring']),
+  cattle_raider_loot: generatedLoot('cattle_raider_loot', 'clan_torc', ['bloodiron_head', 'bloodiron_chest', 'bloodiron_legs', 'bloodiron_ring']),
+  moor_eagle_loot: generatedLoot('moor_eagle_loot', 'clan_torc', ['bloodiron_head', 'bloodiron_chest', 'bloodiron_legs', 'bloodiron_ring']),
+  clan_axeman_loot: generatedLoot('clan_axeman_loot', 'eagle_feather', ['stormforged_head', 'stormforged_chest', 'stormforged_legs', 'stormforged_ring']),
+  highland_bear_loot: generatedLoot('highland_bear_loot', 'eagle_feather', ['stormforged_head', 'stormforged_chest', 'stormforged_legs', 'stormforged_ring']),
+  clan_berserker_loot: generatedLoot('clan_berserker_loot', 'cattle_lords_ring', ['stormforged_head', 'stormforged_chest', 'stormforged_legs', 'stormforged_ring']),
+  reach_eel_loot: generatedLoot('reach_eel_loot', 'eel_skin', ['sunken_head', 'sunken_chest', 'sunken_legs', 'sunken_ring']),
+  wrecker_scavenger_loot: generatedLoot('wrecker_scavenger_loot', 'eel_skin', ['sunken_head', 'sunken_chest', 'sunken_legs', 'sunken_ring']),
+  marsh_heron_loot: generatedLoot('marsh_heron_loot', 'wreckers_salvage', ['tidewrought_head', 'tidewrought_chest', 'tidewrought_legs', 'tidewrought_ring']),
+  smuggler_enforcer_loot: generatedLoot('smuggler_enforcer_loot', 'wreckers_salvage', ['tidewrought_head', 'tidewrought_chest', 'tidewrought_legs', 'tidewrought_ring']),
+  tidewatch_marauder_loot: generatedLoot('tidewatch_marauder_loot', 'pike_jaw', ['duskforged_head', 'duskforged_chest', 'duskforged_legs', 'duskforged_ring']),
+  great_pike_loot: generatedLoot('great_pike_loot', 'pike_jaw', ['duskforged_head', 'duskforged_chest', 'duskforged_legs', 'duskforged_ring']),
+  grey_seal_bull_loot: generatedLoot('grey_seal_bull_loot', 'tidewatch_seal', ['duskforged_head', 'duskforged_chest', 'duskforged_legs', 'duskforged_ring']),
+  fort_mastiff_loot: generatedLoot('fort_mastiff_loot', 'mastiff_fang', ['blackstone_head', 'blackstone_chest', 'blackstone_legs', 'blackstone_ring']),
+  warband_levy_loot: generatedLoot('warband_levy_loot', 'mastiff_fang', ['blackstone_head', 'blackstone_chest', 'blackstone_legs', 'blackstone_ring']),
+  blackshield_spearman_loot: generatedLoot('blackshield_spearman_loot', 'blackshield_boss', ['dread_head', 'dread_chest', 'dread_legs', 'dread_ring']),
+  siege_engineer_loot: generatedLoot('siege_engineer_loot', 'blackshield_boss', ['dread_head', 'dread_chest', 'dread_legs', 'dread_ring']),
+  warhound_alpha_loot: generatedLoot('warhound_alpha_loot', 'blackshield_boss', ['sovereign_head', 'sovereign_chest', 'sovereign_legs', 'sovereign_ring']),
+  blackshield_champion_loot: generatedLoot('blackshield_champion_loot', 'warden_signet', ['sovereign_head', 'sovereign_chest', 'sovereign_legs', 'sovereign_ring']),
+  fort_warden_loot: generatedLoot('fort_warden_loot', 'warden_signet', ['sovereign_head', 'sovereign_chest', 'sovereign_legs', 'sovereign_ring']),
+  aonghus_loot: {
+    id: 'aonghus_loot',
+    goldMultiplier: 1.2,
+    classWeapons: {
+      warrior: 'stormforged_warrior_weapon',
+      priest: 'stormforged_priest_weapon',
+      ranger: 'stormforged_ranger_weapon',
+      rogue: 'stormforged_rogue_weapon',
+      mage: 'stormforged_mage_weapon',
+    },
+    entries: [
+      { itemId: 'eagle_feather', chance: 1, min: 1, max: 2 },
+      { itemId: 'stormforged_head', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'stormforged_chest', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'stormforged_legs', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'stormforged_ring', chance: 0.5, min: 1, max: 1 },
+    ],
+  },
+  muireann_loot: {
+    id: 'muireann_loot',
+    goldMultiplier: 1.2,
+    classWeapons: {
+      warrior: 'gravebound_warrior_weapon',
+      priest: 'gravebound_priest_weapon',
+      ranger: 'gravebound_ranger_weapon',
+      rogue: 'gravebound_rogue_weapon',
+      mage: 'gravebound_mage_weapon',
+    },
+    entries: [
+      { itemId: 'cattle_lords_ring', chance: 1, min: 1, max: 2 },
+      { itemId: 'gravebound_head', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'gravebound_chest', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'gravebound_legs', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'gravebound_ring', chance: 0.5, min: 1, max: 1 },
+    ],
+  },
+  fiachra_loot: {
+    id: 'fiachra_loot',
+    goldMultiplier: 1.2,
+    classWeapons: {
+      warrior: 'tidewrought_warrior_weapon',
+      priest: 'tidewrought_priest_weapon',
+      ranger: 'tidewrought_ranger_weapon',
+      rogue: 'tidewrought_rogue_weapon',
+      mage: 'tidewrought_mage_weapon',
+    },
+    entries: [
+      { itemId: 'wreckers_salvage', chance: 1, min: 1, max: 2 },
+      { itemId: 'tidewrought_head', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'tidewrought_chest', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'tidewrought_legs', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'tidewrought_ring', chance: 0.5, min: 1, max: 1 },
+    ],
+  },
+  old_cauldron_loot: {
+    id: 'old_cauldron_loot',
+    goldMultiplier: 1.2,
+    classWeapons: {
+      warrior: 'wraithbound_warrior_weapon',
+      priest: 'wraithbound_priest_weapon',
+      ranger: 'wraithbound_ranger_weapon',
+      rogue: 'wraithbound_rogue_weapon',
+      mage: 'wraithbound_mage_weapon',
+    },
+    entries: [
+      { itemId: 'tidewatch_seal', chance: 1, min: 1, max: 2 },
+      { itemId: 'wraithbound_head', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'wraithbound_chest', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'wraithbound_legs', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'wraithbound_ring', chance: 0.5, min: 1, max: 1 },
+    ],
+  },
+  ruadhan_loot: {
+    id: 'ruadhan_loot',
+    goldMultiplier: 1.2,
+    classWeapons: {
+      warrior: 'dread_warrior_weapon',
+      priest: 'dread_priest_weapon',
+      ranger: 'dread_ranger_weapon',
+      rogue: 'dread_rogue_weapon',
+      mage: 'dread_mage_weapon',
+    },
+    entries: [
+      { itemId: 'blackshield_boss', chance: 1, min: 1, max: 2 },
+      { itemId: 'dread_head', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'dread_chest', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'dread_legs', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'dread_ring', chance: 0.5, min: 1, max: 1 },
+    ],
+  },
+  donnchadh_loot: {
+    id: 'donnchadh_loot',
+    goldMultiplier: 1.2,
+    classWeapons: {
+      warrior: 'godsbane_warrior_weapon',
+      priest: 'godsbane_priest_weapon',
+      ranger: 'godsbane_ranger_weapon',
+      rogue: 'godsbane_rogue_weapon',
+      mage: 'godsbane_mage_weapon',
+    },
+    entries: [
+      { itemId: 'caer_dubh_crown', chance: 1, min: 1, max: 2 },
+      { itemId: 'godsbane_head', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'godsbane_chest', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'godsbane_legs', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'godsbane_ring', chance: 0.5, min: 1, max: 1 },
     ],
   },
 
@@ -277,6 +408,138 @@ interface MobSpec extends Omit<MobDef, 'xp'> {
 /** Fill in xp from level and stars so the two can never drift apart. */
 function mob(spec: MobSpec): MobDef {
   return { ...spec, xp: spec.xp ?? baseMobXp(spec.level, spec.stars as StarRating) };
+}
+
+
+// === ZONES 2-4: GENERATED BESTIARY (levels 20-100) ========================
+//
+// The Fenmarch above is hand-tuned and stays the reference. Everything from
+// Ardmoor south is generated from the curves in `formulas.ts`, so forty more
+// creatures across seventy-five levels cannot drift out of balance one typo at
+// a time. A definition here says what a thing IS — name, level, stars, how it
+// fights, what it drops — and the numbers follow from that.
+
+type Archetype = 'beast' | 'brute' | 'skirmisher' | 'archer';
+
+/** How an archetype fights. Flavour only; damage budget is identical. */
+const ARCHETYPE_PROFILE: Record<
+  Archetype,
+  { swingMs: number; attackRange: number; moveSpeed: number; aggroRadius: number }
+> = {
+  beast: { swingMs: 1600, attackRange: 2.3, moveSpeed: 5.2, aggroRadius: 10 },
+  brute: { swingMs: 2100, attackRange: 2.9, moveSpeed: 4.4, aggroRadius: 12 },
+  skirmisher: { swingMs: 1750, attackRange: 2.5, moveSpeed: 4.8, aggroRadius: 12 },
+  archer: { swingMs: 2100, attackRange: 8, moveSpeed: 4.4, aggroRadius: 13 },
+};
+
+interface GeneratedMobSpec {
+  id: string;
+  name: string;
+  level: number;
+  stars: StarRating;
+  archetype: Archetype;
+  lootTableId: string;
+  view: { color: number; height: number; radius: number };
+  abilities?: MobAbilityDef[];
+  /** Bosses respawn slowly; ordinary mobs keep a camp populated. */
+  respawnMs?: number;
+}
+
+/** Build a mob from its identity, taking every number from the shared curves. */
+function generated(spec: GeneratedMobSpec): MobDef {
+  const profile = ARCHETYPE_PROFILE[spec.archetype];
+  const damage = curveMobDamageRange(spec.level);
+  const boss = spec.stars >= 5;
+  return {
+    id: spec.id,
+    name: spec.name,
+    level: spec.level,
+    stars: spec.stars,
+    attributes: {
+      strength: Math.round(spec.level * 1.1),
+      dexterity: Math.round(spec.level * 0.7),
+      focus: Math.round(spec.level * 0.4),
+      vitality: Math.round(spec.level * 1.0),
+    },
+    // Bosses carry far less base health than their star multiplier implies —
+    // ★5/★6 already multiply by 9x/15x, and stacking a full health curve on
+    // top of that produced the 200-second slogs the Fenmarch tuning removed.
+    baseHealth: boss ? Math.round(curveMobHealth(spec.level) * 0.42) : curveMobHealth(spec.level),
+    // Bosses hit near their full curve value: they are meant to be survived
+    // by playing well, and a discount here just made them long normal mobs.
+    damageMin: boss ? Math.round(damage.min * 0.95) : damage.min,
+    damageMax: boss ? Math.round(damage.max * 0.95) : damage.max,
+    damageType: 'physical',
+    swingMs: profile.swingMs,
+    attackRange: boss ? profile.attackRange + 0.5 : profile.attackRange,
+    moveSpeed: profile.moveSpeed,
+    aggroRadius: boss ? profile.aggroRadius + 3 : profile.aggroRadius,
+    leashRadius: boss ? 48 : 32,
+    xp: baseMobXp(spec.level, spec.stars),
+    lootTableId: spec.lootTableId,
+    respawnMs: spec.respawnMs ?? (boss ? 300000 : 30000),
+    ...(spec.abilities ? { abilities: spec.abilities } : {}),
+    view: spec.view,
+  };
+}
+
+/** A boss kit: one telegraphed AoE, one interruptible heal, one enrage. */
+function bossKit(name: string, radius: number, slamText: string, healText: string): MobAbilityDef[] {
+  return [
+    {
+      id: `${name}_slam`,
+      name: 'Crushing Blow',
+      kind: 'heavySlam',
+      cooldownMs: 19000,
+      castMs: 2100,
+      radius,
+      damageMultiplier: 3.4,
+      interruptible: false,
+      telegraphText: slamText,
+    },
+    {
+      id: `${name}_mend`,
+      name: 'Second Wind',
+      kind: 'mend',
+      cooldownMs: 32000,
+      castMs: 2600,
+      healFraction: 0.11,
+      interruptible: true,
+      telegraphText: healText,
+    },
+    {
+      id: `${name}_enrage`,
+      name: 'Last Stand',
+      kind: 'enrage',
+      cooldownMs: 0,
+      castMs: 0,
+      healthThreshold: 0.3,
+      enrageDamageMultiplier: 1.45,
+      telegraphText: `${slamText.split(' ')[0]} fights with everything left!`,
+    },
+  ];
+}
+
+/**
+ * Loot for a generated mob: one merchant good, a couple of tier-appropriate
+ * pieces at low odds, holding to the same "better, not more" rule as zone 1.
+ */
+function generatedLoot(
+  id: string,
+  merchantGoodId: string,
+  gear: string[],
+  goldMultiplier?: number,
+): LootTable {
+  return {
+    id,
+    ...(goldMultiplier ? { goldMultiplier } : {}),
+    entries: [
+      { itemId: merchantGoodId, chance: 0.55, min: 1, max: 2 },
+      // Four pieces at 4.5% each keeps total gear chance at 18%, comfortably
+      // inside the cap and in the same band as the hand-tuned zone-1 tables.
+      ...gear.map((itemId) => ({ itemId, chance: 0.045, min: 1, max: 1 })),
+    ],
+  };
 }
 
 export const MOBS: Record<string, MobDef> = {
@@ -440,8 +703,8 @@ export const MOBS: Record<string, MobDef> = {
     stars: 5,
     attributes: { strength: 32, dexterity: 18, focus: 12, vitality: 30 },
     baseHealth: 275,
-    damageMin: 35,
-    damageMax: 49,
+    damageMin: 47,
+    damageMax: 66,
     damageType: 'physical',
     swingMs: 1900,
     attackRange: 3.0,
@@ -498,8 +761,8 @@ export const MOBS: Record<string, MobDef> = {
     stars: 6,
     attributes: { strength: 40, dexterity: 16, focus: 8, vitality: 40 },
     baseHealth: 170,
-    damageMin: 36,
-    damageMax: 50,
+    damageMin: 48,
+    damageMax: 67,
     damageType: 'physical',
     swingMs: 2050,
     attackRange: 3.4,
@@ -512,6 +775,258 @@ export const MOBS: Record<string, MobDef> = {
     view: { color: 0x33251a, height: 3.2, radius: 1.15 },
   }),
 };
+
+Object.assign(MOBS, {
+  crag_goat: generated({
+    id: 'crag_goat',
+    name: 'Crag Goat',
+    level: 20,
+    stars: 1,
+    archetype: 'beast',
+    lootTableId: 'crag_goat_loot',
+    view: { color: 0x9c8f7a, height: 1.1, radius: 0.5 },
+  }),
+  hill_wolf: generated({
+    id: 'hill_wolf',
+    name: 'Hill Wolf',
+    level: 23,
+    stars: 2,
+    archetype: 'beast',
+    lootTableId: 'hill_wolf_loot',
+    view: { color: 0x6b6f78, height: 1.2, radius: 0.5 },
+  }),
+  cattle_raider: generated({
+    id: 'cattle_raider',
+    name: 'Cattle Raider',
+    level: 26,
+    stars: 2,
+    archetype: 'skirmisher',
+    lootTableId: 'cattle_raider_loot',
+    view: { color: 0x7a6350, height: 1.85, radius: 0.48 },
+  }),
+  moor_eagle: generated({
+    id: 'moor_eagle',
+    name: 'Moor Eagle',
+    level: 29,
+    stars: 3,
+    archetype: 'beast',
+    lootTableId: 'moor_eagle_loot',
+    view: { color: 0x8a7654, height: 1, radius: 0.6 },
+  }),
+  clan_axeman: generated({
+    id: 'clan_axeman',
+    name: 'Clan Axeman',
+    level: 32,
+    stars: 3,
+    archetype: 'brute',
+    lootTableId: 'clan_axeman_loot',
+    view: { color: 0x8c5f42, height: 1.95, radius: 0.55 },
+  }),
+  highland_bear: generated({
+    id: 'highland_bear',
+    name: 'Highland Bear',
+    level: 35,
+    stars: 4,
+    archetype: 'brute',
+    lootTableId: 'highland_bear_loot',
+    view: { color: 0x4f3b2a, height: 2.3, radius: 0.85 },
+  }),
+  clan_berserker: generated({
+    id: 'clan_berserker',
+    name: 'Clan Berserker',
+    level: 38,
+    stars: 4,
+    archetype: 'skirmisher',
+    lootTableId: 'clan_berserker_loot',
+    view: { color: 0x9c4a38, height: 2, radius: 0.55 },
+  }),
+  reach_eel: generated({
+    id: 'reach_eel',
+    name: 'Reach Eel',
+    level: 42,
+    stars: 2,
+    archetype: 'beast',
+    lootTableId: 'reach_eel_loot',
+    view: { color: 0x4a6b5c, height: 0.7, radius: 0.5 },
+  }),
+  wrecker_scavenger: generated({
+    id: 'wrecker_scavenger',
+    name: 'Wrecker Scavenger',
+    level: 46,
+    stars: 2,
+    archetype: 'skirmisher',
+    lootTableId: 'wrecker_scavenger_loot',
+    view: { color: 0x6d6455, height: 1.85, radius: 0.48 },
+  }),
+  marsh_heron: generated({
+    id: 'marsh_heron',
+    name: 'Marsh Heron',
+    level: 50,
+    stars: 3,
+    archetype: 'beast',
+    lootTableId: 'marsh_heron_loot',
+    view: { color: 0xa8a294, height: 2.1, radius: 0.45 },
+  }),
+  smuggler_enforcer: generated({
+    id: 'smuggler_enforcer',
+    name: 'Smuggler Enforcer',
+    level: 54,
+    stars: 3,
+    archetype: 'brute',
+    lootTableId: 'smuggler_enforcer_loot',
+    view: { color: 0x5f5344, height: 1.95, radius: 0.55 },
+  }),
+  tidewatch_marauder: generated({
+    id: 'tidewatch_marauder',
+    name: 'Tidewatch Marauder',
+    level: 58,
+    stars: 3,
+    archetype: 'archer',
+    lootTableId: 'tidewatch_marauder_loot',
+    view: { color: 0x4f5f6b, height: 1.85, radius: 0.48 },
+  }),
+  great_pike: generated({
+    id: 'great_pike',
+    name: 'Great Pike',
+    level: 62,
+    stars: 4,
+    archetype: 'beast',
+    lootTableId: 'great_pike_loot',
+    view: { color: 0x3f5a4a, height: 1.3, radius: 0.75 },
+  }),
+  grey_seal_bull: generated({
+    id: 'grey_seal_bull',
+    name: 'Grey Seal Bull',
+    level: 66,
+    stars: 4,
+    archetype: 'brute',
+    lootTableId: 'grey_seal_bull_loot',
+    view: { color: 0x6b6d70, height: 1.9, radius: 0.9 },
+  }),
+  fort_mastiff: generated({
+    id: 'fort_mastiff',
+    name: 'Fort Mastiff',
+    level: 72,
+    stars: 2,
+    archetype: 'beast',
+    lootTableId: 'fort_mastiff_loot',
+    view: { color: 0x51453a, height: 1.25, radius: 0.55 },
+  }),
+  warband_levy: generated({
+    id: 'warband_levy',
+    name: 'Warband Levy',
+    level: 76,
+    stars: 2,
+    archetype: 'skirmisher',
+    lootTableId: 'warband_levy_loot',
+    view: { color: 0x6b6152, height: 1.85, radius: 0.5 },
+  }),
+  blackshield_spearman: generated({
+    id: 'blackshield_spearman',
+    name: 'Blackshield Spearman',
+    level: 80,
+    stars: 3,
+    archetype: 'brute',
+    lootTableId: 'blackshield_spearman_loot',
+    view: { color: 0x3d4148, height: 1.95, radius: 0.55 },
+  }),
+  siege_engineer: generated({
+    id: 'siege_engineer',
+    name: 'Siege Engineer',
+    level: 84,
+    stars: 3,
+    archetype: 'archer',
+    lootTableId: 'siege_engineer_loot',
+    view: { color: 0x6d5f4a, height: 1.85, radius: 0.5 },
+  }),
+  warhound_alpha: generated({
+    id: 'warhound_alpha',
+    name: 'Warhound Alpha',
+    level: 88,
+    stars: 4,
+    archetype: 'beast',
+    lootTableId: 'warhound_alpha_loot',
+    view: { color: 0x453a30, height: 1.4, radius: 0.62 },
+  }),
+  blackshield_champion: generated({
+    id: 'blackshield_champion',
+    name: 'Blackshield Champion',
+    level: 93,
+    stars: 4,
+    archetype: 'brute',
+    lootTableId: 'blackshield_champion_loot',
+    view: { color: 0x33373d, height: 2.05, radius: 0.6 },
+  }),
+  fort_warden: generated({
+    id: 'fort_warden',
+    name: 'Fort Warden',
+    level: 97,
+    stars: 4,
+    archetype: 'skirmisher',
+    lootTableId: 'fort_warden_loot',
+    view: { color: 0x2b2f35, height: 2, radius: 0.58 },
+  }),
+  aonghus: generated({
+    id: 'aonghus',
+    name: 'Aonghus the Cattle-Lord',
+    level: 30,
+    stars: 5,
+    archetype: 'brute',
+    lootTableId: 'aonghus_loot',
+    abilities: bossKit('aonghus', 6, 'Aonghus swings his great axe in a wide arc!', 'Aonghus is catching his breath — cut him off!'),
+    view: { color: 0xa5623f, height: 2.2, radius: 0.65 },
+  }),
+  muireann: generated({
+    id: 'muireann',
+    name: 'Muireann of the Nine Scars',
+    level: 40,
+    stars: 6,
+    archetype: 'skirmisher',
+    lootTableId: 'muireann_loot',
+    abilities: bossKit('muireann', 7, 'Muireann winds up a killing sweep!', 'Muireann is binding her wounds — stop her!'),
+    view: { color: 0xb04a4a, height: 2.15, radius: 0.6 },
+  }),
+  fiachra: generated({
+    id: 'fiachra',
+    name: 'Fiachra the Wrecker',
+    level: 55,
+    stars: 5,
+    archetype: 'brute',
+    lootTableId: 'fiachra_loot',
+    abilities: bossKit('fiachra', 7, 'Fiachra heaves his anchor overhead!', 'Fiachra is patching himself up — interrupt him!'),
+    view: { color: 0x4a6b7a, height: 2.25, radius: 0.68 },
+  }),
+  old_cauldron: generated({
+    id: 'old_cauldron',
+    name: 'Old Cauldron, the Reach Pike',
+    level: 70,
+    stars: 6,
+    archetype: 'beast',
+    lootTableId: 'old_cauldron_loot',
+    abilities: bossKit('old_cauldron', 8, 'Old Cauldron thrashes the shallows!', 'Old Cauldron sinks to mend — cut it off!'),
+    view: { color: 0x2f4a3d, height: 2.4, radius: 1.1 },
+  }),
+  ruadhan: generated({
+    id: 'ruadhan',
+    name: 'Ruadhán the Blackshield',
+    level: 85,
+    stars: 5,
+    archetype: 'brute',
+    lootTableId: 'ruadhan_loot',
+    abilities: bossKit('ruadhan', 7, 'Ruadhán raises his shield to crush the ground!', 'Ruadhán is being tended — stop it!'),
+    view: { color: 0x3a3f4a, height: 2.3, radius: 0.7 },
+  }),
+  donnchadh: generated({
+    id: 'donnchadh',
+    name: 'Donnchadh, Lord of Caer Dubh',
+    level: 100,
+    stars: 6,
+    archetype: 'brute',
+    lootTableId: 'donnchadh_loot',
+    abilities: bossKit('donnchadh', 8, 'Donnchadh brings his greatsword down like a falling tower!', 'Donnchadh is drawing on his last reserves — interrupt him!'),
+    view: { color: 0x1f2228, height: 2.6, radius: 0.9 },
+  }),
+} satisfies Record<string, MobDef>);
 
 export function getMob(id: string): MobDef {
   const mobDef = MOBS[id];

@@ -72,6 +72,12 @@ export class InputController {
       case 'KeyE':
         this.talkToNearestVendor();
         break;
+      case 'KeyG':
+        this.travelIfOnRoad();
+        break;
+      case 'KeyJ':
+        this.hud.toggleQuestLog();
+        break;
       case 'KeyC':
         this.hud.toggleCharacter();
         break;
@@ -164,6 +170,12 @@ export class InputController {
       }
     }
     if (best !== null) this.hud.openVendor(best);
+  }
+
+  /** Take the road out, if standing on one. */
+  private travelIfOnRoad(): void {
+    const exit = this.world.exitInReach(this.world.player);
+    if (exit) this.emit({ t: 'travel', toZoneId: exit.toZoneId });
   }
 
   private lootNearest(): void {

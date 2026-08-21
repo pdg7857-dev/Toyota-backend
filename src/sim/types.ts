@@ -215,6 +215,47 @@ export interface LootTable {
   classWeapons?: Partial<Record<ClassId, string>>;
 }
 
+// --------------------------------------------------------------------------
+// Quests.
+//
+// Quests exist to give a zone DIRECTION. Without them the Fenmarch is a field
+// of camps and nothing tells you the interesting thing is south. A chain of
+// objectives, each pointing one band further on, is the cheapest way to turn a
+// layout into a route.
+// --------------------------------------------------------------------------
+
+export type QuestObjective =
+  | { kind: 'kill'; mobId: string; count: number; text: string }
+  | { kind: 'collect'; itemId: string; count: number; text: string }
+  | { kind: 'reach'; zoneId: string; text: string }
+  | { kind: 'level'; level: number; text: string };
+
+export interface QuestDef {
+  id: string;
+  name: string;
+  /** Zone the quest is given in, and the vendor who gives and takes it. */
+  zoneId: string;
+  giverVendorId: string;
+  minLevel: number;
+  /** Quest that must be finished first, if any — this is how chains are built. */
+  requires?: string;
+  summary: string;
+  objectives: QuestObjective[];
+  rewards: {
+    xp: number;
+    gold: number;
+    items?: string[];
+    /** A reward matched to the player's class, resolved on turn-in. */
+    classItems?: Partial<Record<ClassId, string>>;
+  };
+}
+
+/** Live progress for one accepted quest: one counter per objective. */
+export interface QuestProgress {
+  questId: string;
+  counts: number[];
+}
+
 /**
  * A trader. Vendors are the sink for gold and the buyer for merchant goods,
  * which is what makes those two reward streams mean anything.
@@ -280,6 +321,8 @@ export interface CastState {
   remainingMs: number;
   totalMs: number;
   targetId: EntityId | null;
+  /** Delay already added by incoming damage; capped so a cast cannot stall out. */
+  pushbackMs?: number;
 }
 
 export interface Entity {
@@ -310,6 +353,10 @@ export interface Entity {
   inventory?: ItemStack[];
   equipment?: Partial<Record<EquipSlot, string>>;
   skillCooldowns?: Record<string, number>;
+  /** Accepted quests and their per-objective counters. */
+  quests?: QuestProgress[];
+  /** Ids of quests already turned in; a quest is never repeatable. */
+  questsDone?: string[];
   /** Global cooldown remaining; blocks every skill while > 0. */
   gcdMs?: number;
   /** Normalized movement intent, held until the client changes it. */
@@ -355,6 +402,10 @@ export type Command =
   | { t: 'spendPoint'; attr: keyof Attributes }
   | { t: 'sell'; vendorId: EntityId; itemId: string; qty: number }
   | { t: 'buy'; vendorId: EntityId; itemId: string }
+  | { t: 'acceptQuest'; vendorId: EntityId; questId: string }
+  | { t: 'turnInQuest'; vendorId: EntityId; questId: string }
+  | { t: 'abandonQuest'; questId: string }
+  | { t: 'travel'; toZoneId: string }
   | { t: 'respawn' };
 
 /** A command paired with the actor issuing it. Server-side, actorId is trusted. */
@@ -372,6 +423,8 @@ export type SimEvent =
   | { t: 'castBegin'; sourceId: EntityId; kind: 'skill' | 'ability'; id: string; durationMs: number }
   | { t: 'castInterrupted'; sourceId: EntityId; kind: 'skill' | 'ability'; id: string }
   | { t: 'castComplete'; sourceId: EntityId; kind: 'skill' | 'ability'; id: string }
+  /** Damage delayed a cast rather than cancelling it. */
+  | { t: 'castPushback'; sourceId: EntityId; id: string; delayMs: number }
   /** A dodgeable AoE is winding up. The renderer draws the danger zone from this. */
   | {
       t: 'telegraph';
@@ -417,6 +470,12 @@ export type SimEvent =
   | { t: 'xpGained'; entityId: EntityId; amount: number }
   | { t: 'levelUp'; entityId: EntityId; level: number }
   | { t: 'lootGained'; entityId: EntityId; items: ItemStack[]; gold: number }
+  | { t: 'questAccepted'; entityId: EntityId; questId: string }
+  | { t: 'questProgress'; entityId: EntityId; questId: string; objectiveIndex: number; count: number; needed: number }
+  | { t: 'questReady'; entityId: EntityId; questId: string }
+  | { t: 'questCompleted'; entityId: EntityId; questId: string; xp: number; gold: number; items: string[] }
+  | { t: 'questAbandoned'; entityId: EntityId; questId: string }
+  | { t: 'zoneChanged'; entityId: EntityId; zoneId: string; zoneName: string }
   | { t: 'sold'; entityId: EntityId; itemId: string; qty: number; gold: number }
   | { t: 'bought'; entityId: EntityId; itemId: string; gold: number }
   | { t: 'skillUnlocked'; entityId: EntityId; skillId: string }

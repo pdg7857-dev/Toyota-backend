@@ -1,8 +1,9 @@
 import { World } from '../src/sim/world.js';
-import { POINTS_PER_LEVEL, TICK_MS } from '../src/sim/formulas.js';
-import type { Attributes, Entity, SimEvent } from '../src/sim/types.js';
+import { PRIMARY_ATTRIBUTE, POINTS_PER_LEVEL, TICK_MS } from '../src/sim/formulas.js';
+import type { Attributes, ClassId, Entity, SimEvent } from '../src/sim/types.js';
 import { CLASSES, type ZoneDef } from '../src/content/zone.js';
 import { getMob } from '../src/content/mobs.js';
+import { getSkill } from '../src/content/skills.js';
 
 /** A bare arena with one mob a couple of metres away — no scenery, no neighbours. */
 export function duelZone(mobId: string, distance = 2.5): ZoneDef {
@@ -13,6 +14,8 @@ export function duelZone(mobId: string, distance = 2.5): ZoneDef {
     playerStart: { x: 0, z: 0 },
     spawns: [{ mobId, pos: { x: distance, z: 0 } }],
     vendors: [],
+    exits: [],
+    levelRange: [1, 100],
   };
 }
 
@@ -25,6 +28,8 @@ export function emptyZone(): ZoneDef {
     playerStart: { x: 0, z: 0 },
     spawns: [],
     vendors: [],
+    exits: [],
+    levelRange: [1, 100],
   };
 }
 
@@ -37,28 +42,26 @@ export function vendorZone(vendorId: string, distance = 2): ZoneDef {
     playerStart: { x: 0, z: 0 },
     spawns: [],
     vendors: [{ vendorId, pos: { x: distance, z: 0 } }],
+    exits: [],
+    levelRange: [1, 100],
   };
 }
 
 /**
- * Spend a level's worth of attribute points the way a Warrior player plausibly
- * would: mostly strength, the rest into vitality. Balance targets assume this
- * build, so if the intended build changes, this changes with it.
+ * How a player of `classId` plausibly spends attribute points: 60% into the
+ * attribute their attack rating scales off, the rest into Vitality.
+ *
+ * This MUST follow PRIMARY_ATTRIBUTE. It previously hardcoded Warrior and
+ * Priest, which meant Ranger, Rogue and Mage were tested pouring points into
+ * Strength — an attribute none of them use. They read as underpowered when the
+ * only thing wrong was the harness building them wrong.
  */
-export function warriorBuild(level: number): Attributes {
+export function buildFor(classId: ClassId, level: number): Attributes {
   const points = (level - 1) * POINTS_PER_LEVEL;
-  const strength = Math.round(points * 0.6);
-  return { strength, dexterity: 0, focus: 0, vitality: points - strength };
-}
-
-/**
- * How a Priest player plausibly spends points: mostly Focus (their attack
- * rating scales off it), the rest into Vitality.
- */
-export function priestBuild(level: number): Attributes {
-  const points = (level - 1) * POINTS_PER_LEVEL;
-  const focus = Math.round(points * 0.6);
-  return { strength: 0, dexterity: 0, focus, vitality: points - focus };
+  const primary = Math.round(points * 0.6);
+  const attributes: Attributes = { strength: 0, dexterity: 0, focus: 0, vitality: points - primary };
+  attributes[PRIMARY_ATTRIBUTE[classId]] += primary;
+  return attributes;
 }
 
 export interface LevelOptions {
@@ -71,19 +74,32 @@ export interface LevelOptions {
 export function levelPlayer(world: World, opts: LevelOptions): Entity {
   const player = world.player;
   player.level = opts.level;
-  const base = CLASSES[player.classId ?? 'warrior'].baseAttributes;
-  const build = player.classId === 'priest' ? priestBuild(opts.level) : warriorBuild(opts.level);
+  const classId = player.classId ?? 'warrior';
+  const base = CLASSES[classId].baseAttributes;
+  const build = buildFor(classId, opts.level);
   player.attributes = {
     strength: base.strength + build.strength,
     dexterity: base.dexterity + build.dexterity,
     focus: base.focus + build.focus,
     vitality: base.vitality + build.vitality,
   };
+  // Top up BEFORE the tick as well as after.
+  //
+  // Equipping goes through the command queue, which needs a tick to drain —
+  // and during that tick the duel's mob is already swinging while the player
+  // still carries level-1 health. A crit could kill them during setup, which
+  // reported as the class losing the fight it never got to start. It hit the
+  // low-Vitality classes hardest, so it read exactly like a balance problem.
+  const before = world.statsOf(player);
+  player.health = before.maxHealth;
+  player.energy = before.maxEnergy;
+
   for (const itemId of opts.gear ?? []) {
     world.addItem(player, { itemId, qty: 1 });
     world.submit(player.id, { t: 'equip', itemId });
   }
   world.tick();
+
   const stats = world.statsOf(player);
   player.health = stats.maxHealth;
   player.energy = stats.maxEnergy;
@@ -103,6 +119,8 @@ export interface FightResult {
   slamsDodged: number;
   /** Mob casts the player successfully cut short. */
   interrupts: number;
+  /** Health the player restored to themselves during the fight. */
+  selfHealed: number;
   /** Health the mob recovered because a heal was allowed to finish. */
   mobHealed: number;
 }
@@ -158,6 +176,7 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
   let slamsDodged = 0;
   let interrupts = 0;
   let mobHealed = 0;
+  let selfHealed = 0;
   let lastMove = { x: 0, z: 0 };
 
   const move = (x: number, z: number): void => {
@@ -166,22 +185,42 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
     world.submit(player.id, { t: 'move', dir: { x, z } });
   };
 
-  for (let i = 0; i < maxTicks; i++) {
-    for (const skillId of skills) {
-      if ((player.skillCooldowns?.[skillId] ?? 0) <= 0) {
-        world.submit(player.id, { t: 'useSkill', skillId });
-      }
-    }
+  /** The ability the mob is currently casting, if any. */
+  const mobCasting = (): { id: string; kind: string; interruptible?: boolean } | null => {
+    const cast = mob.cast;
+    if (cast?.kind !== 'ability') return null;
+    const ability = getMob(mob.defId!).abilities?.find((a) => a.id === cast.id);
+    return ability ?? null;
+  };
 
-    // React to an interruptible cast in progress. Checked before the tick so
-    // the interrupt lands during the cast window rather than after it resolves.
-    if (opts.interruptSkill && (player.skillCooldowns?.[opts.interruptSkill] ?? 0) <= 0) {
-      const cast = mob.cast;
-      if (cast?.kind === 'ability') {
-        const ability = getMob(mob.defId!).abilities?.find((a) => a.id === cast.id);
-        if (ability?.interruptible) {
-          world.submit(player.id, { t: 'useSkill', skillId: opts.interruptSkill });
-        }
+  for (let i = 0; i < maxTicks; i++) {
+    const healthFraction = player.health / maxHealth;
+    const casting = mobCasting();
+
+    // Saving the interrupt for a heal means HOLDING the global cooldown for it.
+    // Spamming the rest of the kit keeps the GCD permanently busy, so the
+    // interrupt never gets a window — which measured as "interrupts do nothing"
+    // when the real cause was the harness never letting one fire.
+    const wantInterrupt =
+      !!opts.interruptSkill &&
+      (player.skillCooldowns?.[opts.interruptSkill] ?? 0) <= 0 &&
+      casting?.interruptible === true &&
+      casting.kind === 'mend';
+
+    if (wantInterrupt) {
+      world.submit(player.id, { t: 'useSkill', skillId: opts.interruptSkill! });
+    } else {
+      for (const skillId of skills) {
+        if ((player.skillCooldowns?.[skillId] ?? 0) > 0) continue;
+        const skill = getSkill(skillId);
+        // Don't heal at full health. Casting locks out auto-attack, so firing a
+        // heal on cooldown regardless of need costs real damage and drags the
+        // fight out — which then costs MORE health.
+        if (skill.kind === 'heal' && healthFraction > 0.7) continue;
+        // Don't spend an interrupt on nothing: it burns energy and a global
+        // cooldown for no effect, which penalised every class that has one.
+        if (skill.kind === 'interrupt' && !casting?.interruptible) continue;
+        world.submit(player.id, { t: 'useSkill', skillId });
       }
     }
 
@@ -216,6 +255,8 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
         interrupts++;
       } else if (ev.t === 'heal' && ev.targetId === mob.id) {
         mobHealed += ev.amount;
+      } else if (ev.t === 'heal' && ev.targetId === player.id) {
+        selfHealed += ev.amount;
       } else if (ev.t === 'damage' && ev.targetId === player.id && ev.abilityId) {
         // Any damage to the player carrying an ability id came from a mob
         // ability — auto-attacks pass null. Do NOT gate this on `pending`: the
@@ -240,6 +281,7 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
         slamsDodged,
         interrupts,
         mobHealed,
+        selfHealed,
       };
     }
   }
@@ -252,6 +294,7 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
     slamsDodged,
     interrupts,
     mobHealed,
+    selfHealed,
   };
 }
 
