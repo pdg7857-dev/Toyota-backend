@@ -1,0 +1,27 @@
+{
+  "name": "emerald-isle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Single-player 3D tab-target RPG. Headless deterministic sim core + three.js renderer.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node tools/smoke.mjs",
+    "verify": "npm run typecheck && npm run test"
+  },
+  "dependencies": {
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.169.0",
+    "playwright": "^1.62.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
+  }
+}
