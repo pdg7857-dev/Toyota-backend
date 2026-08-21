@@ -3,6 +3,8 @@ import { World } from '../src/sim/world.js';
 import { MAX_LEVEL, TICK_MS, xpToNext } from '../src/sim/formulas.js';
 import { FENMARCH } from '../src/content/zone.js';
 import { countEvents, duelZone, emptyZone, levelPlayer, simulateFight } from './helpers.js';
+import { skillBarFor, getSkill } from '../src/content/skills.js';
+import { canEquip, getItem } from '../src/content/items.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
 
 function newWorld(seed = 1, zone = duelZone('mossback_boar')) {
@@ -524,4 +526,196 @@ describe('tick contract', () => {
     world.tick();
     expect(player.skillCooldowns.strike).toBeUndefined();
   });
+});
+
+// --------------------------------------------------------------------------
+// Interrupts. The counterpart to dodging: heavy AoEs are answered by moving,
+// heals and summons are answered by cutting the cast short.
+// --------------------------------------------------------------------------
+
+describe('interrupts', () => {
+  function bossFight(seed: number, mobId: string, classId: 'warrior' | 'priest') {
+    const world = new World({ seed, zone: duelZone(mobId), classId });
+    const player = levelPlayer(world, {
+      level: 25,
+      gear: classId === 'warrior' ? ['scarred_fang'] : ['bonecarved_stave'],
+    });
+    const boss = theMob(world);
+    world.submit(player.id, { t: 'target', id: boss.id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+    return { world, player, boss };
+  }
+
+  /** Hold the boss alive until it starts the named interruptible cast. */
+  function runUntilCasting(world: World, boss: Entity, abilityId: string): boolean {
+    for (let i = 0; i < 3000; i++) {
+      boss.health = world.statsOf(boss).maxHealth * 0.5;
+      world.tick();
+      if (boss.cast?.kind === 'ability' && boss.cast.id === abilityId) return true;
+    }
+    return false;
+  }
+
+  it('stops an interruptible cast and locks the ability out', () => {
+    const { world, player, boss } = bossFight(61, 'cadfael', 'priest');
+    expect(runUntilCasting(world, boss, 'bind_wounds')).toBe(true);
+
+    world.submit(player.id, { t: 'useSkill', skillId: 'rebuke' });
+    const events = world.tick();
+
+    const hit = events.find((e) => e.t === 'interrupted');
+    expect(hit).toBeDefined();
+    if (hit?.t === 'interrupted') {
+      expect(hit.abilityId).toBe('bind_wounds');
+      expect(hit.lockoutMs).toBe(9000);
+    }
+    expect(boss.cast).toBeNull();
+    expect(boss.abilityLockouts?.bind_wounds).toBeGreaterThan(0);
+  });
+
+  it('prevents the heal from landing at all', () => {
+    const { world, player, boss } = bossFight(62, 'cadfael', 'priest');
+    expect(runUntilCasting(world, boss, 'bind_wounds')).toBe(true);
+
+    boss.health = world.statsOf(boss).maxHealth * 0.4;
+    world.submit(player.id, { t: 'useSkill', skillId: 'rebuke' });
+    const healthAfterInterrupt = boss.health;
+    const events = world.advance(2000);
+    const healed = events.filter((e) => e.t === 'heal' && e.targetId === boss.id);
+    expect(healed).toHaveLength(0);
+    expect(boss.health).toBeLessThanOrEqual(healthAfterInterrupt);
+  });
+
+  it('keeps the ability unusable for the whole lockout', () => {
+    const { world, player, boss } = bossFight(63, 'cadfael', 'priest');
+    expect(runUntilCasting(world, boss, 'bind_wounds')).toBe(true);
+    world.submit(player.id, { t: 'useSkill', skillId: 'rebuke' });
+    world.tick();
+
+    // Clear the normal cooldown so only the lockout can be holding it back.
+    delete boss.abilityCooldowns?.bind_wounds;
+    const events: SimEvent[] = [];
+    for (let i = 0; i < 150; i++) {
+      boss.health = world.statsOf(boss).maxHealth * 0.5;
+      events.push(...world.tick());
+    }
+    const recast = events.some((e) => e.t === 'castBegin' && e.id === 'bind_wounds');
+    expect(recast).toBe(false);
+  });
+
+  it('cannot interrupt an ability flagged uninterruptible — dodge that instead', () => {
+    const { world, player, boss } = bossFight(64, 'old_scar', 'priest');
+    let casting = false;
+    for (let i = 0; i < 3000 && !casting; i++) {
+      boss.health = world.statsOf(boss).maxHealth;
+      world.tick();
+      casting = boss.cast?.kind === 'ability' && boss.cast.id === 'ground_shake';
+    }
+    expect(casting).toBe(true);
+
+    world.submit(player.id, { t: 'useSkill', skillId: 'rebuke' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'interruptWasted')).toBe(true);
+    expect(boss.cast).not.toBeNull();
+  });
+
+  it('reports a wasted interrupt when the target is not casting', () => {
+    const { world, player } = bossFight(65, 'cadfael', 'priest');
+    world.submit(player.id, { t: 'useSkill', skillId: 'rebuke' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'interruptWasted')).toBe(true);
+    // It still costs the cooldown, so mashing it is a real mistake.
+    expect(world.player.skillCooldowns?.rebuke).toBeGreaterThan(0);
+  });
+
+  it('gives the Warrior an interrupt too', () => {
+    const { world, player, boss } = bossFight(66, 'cadfael', 'warrior');
+    expect(runUntilCasting(world, boss, 'bind_wounds')).toBe(true);
+    world.submit(player.id, { t: 'useSkill', skillId: 'bash' });
+    const events = world.tick();
+    const hit = events.find((e) => e.t === 'interrupted');
+    expect(hit).toBeDefined();
+    // Warrior's lockout is shorter than the Priest's — interrupting is the
+    // Priest's speciality, not a tool both classes hold equally.
+    if (hit?.t === 'interrupted') expect(hit.lockoutMs).toBe(6000);
+    expect(boss.abilityLockouts?.bind_wounds).toBeGreaterThan(5000);
+  });
+});
+
+describe('classes', () => {
+  it('scales the Priest off Focus and the Warrior off Strength', () => {
+    const priest = new World({ seed: 1, zone: emptyZone(), classId: 'priest' });
+    const warrior = new World({ seed: 1, zone: emptyZone(), classId: 'warrior' });
+
+    const priestBefore = priest.statsOf(priest.player).attack;
+    priest.player.attributes!.focus += 10;
+    expect(priest.statsOf(priest.player).attack).toBe(priestBefore + 20);
+    priest.player.attributes!.strength += 10;
+    expect(priest.statsOf(priest.player).attack).toBe(priestBefore + 20);
+
+    const warriorBefore = warrior.statsOf(warrior.player).attack;
+    warrior.player.attributes!.strength += 10;
+    expect(warrior.statsOf(warrior.player).attack).toBe(warriorBefore + 20);
+  });
+
+  it('refuses to equip a weapon from another class', () => {
+    const world = new World({ seed: 1, zone: emptyZone(), classId: 'priest' });
+    const player = world.player;
+    world.addItem(player, { itemId: 'scarred_fang', qty: 1 });
+    world.submit(player.id, { t: 'equip', itemId: 'scarred_fang' });
+    const events = world.tick();
+
+    expect(events.some((e) => e.t === 'error' && /cannot be used/i.test(e.message))).toBe(true);
+    expect(player.equipment?.weapon).toBe('oaken_walking_staff');
+    // And the item stays in the bag rather than vanishing.
+    expect(player.inventory?.some((s) => s.itemId === 'scarred_fang')).toBe(true);
+  });
+
+  it('lets either class wear the same armour', () => {
+    for (const classId of ['warrior', 'priest'] as const) {
+      const world = new World({ seed: 1, zone: emptyZone(), classId });
+      const player = world.player;
+      world.addItem(player, { itemId: 'bearhide_cuirass', qty: 1 });
+      world.submit(player.id, { t: 'equip', itemId: 'bearhide_cuirass' });
+      world.tick();
+      expect(player.equipment?.chest).toBe('bearhide_cuirass');
+    }
+  });
+
+  it('gives each class its own skill bar', () => {
+    const warriorKit = skillBarFor('warrior').map((s) => s.id);
+    const priestKit = skillBarFor('priest').map((s) => s.id);
+    expect(warriorKit).toContain('bash');
+    expect(priestKit).toContain('rebuke');
+    expect(warriorKit.some((id) => priestKit.includes(id))).toBe(false);
+    // Both must have an interrupt, or one class simply cannot answer a heal.
+    for (const kit of [warriorKit, priestKit]) {
+      expect(kit.some((id) => getSkill(id).kind === 'interrupt')).toBe(true);
+    }
+  });
+});
+
+describe('boss class weapons', () => {
+  for (const [classId, mobId, expected] of [
+    ['warrior', 'old_scar', 'scarred_fang'],
+    ['priest', 'old_scar', 'bonecarved_stave'],
+    ['warrior', 'cadfael', 'cadfaels_cleaver'],
+    ['priest', 'cadfael', 'chieftains_reliquary'],
+  ] as const) {
+    it(`drops ${expected} for a ${classId} killing ${mobId}`, () => {
+      const world = new World({ seed: 71, zone: duelZone(mobId, 2), classId });
+      const player = levelPlayer(world, { level: 25 });
+      const boss = theMob(world);
+      world.submit(player.id, { t: 'target', id: boss.id });
+      world.submit(player.id, { t: 'autoAttack', on: true });
+      boss.health = 1;
+      world.advance(4000);
+
+      expect(boss.dead).toBe(true);
+      expect(boss.corpseLoot?.some((s) => s.itemId === expected)).toBe(true);
+      // And it must actually be equippable by the class that earned it.
+      const drop = getItem(expected);
+      expect(canEquip(drop, classId)).toBe(true);
+    });
+  }
 });

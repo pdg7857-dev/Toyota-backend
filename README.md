@@ -24,7 +24,7 @@ Add `?fresh` to the URL to discard your save and start over.
 | `WASD` | Move (camera-relative) |
 | Right-drag / Scroll | Orbit / zoom the camera |
 | Click or `Tab` | Target |
-| `1`–`6` | Skills |
+| `1`–`7` | Skills |
 | `T` | Toggle auto-attack |
 | `F` | Loot a nearby corpse |
 | `C` / `I` | Character / Inventory |
@@ -51,33 +51,61 @@ on the northern moor; the danger rises the further down you push.
 boss. A higher star rating means more health, damage and armour at the same
 level — a ★4 is a real threat without being higher level than the band it sits in.
 
-**Bosses telegraph.** When Old Scar rears up to slam the ground, a red circle
-grows on the ground and a warning flashes on screen. He is rooted while he winds
-up, so the circle stays where it was drawn — get out of it. Standing in
-everything loses; dodging wins. That gap is measured in the test suite.
 
 **The grind is the point.** Roughly 2,650 kills to reach 25, and the cost per
 level keeps climbing: about 6 kills for your first level, 150+ near the cap.
 Grey mobs give almost nothing, so pushing south is the only way forward.
+
+## Classes
+
+Pick one on first launch. Add `?fresh` to the URL to re-choose, or
+`?class=priest` to skip the screen.
+
+**Warrior** — Strength, melee, durable. Strike, Rend, Rally, Bulwark, Sunder,
+**Bash** (interrupt, lv12), Onslaught.
+
+**Priest** — Focus, caster, sustain. Smite, Mend Wounds, Searing Word,
+**Rebuke** (interrupt, lv7 — longer range and a longer lockout than Bash),
+Spirit Shield, Judgement. Kills more slowly than the Warrior and survives more.
+
+Weapons are class-locked — a Priest cannot swing a greatsword — but armour and
+rings are shared. **Each boss drops a guaranteed epic weapon matched to whoever
+kills it**, so the reward is never something you can only vendor.
+
+## Mechanics worth knowing
+
+**Bosses telegraph.** A red circle grows on the ground and a warning flashes.
+The boss is rooted while winding up, so the circle stays where it was drawn —
+get out of it. Standing in everything loses; dodging wins.
+
+**Interrupts answer what dodging can't.** Heavy AoEs cannot be interrupted,
+only escaped. Heals and summons *can* be interrupted, and should be — let
+Cadfael finish binding his wounds and you will be there a while. A missed
+interrupt still burns its cooldown.
+
+**Loot gets better, not more frequent.** Gold and merchant goods scale steeply
+with difficulty and are the reliable income. Equipment stays rare at every tier
+— what improves is the quality of what drops. Epics come only from bosses.
 
 ## What's in it
 
 - Fixed 20 Hz deterministic simulation with render interpolation
 - Tab-target combat: swing timers, hit/crit rolls, armour mitigation, level-gap
   scaling, global cooldown
-- 6 Warrior skills unlocking across the whole 1–25 band — instant, cast-time,
-  damage-over-time, heal and buff — with cast interruption
-- Mob abilities: telegraphed dodgeable AoEs, enrage thresholds, summoned adds
-  that despawn with their summoner, self-heals
+- Two playable classes with separate skill trees, weapon ladders and identities
+- 13 skills across the two classes — instant, cast-time, damage-over-time,
+  heal, buff and interrupt — unlocking across the whole 1–25 band
+- Mob abilities: telegraphed dodgeable AoEs, interruptible heals and summons,
+  enrage thresholds, adds that despawn with their summoner and drop no loot
 - Mob AI: aggro radius, threat tables, chase, leash-and-heal, respawn timers
-- 12 mob types across ★1–★6, 30 items, 11 loot tables
+- 12 mob types across ★1–★6, 41 items, 12 loot tables, class-aware boss drops
 - Levelling to 25, spendable attribute points, skill unlocks
 - Death and respawn, save/load via full world serialization
 
 ## Development
 
 ```bash
-npm run verify     # typecheck + 56 unit and balance tests
+npm run verify     # typecheck + 83 unit and balance tests
 npm run smoke      # plays the game in real Chromium, writes screenshots/
 ```
 

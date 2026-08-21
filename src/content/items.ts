@@ -1,19 +1,22 @@
-import type { ItemDef } from '../sim/types.js';
+import type { ItemDef, ItemQuality } from '../sim/types.js';
 
 /**
  * Item registry. Data only — no behaviour. Adding gear should never require
  * touching sim code.
  *
- * The progression is built for levels 1–25 in roughly four-level steps, so a
- * player grinding a band has something to look forward to from the next one.
+ * Weapons are class-locked (`classes`); armour and rings are not, so the two
+ * classes compete for the same defensive drops but each has its own weapon
+ * ladder. The progression runs in roughly four-level steps so a player grinding
+ * a band always has something to look forward to from the next one.
  */
 export const ITEMS: Record<string, ItemDef> = {
-  // --- weapons ------------------------------------------------------------
+  // === WARRIOR WEAPONS — Strength, fast, high sustained damage ==============
   rusted_blade: {
     id: 'rusted_blade',
     name: 'Rusted Blade',
     slot: 'weapon',
     quality: 'common',
+    classes: ['warrior'],
     value: 4,
     damageMin: 3,
     damageMax: 6,
@@ -26,6 +29,7 @@ export const ITEMS: Record<string, ItemDef> = {
     name: 'Bronze Shortsword',
     slot: 'weapon',
     quality: 'common',
+    classes: ['warrior'],
     value: 18,
     damageMin: 6,
     damageMax: 11,
@@ -39,6 +43,7 @@ export const ITEMS: Record<string, ItemDef> = {
     name: 'Ironbark Cudgel',
     slot: 'weapon',
     quality: 'uncommon',
+    classes: ['warrior'],
     value: 55,
     damageMin: 11,
     damageMax: 19,
@@ -52,6 +57,7 @@ export const ITEMS: Record<string, ItemDef> = {
     name: 'Iron Longsword',
     slot: 'weapon',
     quality: 'uncommon',
+    classes: ['warrior'],
     value: 120,
     damageMin: 18,
     damageMax: 28,
@@ -65,6 +71,7 @@ export const ITEMS: Record<string, ItemDef> = {
     name: 'Outlaw Saber',
     slot: 'weapon',
     quality: 'rare',
+    classes: ['warrior'],
     value: 260,
     damageMin: 26,
     damageMax: 38,
@@ -78,6 +85,7 @@ export const ITEMS: Record<string, ItemDef> = {
     name: 'Boar Spear',
     slot: 'weapon',
     quality: 'rare',
+    classes: ['warrior'],
     value: 380,
     damageMin: 35,
     damageMax: 50,
@@ -91,6 +99,7 @@ export const ITEMS: Record<string, ItemDef> = {
     name: "Cadfael's Cleaver",
     slot: 'weapon',
     quality: 'epic',
+    classes: ['warrior'],
     value: 900,
     damageMin: 44,
     damageMax: 62,
@@ -104,6 +113,7 @@ export const ITEMS: Record<string, ItemDef> = {
     name: 'Scarred Fang',
     slot: 'weapon',
     quality: 'epic',
+    classes: ['warrior'],
     value: 1800,
     damageMin: 56,
     damageMax: 78,
@@ -113,7 +123,120 @@ export const ITEMS: Record<string, ItemDef> = {
     attributes: { strength: 22, dexterity: 11, vitality: 10 },
   },
 
-  // --- head ---------------------------------------------------------------
+  // === PRIEST WEAPONS — Focus, slower, heavier per swing ====================
+  oaken_walking_staff: {
+    id: 'oaken_walking_staff',
+    name: 'Oaken Walking Staff',
+    slot: 'weapon',
+    quality: 'common',
+    classes: ['priest'],
+    value: 4,
+    damageMin: 3,
+    damageMax: 5,
+    damageType: 'nature',
+    swingMs: 2200,
+    attackRange: 2.6,
+  },
+  rowan_stave: {
+    id: 'rowan_stave',
+    name: 'Rowan Stave',
+    slot: 'weapon',
+    quality: 'common',
+    classes: ['priest'],
+    value: 18,
+    damageMin: 8,
+    damageMax: 13,
+    damageType: 'nature',
+    swingMs: 2000,
+    attackRange: 2.6,
+    attributes: { focus: 2 },
+  },
+  blessed_mace: {
+    id: 'blessed_mace',
+    name: 'Blessed Mace',
+    slot: 'weapon',
+    quality: 'uncommon',
+    classes: ['priest'],
+    value: 55,
+    damageMin: 14,
+    damageMax: 22,
+    damageType: 'physical',
+    swingMs: 2100,
+    attackRange: 2.5,
+    attributes: { focus: 4, vitality: 2 },
+  },
+  vigil_stave: {
+    id: 'vigil_stave',
+    name: 'Vigil Stave',
+    slot: 'weapon',
+    quality: 'uncommon',
+    classes: ['priest'],
+    value: 120,
+    damageMin: 22,
+    damageMax: 33,
+    damageType: 'nature',
+    swingMs: 2200,
+    attackRange: 2.8,
+    attributes: { focus: 7, vitality: 3 },
+  },
+  reliquary_mace: {
+    id: 'reliquary_mace',
+    name: 'Reliquary Mace',
+    slot: 'weapon',
+    quality: 'rare',
+    classes: ['priest'],
+    value: 260,
+    damageMin: 31,
+    damageMax: 45,
+    damageType: 'physical',
+    swingMs: 2050,
+    attackRange: 2.6,
+    attributes: { focus: 10, vitality: 5 },
+  },
+  prayerwood_stave: {
+    id: 'prayerwood_stave',
+    name: 'Prayerwood Stave',
+    slot: 'weapon',
+    quality: 'rare',
+    classes: ['priest'],
+    value: 380,
+    damageMin: 42,
+    damageMax: 59,
+    damageType: 'nature',
+    swingMs: 2200,
+    attackRange: 2.9,
+    attributes: { focus: 13, vitality: 6 },
+  },
+  chieftains_reliquary: {
+    id: 'chieftains_reliquary',
+    name: "Chieftain's Reliquary",
+    slot: 'weapon',
+    quality: 'epic',
+    classes: ['priest'],
+    value: 900,
+    damageMin: 52,
+    damageMax: 73,
+    damageType: 'physical',
+    swingMs: 2150,
+    attackRange: 2.7,
+    attributes: { focus: 17, vitality: 9, dexterity: 5 },
+  },
+  bonecarved_stave: {
+    id: 'bonecarved_stave',
+    name: 'Bonecarved Stave',
+    slot: 'weapon',
+    quality: 'epic',
+    classes: ['priest'],
+    value: 1800,
+    damageMin: 66,
+    damageMax: 92,
+    damageType: 'nature',
+    swingMs: 2100,
+    attackRange: 2.9,
+    attributes: { focus: 22, vitality: 12, dexterity: 7 },
+  },
+
+  // === ARMOUR — shared between classes ======================================
   tattered_hood: {
     id: 'tattered_hood',
     name: 'Tattered Hood',
@@ -148,10 +271,8 @@ export const ITEMS: Record<string, ItemDef> = {
     quality: 'rare',
     value: 340,
     armor: 28,
-    attributes: { vitality: 9, strength: 4 },
+    attributes: { vitality: 9, strength: 4, focus: 4 },
   },
-
-  // --- chest --------------------------------------------------------------
   boiled_leather_vest: {
     id: 'boiled_leather_vest',
     name: 'Boiled Leather Vest',
@@ -168,7 +289,7 @@ export const ITEMS: Record<string, ItemDef> = {
     quality: 'uncommon',
     value: 90,
     armor: 20,
-    attributes: { vitality: 5, strength: 2 },
+    attributes: { vitality: 5, strength: 2, focus: 2 },
   },
   outlaw_mail: {
     id: 'outlaw_mail',
@@ -177,7 +298,7 @@ export const ITEMS: Record<string, ItemDef> = {
     quality: 'rare',
     value: 300,
     armor: 36,
-    attributes: { vitality: 9, strength: 5 },
+    attributes: { vitality: 9, strength: 5, focus: 5 },
   },
   bearhide_cuirass: {
     id: 'bearhide_cuirass',
@@ -186,10 +307,8 @@ export const ITEMS: Record<string, ItemDef> = {
     quality: 'epic',
     value: 750,
     armor: 52,
-    attributes: { vitality: 14, strength: 7 },
+    attributes: { vitality: 14, strength: 7, focus: 7 },
   },
-
-  // --- legs ---------------------------------------------------------------
   bogstrider_greaves: {
     id: 'bogstrider_greaves',
     name: 'Bogstrider Greaves',
@@ -217,8 +336,6 @@ export const ITEMS: Record<string, ItemDef> = {
     armor: 40,
     attributes: { vitality: 10, dexterity: 6 },
   },
-
-  // --- rings --------------------------------------------------------------
   ring_of_the_fen: {
     id: 'ring_of_the_fen',
     name: 'Ring of the Fen',
@@ -235,7 +352,7 @@ export const ITEMS: Record<string, ItemDef> = {
     quality: 'rare',
     value: 420,
     armor: 4,
-    attributes: { strength: 6, dexterity: 5 },
+    attributes: { strength: 6, focus: 6, dexterity: 5 },
   },
   scarred_band: {
     id: 'scarred_band',
@@ -244,18 +361,24 @@ export const ITEMS: Record<string, ItemDef> = {
     quality: 'epic',
     value: 1100,
     armor: 6,
-    attributes: { strength: 9, vitality: 8, dexterity: 5 },
+    attributes: { strength: 9, focus: 9, vitality: 8, dexterity: 5 },
   },
 
-  // --- trade goods / vendor trash -----------------------------------------
-  hare_pelt: { id: 'hare_pelt', name: 'Hare Pelt', slot: null, quality: 'common', value: 1, stackable: true },
-  boar_tusk: { id: 'boar_tusk', name: 'Boar Tusk', slot: null, quality: 'common', value: 2, stackable: true },
-  adder_skin: { id: 'adder_skin', name: 'Adder Skin', slot: null, quality: 'common', value: 5, stackable: true },
-  wolf_pelt: { id: 'wolf_pelt', name: 'Wolf Pelt', slot: null, quality: 'common', value: 8, stackable: true },
-  stag_antler: { id: 'stag_antler', name: 'Stag Antler', slot: null, quality: 'common', value: 14, stackable: true },
-  outlaw_purse: { id: 'outlaw_purse', name: "Outlaw's Purse", slot: null, quality: 'uncommon', value: 26, stackable: true },
-  bear_claw: { id: 'bear_claw', name: 'Bear Claw', slot: null, quality: 'uncommon', value: 45, stackable: true },
-  lynx_fang: { id: 'lynx_fang', name: 'Lynx Fang', slot: null, quality: 'uncommon', value: 60, stackable: true },
+  // === MERCHANT GOODS ======================================================
+  // Pure vendor value. These scale steeply with the difficulty of what drops
+  // them, which is what makes grinding a harder camp pay off reliably even
+  // when no equipment drops.
+  hare_pelt: { id: 'hare_pelt', name: 'Hare Pelt', slot: null, quality: 'common', value: 2, stackable: true, merchantGood: true },
+  boar_tusk: { id: 'boar_tusk', name: 'Boar Tusk', slot: null, quality: 'common', value: 5, stackable: true, merchantGood: true },
+  adder_skin: { id: 'adder_skin', name: 'Adder Skin', slot: null, quality: 'common', value: 12, stackable: true, merchantGood: true },
+  wolf_pelt: { id: 'wolf_pelt', name: 'Wolf Pelt', slot: null, quality: 'common', value: 24, stackable: true, merchantGood: true },
+  stag_antler: { id: 'stag_antler', name: 'Stag Antler', slot: null, quality: 'uncommon', value: 45, stackable: true, merchantGood: true },
+  outlaw_purse: { id: 'outlaw_purse', name: "Outlaw's Purse", slot: null, quality: 'uncommon', value: 80, stackable: true, merchantGood: true },
+  bear_claw: { id: 'bear_claw', name: 'Bear Claw', slot: null, quality: 'uncommon', value: 140, stackable: true, merchantGood: true },
+  lynx_fang: { id: 'lynx_fang', name: 'Lynx Fang', slot: null, quality: 'uncommon', value: 210, stackable: true, merchantGood: true },
+  smugglers_ledger: { id: 'smugglers_ledger', name: "Smuggler's Ledger", slot: null, quality: 'rare', value: 420, stackable: true, merchantGood: true },
+  chieftains_seal: { id: 'chieftains_seal', name: "Chieftain's Seal", slot: null, quality: 'rare', value: 900, stackable: true, merchantGood: true },
+  ancient_bear_skull: { id: 'ancient_bear_skull', name: 'Ancient Bear Skull', slot: null, quality: 'epic', value: 2200, stackable: true, merchantGood: true },
 };
 
 export function getItem(id: string): ItemDef {
@@ -264,7 +387,13 @@ export function getItem(id: string): ItemDef {
   return item;
 }
 
-export const QUALITY_COLORS: Record<ItemDef['quality'], string> = {
+/** Whether `classId` is allowed to equip this item. */
+export function canEquip(item: ItemDef, classId: string | undefined): boolean {
+  if (!item.classes) return true;
+  return classId !== undefined && item.classes.includes(classId as never);
+}
+
+export const QUALITY_COLORS: Record<ItemQuality, string> = {
   common: '#c8c8c8',
   uncommon: '#4ad66d',
   rare: '#4aa3ff',

@@ -82,6 +82,46 @@ reach 25, rising from ~6 kills for the first level to ~150+ near the cap. If
 someone asks to "make levelling faster", change `XP_CURVE_BASE` — do not
 quietly flatten the exponent, the ramp is the design.
 
+## Two classes, two answers
+
+**Warrior** scales off Strength, **Priest** off Focus. That is the only branch in
+combat maths: `PRIMARY_ATTRIBUTE` selects which attribute feeds attack rating,
+and both classes then run the identical formula, so they are balanced against the
+same numbers.
+
+Weapons are class-locked via `ItemDef.classes`; armour and rings are shared.
+Every boss declares `classWeapons` on its loot table, resolved against whoever
+lands the kill, so the guaranteed epic is always something you can actually use.
+
+**Both classes get an interrupt** (Warrior `bash` at 12, Priest `rebuke` at 7,
+longer range and longer lockout — cutting casts is the Priest's identity). The
+answer to a mechanic is split deliberately:
+
+| Boss does | Player answers with |
+|---|---|
+| Telegraphed AoE (`heavySlam`) | **Moving** out of the circle. Not interruptible. |
+| Heal or summon | **Interrupting**. `interruptible: true` on the ability. |
+
+If everything were interruptible, the interrupt would just be a strictly better
+dodge and one of the two mechanics would be dead weight. A missed interrupt still
+burns its cooldown, so timing it is a real decision.
+
+## Loot: better, not more
+
+The rule, enforced by tests:
+
+- **Gold** is derived (`goldForKill`) from level and stars and scales steeply.
+  It is the reliable reward and the reason a grind still pays with no drop.
+- **Merchant goods** drop often and climb sharply in value with difficulty.
+- **Equipment stays rare at every tier** — total gear chance per ordinary mob is
+  capped by `MAX_EQUIPMENT_DROP_CHANCE`. What improves with difficulty is the
+  *quality* of the piece, not the odds. Epics come only from bosses.
+
+A loot-table `goldMultiplier` is a flavour bonus (outlaws carry coin). A test
+asserts the dominance relation — if one mob is no easier on both level and stars
+and strictly harder on one, it must pay more — which already caught an outlaw
+bonus letting a level-16 mob out-earn a level-21 one.
+
 ## Bosses must be decided by play, not stats
 
 A boss whose only mechanic is a bigger stat block has no outcome variance: the
@@ -95,10 +135,17 @@ playing well and playing badly:
 
 | Fight | Standing in it | Dodging |
 |---|---|---|
-| Cadfael ★5 (20) at lv22 | 6% win | 64% win |
-| Old Scar ★6 (25) at lv25 | 20% win | 100% win |
+| Cadfael ★5 (20) at lv22 | 36% win | 100% win, 36% hp left |
+| Old Scar ★6 (25) at lv25 | 47% win | 100% win, 48% hp left |
 
-If you add a boss, add a telegraph, and add that comparison to the tests.
+And for the interrupt — Priest vs Cadfael at 22, both dodging:
+
+| | Win rate | Health the boss healed |
+|---|---|---|
+| Ignoring the heal | 51% | 57,279 |
+| Interrupting it | 67% | 27,579 |
+
+If you add a boss, add a telegraph, and add both comparisons to the tests.
 
 ## Balance is measured, not guessed
 
@@ -130,7 +177,7 @@ file changes** — the events that drive animation (`swing`, `castBegin`,
 ## Verifying a change
 
 ```bash
-npm run verify        # typecheck + 56 unit and balance tests
+npm run verify        # typecheck + 83 unit and balance tests
 npm run build && npm run preview &
 npm run smoke         # real browser, plays the game, writes screenshots/
 ```
@@ -143,7 +190,5 @@ debug handle exposed in `main.ts`.
 ## Deliberately not built yet
 
 Quests, dialogue, crafting, vendors, a second zone, the four unimplemented
-classes (data stubs exist in `content/zone.ts`), real terrain height,
-pathfinding (mobs walk straight lines), entity collision, and interrupts — note
-that Cadfael's `bind_wounds` is a soft DPS check rather than something to react
-to precisely because no interrupt skill exists yet.
+classes (data stubs exist in `content/zone.ts`, flagged `implemented: false`),
+real terrain height, pathfinding (mobs walk straight lines), and entity collision.

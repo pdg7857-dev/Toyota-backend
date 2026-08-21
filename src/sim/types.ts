@@ -15,7 +15,7 @@ export interface Vec2 {
   z: number;
 }
 
-export type ClassId = 'warrior' | 'ranger' | 'rogue' | 'mage' | 'druid';
+export type ClassId = 'warrior' | 'priest' | 'ranger' | 'rogue' | 'mage';
 
 export type DamageType = 'physical' | 'fire' | 'frost' | 'nature';
 
@@ -66,14 +66,26 @@ export interface DerivedStats {
 
 export type EquipSlot = 'weapon' | 'head' | 'chest' | 'legs' | 'ring';
 
+export type ItemQuality = 'common' | 'uncommon' | 'rare' | 'epic';
+
 export interface ItemDef {
   id: string;
   name: string;
   slot: EquipSlot | null;
   /** Rough tier for colouring and vendor value. */
-  quality: 'common' | 'uncommon' | 'rare' | 'epic';
+  quality: ItemQuality;
   value: number;
   stackable?: boolean;
+  /**
+   * Classes allowed to equip this. Undefined means anyone can.
+   *
+   * Weapons are class-locked so "a weapon for your class" is a meaningful
+   * reward — a Priest cannot swing a Warrior's greatsword to get its raw
+   * damage, and vice versa.
+   */
+  classes?: ClassId[];
+  /** Marks an item whose only purpose is to be sold. */
+  merchantGood?: boolean;
   attributes?: Partial<Attributes>;
   damageMin?: number;
   damageMax?: number;
@@ -88,7 +100,7 @@ export interface ItemStack {
   qty: number;
 }
 
-export type SkillEffectKind = 'damage' | 'heal' | 'dot' | 'buff';
+export type SkillEffectKind = 'damage' | 'heal' | 'dot' | 'buff' | 'interrupt';
 
 export interface SkillDef {
   id: string;
@@ -116,6 +128,12 @@ export interface SkillDef {
   /** For buff: what it actually does. */
   defenseBonus?: number;
   damageMultiplier?: number;
+  /**
+   * For `interrupt`: how long the interrupted ability is locked out afterwards.
+   * Without a lockout the boss simply re-casts next tick and the interrupt is
+   * a wasted global cooldown.
+   */
+  lockoutMs?: number;
   description: string;
 }
 
@@ -159,6 +177,14 @@ export interface MobAbilityDef {
   summonCount?: number;
   /** mend: fraction of max health restored. */
   healFraction?: number;
+  /**
+   * Whether a player interrupt can stop this mid-cast.
+   *
+   * Deliberately split by role: a big telegraphed AoE is answered by *moving*,
+   * a heal or a summon is answered by *interrupting*. Making everything
+   * interruptible would collapse both answers into one button.
+   */
+  interruptible?: boolean;
   /** Shown in the combat log when the ability starts. */
   telegraphText: string;
 }
@@ -174,8 +200,19 @@ export interface LootTable {
   id: string;
   /** Rolled independently — every entry gets its own chance check. */
   entries: LootEntry[];
-  goldMin: number;
-  goldMax: number;
+  /**
+   * Multiplier on the gold this mob's level and stars would normally yield.
+   * Gold itself is derived (see `goldForKill`) so that harder mobs always pay
+   * better without every table hand-setting a range that can drift.
+   */
+  goldMultiplier?: number;
+  /**
+   * A weapon matched to the looting player's class, resolved at kill time.
+   *
+   * This is how a boss guarantees a reward that is actually useful to you
+   * rather than a class-locked item you have to vendor.
+   */
+  classWeapons?: Partial<Record<ClassId, string>>;
 }
 
 export interface MobDef {
@@ -270,6 +307,8 @@ export interface Entity {
   aiState?: 'idle' | 'chasing' | 'attacking' | 'returning' | 'dead';
   threat?: Record<EntityId, number>;
   abilityCooldowns?: Record<string, number>;
+  /** Abilities locked out by a player interrupt, keyed to remaining ms. */
+  abilityLockouts?: Record<string, number>;
   /** Health-threshold abilities that have already fired this life. */
   firedAbilities?: string[];
   /** Set on adds; they are removed when their summoner dies or resets. */
@@ -327,6 +366,17 @@ export type SimEvent =
   /** The player was outside the radius when a telegraphed ability landed. */
   | { t: 'dodged'; sourceId: EntityId; targetId: EntityId; abilityId: string }
   | { t: 'enraged'; entityId: EntityId; abilityId: string }
+  /** A player interrupt landed and locked the ability out. */
+  | {
+      t: 'interrupted';
+      sourceId: EntityId;
+      targetId: EntityId;
+      abilityId: string;
+      abilityName: string;
+      lockoutMs: number;
+    }
+  /** An interrupt was used but the target was not casting anything stoppable. */
+  | { t: 'interruptWasted'; sourceId: EntityId; targetId: EntityId }
   | { t: 'summoned'; sourceId: EntityId; spawnedIds: EntityId[] }
   | {
       t: 'damage';

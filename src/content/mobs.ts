@@ -11,126 +11,147 @@ import type { LootTable, MobAbilityDef, MobDef, StarRating } from '../sim/types.
  * a higher level than the band it sits in.
  */
 
+// --------------------------------------------------------------------------
+// Loot.
+//
+// The rule is "harder mobs drop BETTER things, not MORE things":
+//
+//  - Gold is derived from level and stars (`goldForKill`) and scales steeply.
+//    It is the reliable reward, and it is why the grind still pays when no
+//    equipment drops.
+//  - Merchant goods drop often and climb sharply in value with difficulty.
+//    Same purpose: dependable income that respects what you can kill.
+//  - Equipment stays RARE at every tier. Total equipment chance per ordinary
+//    mob is held under `MAX_EQUIPMENT_DROP_CHANCE`, enforced by a test. What
+//    improves with difficulty is the QUALITY of the piece, not the odds.
+//  - Bosses are exempt from that ceiling: they are on multi-minute respawns and
+//    are the designed source of epics.
+// --------------------------------------------------------------------------
+
 export const LOOT_TABLES: Record<string, LootTable> = {
   hare: {
     id: 'hare',
-    goldMin: 0,
-    goldMax: 2,
     entries: [{ itemId: 'hare_pelt', chance: 0.6, min: 1, max: 1 }],
   },
   boar: {
     id: 'boar',
-    goldMin: 1,
-    goldMax: 4,
     entries: [
       { itemId: 'boar_tusk', chance: 0.55, min: 1, max: 2 },
-      { itemId: 'rusted_blade', chance: 0.05, min: 1, max: 1 },
-      { itemId: 'tattered_hood', chance: 0.07, min: 1, max: 1 },
+      { itemId: 'rusted_blade', chance: 0.04, min: 1, max: 1 },
+      { itemId: 'oaken_walking_staff', chance: 0.04, min: 1, max: 1 },
+      { itemId: 'tattered_hood', chance: 0.06, min: 1, max: 1 },
     ],
   },
   adder: {
     id: 'adder',
-    goldMin: 2,
-    goldMax: 7,
     entries: [
       { itemId: 'adder_skin', chance: 0.55, min: 1, max: 2 },
-      { itemId: 'bronze_shortsword', chance: 0.06, min: 1, max: 1 },
-      { itemId: 'boiled_leather_vest', chance: 0.08, min: 1, max: 1 },
+      { itemId: 'bronze_shortsword', chance: 0.04, min: 1, max: 1 },
+      { itemId: 'rowan_stave', chance: 0.04, min: 1, max: 1 },
+      { itemId: 'boiled_leather_vest', chance: 0.07, min: 1, max: 1 },
     ],
   },
   wolf: {
     id: 'wolf',
-    goldMin: 5,
-    goldMax: 14,
     entries: [
       { itemId: 'wolf_pelt', chance: 0.6, min: 1, max: 2 },
-      { itemId: 'ironbark_cudgel', chance: 0.05, min: 1, max: 1 },
-      { itemId: 'leather_coif', chance: 0.08, min: 1, max: 1 },
+      { itemId: 'ironbark_cudgel', chance: 0.04, min: 1, max: 1 },
+      { itemId: 'blessed_mace', chance: 0.04, min: 1, max: 1 },
+      { itemId: 'leather_coif', chance: 0.07, min: 1, max: 1 },
       { itemId: 'bogstrider_greaves', chance: 0.05, min: 1, max: 1 },
     ],
   },
   stag: {
     id: 'stag',
-    goldMin: 12,
-    goldMax: 28,
     entries: [
       { itemId: 'stag_antler', chance: 0.55, min: 1, max: 2 },
-      { itemId: 'iron_longsword', chance: 0.05, min: 1, max: 1 },
-      { itemId: 'studded_jerkin', chance: 0.07, min: 1, max: 1 },
+      { itemId: 'iron_longsword', chance: 0.04, min: 1, max: 1 },
+      { itemId: 'vigil_stave', chance: 0.04, min: 1, max: 1 },
+      { itemId: 'studded_jerkin', chance: 0.06, min: 1, max: 1 },
     ],
   },
   outlaw_common: {
     id: 'outlaw_common',
-    goldMin: 20,
-    goldMax: 48,
+    // Outlaws carry coin — that is the point of robbing them. Kept modest:
+    // a flavour bonus must never let an easier mob out-earn a harder one.
+    goldMultiplier: 1.15,
     entries: [
-      { itemId: 'outlaw_purse', chance: 0.45, min: 1, max: 1 },
-      { itemId: 'iron_longsword', chance: 0.06, min: 1, max: 1 },
-      { itemId: 'studded_jerkin', chance: 0.07, min: 1, max: 1 },
-      { itemId: 'outlaw_hood', chance: 0.05, min: 1, max: 1 },
+      { itemId: 'outlaw_purse', chance: 0.5, min: 1, max: 1 },
+      { itemId: 'iron_longsword', chance: 0.05, min: 1, max: 1 },
+      { itemId: 'vigil_stave', chance: 0.05, min: 1, max: 1 },
+      { itemId: 'studded_jerkin', chance: 0.06, min: 1, max: 1 },
+      { itemId: 'outlaw_hood', chance: 0.04, min: 1, max: 1 },
     ],
   },
   outlaw_reaver: {
     id: 'outlaw_reaver',
-    goldMin: 35,
-    goldMax: 80,
+    goldMultiplier: 1.15,
     entries: [
       { itemId: 'outlaw_purse', chance: 0.5, min: 1, max: 2 },
-      { itemId: 'outlaw_saber', chance: 0.05, min: 1, max: 1 },
-      { itemId: 'outlaw_hood', chance: 0.08, min: 1, max: 1 },
-      { itemId: 'reaver_legguards', chance: 0.07, min: 1, max: 1 },
+      { itemId: 'smugglers_ledger', chance: 0.08, min: 1, max: 1 },
+      { itemId: 'outlaw_saber', chance: 0.04, min: 1, max: 1 },
+      { itemId: 'reliquary_mace', chance: 0.04, min: 1, max: 1 },
+      { itemId: 'outlaw_hood', chance: 0.06, min: 1, max: 1 },
+      { itemId: 'reaver_legguards', chance: 0.06, min: 1, max: 1 },
     ],
   },
   bear: {
     id: 'bear',
-    goldMin: 55,
-    goldMax: 120,
     entries: [
       { itemId: 'bear_claw', chance: 0.5, min: 1, max: 2 },
-      { itemId: 'boar_spear', chance: 0.04, min: 1, max: 1 },
-      { itemId: 'outlaw_mail', chance: 0.06, min: 1, max: 1 },
+      { itemId: 'smugglers_ledger', chance: 0.05, min: 1, max: 1 },
+      { itemId: 'boar_spear', chance: 0.035, min: 1, max: 1 },
+      { itemId: 'prayerwood_stave', chance: 0.035, min: 1, max: 1 },
+      { itemId: 'outlaw_mail', chance: 0.05, min: 1, max: 1 },
       { itemId: 'bearhide_helm', chance: 0.05, min: 1, max: 1 },
     ],
   },
   lynx: {
     id: 'lynx',
-    goldMin: 70,
-    goldMax: 150,
     entries: [
       { itemId: 'lynx_fang', chance: 0.5, min: 1, max: 2 },
-      { itemId: 'reaver_legguards', chance: 0.07, min: 1, max: 1 },
-      { itemId: 'fenhide_leggings', chance: 0.05, min: 1, max: 1 },
+      { itemId: 'smugglers_ledger', chance: 0.07, min: 1, max: 1 },
+      { itemId: 'reaver_legguards', chance: 0.06, min: 1, max: 1 },
+      { itemId: 'fenhide_leggings', chance: 0.04, min: 1, max: 1 },
     ],
   },
   marauder: {
     id: 'marauder',
-    goldMin: 90,
-    goldMax: 190,
+    goldMultiplier: 1.4,
     entries: [
       { itemId: 'outlaw_purse', chance: 0.55, min: 2, max: 3 },
-      { itemId: 'outlaw_saber', chance: 0.07, min: 1, max: 1 },
-      { itemId: 'outlaw_mail', chance: 0.07, min: 1, max: 1 },
-      { itemId: 'outlaws_signet', chance: 0.05, min: 1, max: 1 },
+      { itemId: 'smugglers_ledger', chance: 0.12, min: 1, max: 1 },
+      { itemId: 'outlaw_saber', chance: 0.05, min: 1, max: 1 },
+      { itemId: 'reliquary_mace', chance: 0.05, min: 1, max: 1 },
+      { itemId: 'outlaw_mail', chance: 0.06, min: 1, max: 1 },
+      { itemId: 'outlaws_signet', chance: 0.04, min: 1, max: 1 },
     ],
   },
+
+  // --- bosses: guaranteed class weapon, guaranteed high-value merchant good ---
   cadfael: {
     id: 'cadfael',
-    goldMin: 600,
-    goldMax: 1100,
+    goldMultiplier: 1.2,
+    classWeapons: {
+      warrior: 'cadfaels_cleaver',
+      priest: 'chieftains_reliquary',
+    },
     entries: [
-      { itemId: 'cadfaels_cleaver', chance: 0.3, min: 1, max: 1 },
+      { itemId: 'chieftains_seal', chance: 1, min: 1, max: 1 },
       { itemId: 'outlaws_signet', chance: 0.45, min: 1, max: 1 },
       { itemId: 'outlaw_mail', chance: 0.55, min: 1, max: 1 },
-      { itemId: 'boar_spear', chance: 0.35, min: 1, max: 1 },
+      { itemId: 'bearhide_helm', chance: 0.35, min: 1, max: 1 },
       { itemId: 'outlaw_purse', chance: 1, min: 4, max: 7 },
     ],
   },
   old_scar: {
     id: 'old_scar',
-    goldMin: 1400,
-    goldMax: 2600,
+    classWeapons: {
+      warrior: 'scarred_fang',
+      priest: 'bonecarved_stave',
+    },
     entries: [
-      { itemId: 'scarred_fang', chance: 0.28, min: 1, max: 1 },
+      { itemId: 'ancient_bear_skull', chance: 1, min: 1, max: 1 },
       { itemId: 'scarred_band', chance: 0.4, min: 1, max: 1 },
       { itemId: 'bearhide_cuirass', chance: 0.5, min: 1, max: 1 },
       { itemId: 'fenhide_leggings', chance: 0.5, min: 1, max: 1 },
@@ -146,6 +167,11 @@ export const LOOT_TABLES: Record<string, LootTable> = {
 // Every boss gets at least one telegraphed, dodgeable ability. That is what
 // gives the fight outcome variance: without it the result is decided by the
 // stat spread before the first swing, and the "boss" is just a long normal mob.
+//
+// Note the split in `interruptible`: the heavy AoEs are answered by MOVING and
+// cannot be interrupted, while heals and summons are answered by INTERRUPTING.
+// Two mechanics, two answers — if everything were interruptible the interrupt
+// would just be a strictly better dodge.
 // --------------------------------------------------------------------------
 
 const CADFAEL_ABILITIES: MobAbilityDef[] = [
@@ -157,6 +183,7 @@ const CADFAEL_ABILITIES: MobAbilityDef[] = [
     castMs: 2000,
     radius: 6,
     damageMultiplier: 3.4,
+    interruptible: false,
     telegraphText: 'Cadfael raises his cleaver for a wide swing!',
   },
   {
@@ -167,7 +194,8 @@ const CADFAEL_ABILITIES: MobAbilityDef[] = [
     castMs: 1500,
     summonMobId: 'outlaw_bowman',
     summonCount: 2,
-    telegraphText: 'Cadfael whistles for his men!',
+    interruptible: true,
+    telegraphText: 'Cadfael whistles for his men — cut him off!',
   },
   {
     id: 'bind_wounds',
@@ -175,10 +203,9 @@ const CADFAEL_ABILITIES: MobAbilityDef[] = [
     kind: 'mend',
     cooldownMs: 30000,
     castMs: 2500,
-    healFraction: 0.1,
-    // No interrupt skill exists yet, so this is a soft DPS check rather than
-    // something to react to. Revisit the wording if interrupts get added.
-    telegraphText: 'Cadfael binds his wounds!',
+    healFraction: 0.12,
+    interruptible: true,
+    telegraphText: 'Cadfael is binding his wounds — interrupt him!',
   },
   {
     id: 'cornered',
@@ -201,6 +228,7 @@ const OLD_SCAR_ABILITIES: MobAbilityDef[] = [
     castMs: 2200,
     radius: 7,
     damageMultiplier: 3.6,
+    interruptible: false,
     telegraphText: 'Old Scar rears up to slam the ground!',
   },
   {
@@ -211,7 +239,18 @@ const OLD_SCAR_ABILITIES: MobAbilityDef[] = [
     castMs: 1300,
     radius: 4.5,
     damageMultiplier: 2.6,
+    interruptible: false,
     telegraphText: 'Old Scar lunges into a savage maul!',
+  },
+  {
+    id: 'lick_wounds',
+    name: 'Lick Wounds',
+    kind: 'mend',
+    cooldownMs: 34000,
+    castMs: 2800,
+    healFraction: 0.1,
+    interruptible: true,
+    telegraphText: 'Old Scar is licking its wounds — interrupt it!',
   },
   {
     id: 'wounded_fury',

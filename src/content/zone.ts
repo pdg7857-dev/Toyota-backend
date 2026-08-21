@@ -126,6 +126,10 @@ export interface ClassDef {
   description: string;
   baseAttributes: Attributes;
   startingWeapon: string;
+  /** Whether the class is actually playable yet. */
+  implemented: boolean;
+  /** One-line hint shown on the class-select screen. */
+  playstyle: string;
   /** Renderer hint. */
   color: number;
 }
@@ -135,14 +139,30 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     id: 'warrior',
     name: 'Warrior',
     description: 'Holds the line. High health, steady melee damage, hard to kill.',
+    playstyle: 'Strength · melee · durable',
+    implemented: true,
     baseAttributes: { strength: 8, dexterity: 4, focus: 2, vitality: 8 },
     startingWeapon: 'rusted_blade',
     color: 0xd9c27a,
+  },
+  priest: {
+    id: 'priest',
+    name: 'Priest',
+    description:
+      'Outlasts what it cannot outhit. Sustains through damage with healing, ' +
+      'and is the surest hand at cutting a spell short.',
+    playstyle: 'Focus · caster · sustain & interrupts',
+    implemented: true,
+    baseAttributes: { strength: 3, dexterity: 4, focus: 10, vitality: 6 },
+    startingWeapon: 'oaken_walking_staff',
+    color: 0xbfd4e8,
   },
   ranger: {
     id: 'ranger',
     name: 'Ranger',
     description: 'Kills at range before it reaches you. Not yet implemented.',
+    playstyle: 'Dexterity · ranged',
+    implemented: false,
     baseAttributes: { strength: 5, dexterity: 9, focus: 4, vitality: 5 },
     startingWeapon: 'rusted_blade',
     color: 0x7ab87a,
@@ -151,6 +171,8 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     id: 'rogue',
     name: 'Rogue',
     description: 'Bursts a target down fast. Not yet implemented.',
+    playstyle: 'Dexterity · melee burst',
+    implemented: false,
     baseAttributes: { strength: 6, dexterity: 10, focus: 3, vitality: 4 },
     startingWeapon: 'rusted_blade',
     color: 0x9a7ab8,
@@ -159,16 +181,13 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     id: 'mage',
     name: 'Mage',
     description: 'Heavy elemental damage, fragile. Not yet implemented.',
+    playstyle: 'Focus · caster burst',
+    implemented: false,
     baseAttributes: { strength: 2, dexterity: 4, focus: 12, vitality: 4 },
     startingWeapon: 'rusted_blade',
     color: 0x7a9ad9,
   },
-  druid: {
-    id: 'druid',
-    name: 'Druid',
-    description: 'Sustains through damage with nature magic. Not yet implemented.',
-    baseAttributes: { strength: 3, dexterity: 4, focus: 10, vitality: 6 },
-    startingWeapon: 'rusted_blade',
-    color: 0x9ad97a,
-  },
 };
+
+/** Classes a player can actually pick right now. */
+export const PLAYABLE_CLASSES: ClassDef[] = Object.values(CLASSES).filter((c) => c.implemented);

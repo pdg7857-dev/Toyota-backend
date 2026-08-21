@@ -1,16 +1,22 @@
 import * as THREE from 'three';
-import { SKILLS, getSkill } from '../content/skills.js';
-import { QUALITY_COLORS, getItem } from '../content/items.js';
+import { getSkill, skillBarFor } from '../content/skills.js';
+import { QUALITY_COLORS, canEquip, getItem } from '../content/items.js';
 import { getMob } from '../content/mobs.js';
 import { xpToNext } from '../sim/formulas.js';
 import { BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
 import type { Attributes, Command, Entity, EntityId, SimEvent } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 
-const SKILL_ORDER = ['strike', 'rend', 'rally', 'bulwark', 'sunder', 'onslaught'];
 const MAX_LOG_LINES = 9;
-/** How far away a mob can be and still show a nameplate, in world units. */
-const NAMEPLATE_RANGE = 20;
+/**
+ * How far away a mob can be and still show a nameplate, in world units.
+ *
+ * Kept tight on purpose. Camps are dense so the grind has throughput, which
+ * means a generous plate range buries the screen in labels — the plates you
+ * actually need are your target, whatever is hitting you, and what is close
+ * enough to pull next.
+ */
+const NAMEPLATE_RANGE = 13;
 
 /** ★ string for a mob's difficulty rating. ★5 is a boss, ★6 an elite boss. */
 function starText(stars: number): string {
@@ -66,6 +72,8 @@ export class Hud {
   private telegraphTimer: number | null = null;
 
   private slots = new Map<string, { el: HTMLElement; cd: HTMLElement; name: HTMLElement }>();
+  /** Hotkey order for this character's class, filled in at construction. */
+  private skillOrder: string[] = [];
   private nameplates = new Map<EntityId, HTMLElement>();
   private projected = new THREE.Vector3();
 
@@ -123,9 +131,10 @@ export class Hud {
   }
 
   private buildSkillBar(): void {
-    SKILL_ORDER.forEach((skillId, i) => {
-      const skill = SKILLS[skillId];
-      if (!skill) return;
+    const bar = skillBarFor(this.world.player.classId ?? 'warrior');
+    this.skillOrder = bar.map((s) => s.id);
+    bar.forEach((skill, i) => {
+      const skillId = skill.id;
       const el = document.createElement('div');
       el.className = 'slot clickable';
       el.title = `${skill.name} — ${skill.description} (${skill.energyCost} energy)`;
@@ -145,7 +154,7 @@ export class Hud {
 
   /** Skill id bound to a 1-5 hotkey, or null. */
   skillForSlot(index: number): string | null {
-    return SKILL_ORDER[index] ?? null;
+    return this.skillOrder[index] ?? null;
   }
 
   // ------------------------------------------------------------------ events
@@ -238,6 +247,24 @@ export class Hud {
           if (mob) this.log(`${mob.name} is enraged!`, 'log-danger');
           break;
         }
+        case 'interrupted': {
+          if (ev.sourceId !== playerId) break;
+          const target = this.world.entity(ev.targetId);
+          this.log(
+            `You interrupt ${target?.name ?? 'the caster'}'s ${ev.abilityName}! ` +
+              `Locked out for ${Math.round(ev.lockoutMs / 1000)}s.`,
+            'log-good',
+          );
+          // Clear the warning immediately — the thing it warned about is gone.
+          this.hideTelegraphBanner();
+          if (target) this.float(camera, target, 'interrupted!', 'interrupt');
+          break;
+        }
+        case 'interruptWasted': {
+          if (ev.sourceId !== playerId) break;
+          this.log('Nothing to interrupt.', 'log-warn');
+          break;
+        }
         case 'summoned': {
           const mob = this.world.entity(ev.sourceId);
           if (mob) this.log(`${mob.name} calls in reinforcements!`, 'log-danger');
@@ -274,6 +301,12 @@ export class Hud {
       banner.style.display = 'none';
       this.telegraphTimer = null;
     }, durationMs + 400);
+  }
+
+  private hideTelegraphBanner(): void {
+    if (this.telegraphTimer !== null) clearTimeout(this.telegraphTimer);
+    this.telegraphTimer = null;
+    this.els.telegraph.style.display = 'none';
   }
 
   log(text: string, cls = ''): void {
@@ -588,13 +621,22 @@ export class Hud {
     }
     for (const stack of inv) {
       const item = getItem(stack.itemId);
+      const usable = canEquip(item, player.classId);
       const row = document.createElement('div');
-      row.className = 'inv-row clickable';
+      row.className = `inv-row${item.slot && usable ? ' clickable' : ''}${usable ? '' : ' unusable'}`;
+
+      // Right-hand tag: the slot, or why you can't use it, or its vendor value.
+      let tag: string;
+      if (item.slot && !usable) tag = `<span class="locked-class">${item.classes?.join('/')} only</span>`;
+      else if (item.slot) tag = item.slot;
+      else tag = `${item.value}g`;
+
       row.innerHTML =
         `<span style="color:${QUALITY_COLORS[item.quality]}">${item.name}` +
         `${stack.qty > 1 ? ` <span class="muted">x${stack.qty}</span>` : ''}</span>` +
-        `<span class="muted">${item.slot ?? `${item.value}g`}</span>`;
-      if (item.slot) {
+        `<span class="muted">${tag}</span>`;
+
+      if (item.slot && usable) {
         row.title = `Click to equip — ${describeItem(stack.itemId)}`;
         row.addEventListener('click', () => {
           this.emit({ t: 'equip', itemId: stack.itemId });

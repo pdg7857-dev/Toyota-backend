@@ -54,6 +54,20 @@ async function main() {
   });
 
   await page.goto(URL, { waitUntil: 'networkidle' });
+  await wait(900);
+  await page.screenshot({ path: join(OUT, '00-class-select.png') });
+
+  // Pick the class named by CLASS (default Warrior) from the start screen.
+  const wanted = (process.env.CLASS ?? 'Warrior').toLowerCase();
+  const picked = await page.evaluate((name) => {
+    const cards = [...document.querySelectorAll('.cs-card')];
+    const card = cards.find((c) => c.querySelector('h2')?.textContent?.toLowerCase() === name);
+    if (!card) return false;
+    card.click();
+    return true;
+  }, wanted);
+  if (!picked) throw new Error('class select did not offer ' + wanted);
+
   await wait(1500);
   await page.screenshot({ path: join(OUT, '01-spawn.png') });
 
@@ -147,7 +161,9 @@ async function main() {
 
   const checks = [
     ['canvas present', state.canvas],
-    ['skill bar built', state.slots === 6],
+    // Exact kit contents are a unit-test concern; here we only care that the
+    // bar rendered a plausible number of slots for the chosen class.
+    ['skill bar built', state.slots >= 6],
     ['player health shown', /\d+ \/ \d+/.test(state.hp)],
     ['xp bar shown', /\d+ \/ \d+ XP/.test(state.xp)],
     ['a target was acquired', state.targetVisible && state.target.length > 0],

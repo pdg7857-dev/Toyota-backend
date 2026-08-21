@@ -1,7 +1,8 @@
 import { World } from '../src/sim/world.js';
 import { POINTS_PER_LEVEL, TICK_MS } from '../src/sim/formulas.js';
 import type { Attributes, Entity, SimEvent } from '../src/sim/types.js';
-import type { ZoneDef } from '../src/content/zone.js';
+import { CLASSES, type ZoneDef } from '../src/content/zone.js';
+import { getMob } from '../src/content/mobs.js';
 
 /** A bare arena with one mob a couple of metres away — no scenery, no neighbours. */
 export function duelZone(mobId: string, distance = 2.5): ZoneDef {
@@ -30,6 +31,16 @@ export function warriorBuild(level: number): Attributes {
   return { strength, dexterity: 0, focus: 0, vitality: points - strength };
 }
 
+/**
+ * How a Priest player plausibly spends points: mostly Focus (their attack
+ * rating scales off it), the rest into Vitality.
+ */
+export function priestBuild(level: number): Attributes {
+  const points = (level - 1) * POINTS_PER_LEVEL;
+  const focus = Math.round(points * 0.6);
+  return { strength: 0, dexterity: 0, focus, vitality: points - focus };
+}
+
 export interface LevelOptions {
   level: number;
   /** Item ids to equip before the fight. */
@@ -40,12 +51,13 @@ export interface LevelOptions {
 export function levelPlayer(world: World, opts: LevelOptions): Entity {
   const player = world.player;
   player.level = opts.level;
-  const build = warriorBuild(opts.level);
+  const base = CLASSES[player.classId ?? 'warrior'].baseAttributes;
+  const build = player.classId === 'priest' ? priestBuild(opts.level) : warriorBuild(opts.level);
   player.attributes = {
-    strength: 8 + build.strength,
-    dexterity: 4 + build.dexterity,
-    focus: 2 + build.focus,
-    vitality: 8 + build.vitality,
+    strength: base.strength + build.strength,
+    dexterity: base.dexterity + build.dexterity,
+    focus: base.focus + build.focus,
+    vitality: base.vitality + build.vitality,
   };
   for (const itemId of opts.gear ?? []) {
     world.addItem(player, { itemId, qty: 1 });
@@ -69,6 +81,10 @@ export interface FightResult {
   slamsTaken: number;
   /** Telegraphed AoEs the player escaped. */
   slamsDodged: number;
+  /** Mob casts the player successfully cut short. */
+  interrupts: number;
+  /** Health the mob recovered because a heal was allowed to finish. */
+  mobHealed: number;
 }
 
 export interface FightOptions {
@@ -80,6 +96,12 @@ export interface FightOptions {
    * stands in every AoE — which is the floor, not the ceiling.
    */
   dodge?: boolean;
+  /**
+   * Skill id to fire the moment the mob starts an interruptible cast. Models a
+   * player who is actually watching for the heal, rather than one who mashes
+   * the interrupt on cooldown and has it down when it matters.
+   */
+  interruptSkill?: string;
   timeoutSec?: number;
 }
 
@@ -114,6 +136,8 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
   let pending: PendingSlam | null = null;
   let slamsTaken = 0;
   let slamsDodged = 0;
+  let interrupts = 0;
+  let mobHealed = 0;
   let lastMove = { x: 0, z: 0 };
 
   const move = (x: number, z: number): void => {
@@ -126,6 +150,18 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
     for (const skillId of skills) {
       if ((player.skillCooldowns?.[skillId] ?? 0) <= 0) {
         world.submit(player.id, { t: 'useSkill', skillId });
+      }
+    }
+
+    // React to an interruptible cast in progress. Checked before the tick so
+    // the interrupt lands during the cast window rather than after it resolves.
+    if (opts.interruptSkill && (player.skillCooldowns?.[opts.interruptSkill] ?? 0) <= 0) {
+      const cast = mob.cast;
+      if (cast?.kind === 'ability') {
+        const ability = getMob(mob.defId!).abilities?.find((a) => a.id === cast.id);
+        if (ability?.interruptible) {
+          world.submit(player.id, { t: 'useSkill', skillId: opts.interruptSkill });
+        }
       }
     }
 
@@ -156,6 +192,10 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
         pending = { sourceId: ev.sourceId, radius: ev.radius, remainingMs: ev.durationMs };
       } else if (ev.t === 'dodged' && ev.targetId === player.id) {
         slamsDodged++;
+      } else if (ev.t === 'interrupted' && ev.sourceId === player.id) {
+        interrupts++;
+      } else if (ev.t === 'heal' && ev.targetId === mob.id) {
+        mobHealed += ev.amount;
       } else if (ev.t === 'damage' && ev.targetId === player.id && ev.abilityId) {
         // Any damage to the player carrying an ability id came from a mob
         // ability — auto-attacks pass null. Do NOT gate this on `pending`: the
@@ -178,6 +218,8 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
         timedOut: false,
         slamsTaken,
         slamsDodged,
+        interrupts,
+        mobHealed,
       };
     }
   }
@@ -188,6 +230,8 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
     timedOut: true,
     slamsTaken,
     slamsDodged,
+    interrupts,
+    mobHealed,
   };
 }
 

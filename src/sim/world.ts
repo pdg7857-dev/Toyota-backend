@@ -24,6 +24,8 @@ import {
   healthRegenPerSec,
   POINTS_PER_LEVEL,
   MAX_LEVEL,
+  PRIMARY_ATTRIBUTE,
+  goldForKill,
   resolveAttack,
   threatFromDamage,
   xpForKill,
@@ -44,7 +46,7 @@ import type {
   SkillDef,
   Vec2,
 } from './types.js';
-import { getItem } from '../content/items.js';
+import { canEquip, getItem } from '../content/items.js';
 import { getLootTable, getMob } from '../content/mobs.js';
 import { getSkill, skillsForClass } from '../content/skills.js';
 import { CLASSES, type ZoneDef } from '../content/zone.js';
@@ -56,7 +58,7 @@ const LOOT_RANGE = 4.5;
 const COMBAT_TIMEOUT_MS = 6000;
 
 /** Save format version. Bump when the Entity shape changes. */
-const SAVE_VERSION = 2;
+const SAVE_VERSION = 3;
 
 export interface WorldOptions {
   seed: number;
@@ -148,6 +150,7 @@ export class World {
       aiState: 'idle',
       threat: {},
       abilityCooldowns: {},
+      abilityLockouts: {},
       firedAbilities: [],
       corpseLoot: [],
       corpseGold: 0,
@@ -212,6 +215,7 @@ export class World {
       stats = deriveStats({
         level: e.level,
         attributes: acc.attributes,
+        primaryAttribute: PRIMARY_ATTRIBUTE[e.classId ?? 'warrior'],
         armor: acc.armor,
         weapon,
       });
@@ -345,7 +349,7 @@ export class World {
   private tickCooldowns(): void {
     for (const e of this.entities.values()) {
       if (e.gcdMs !== undefined && e.gcdMs > 0) e.gcdMs = Math.max(0, e.gcdMs - TICK_MS);
-      for (const bag of [e.skillCooldowns, e.abilityCooldowns]) {
+      for (const bag of [e.skillCooldowns, e.abilityCooldowns, e.abilityLockouts]) {
         if (!bag) continue;
         for (const id of Object.keys(bag)) {
           const remaining = (bag[id] ?? 0) - TICK_MS;
@@ -493,6 +497,8 @@ export class World {
       const stats = this.statsOf(e);
       for (const ability of def.abilities) {
         if ((e.abilityCooldowns?.[ability.id] ?? 0) > 0) continue;
+        // Locked out by a player interrupt.
+        if ((e.abilityLockouts?.[ability.id] ?? 0) > 0) continue;
 
         if (ability.healthThreshold !== undefined) {
           // One-shot: only when crossing the threshold, and only once per life.
@@ -757,6 +763,7 @@ export class World {
       e.threat = {};
       e.effects = [];
       e.abilityCooldowns = {};
+      e.abilityLockouts = {};
       e.firedAbilities = [];
       e.corpseLoot = [];
       e.corpseGold = 0;
@@ -833,9 +840,9 @@ export class World {
       victim.respawnInMs = def.respawnMs;
       victim.threat = {};
       this.despawnSummonsOf(victim.id);
-      this.rollLoot(victim);
-
       const killer = this.entities.get(killerId);
+      this.rollLoot(victim, killer);
+
       if (killer && killer.kind === 'player') {
         this.awardXp(killer, xpForKill(def.xp, def.level, killer.level));
       }
@@ -847,21 +854,33 @@ export class World {
     }
   }
 
-  private rollLoot(mob: Entity): void {
+  private rollLoot(mob: Entity, killer: Entity | undefined): void {
     // Adds drop nothing — otherwise a summoning boss is an infinite loot faucet.
     if (mob.summonedBy !== undefined) {
       mob.corpseLoot = [];
       mob.corpseGold = 0;
       return;
     }
-    const table = getLootTable(getMob(mob.defId!).lootTableId);
+    const def = getMob(mob.defId!);
+    const table = getLootTable(def.lootTableId);
     const loot: ItemStack[] = [];
+
+    // A boss's class weapon is resolved against whoever actually killed it, so
+    // the reward is always something that player can equip rather than a
+    // class-locked drop they can only vendor.
+    if (table.classWeapons && killer?.kind === 'player' && killer.classId) {
+      const weaponId = table.classWeapons[killer.classId];
+      if (weaponId) loot.push({ itemId: weaponId, qty: 1 });
+    }
+
     for (const entry of table.entries) {
       if (!this.rng.chance(entry.chance)) continue;
       loot.push({ itemId: entry.itemId, qty: this.rng.int(entry.min, entry.max) });
     }
+
+    const gold = goldForKill(def.level, def.stars, table.goldMultiplier ?? 1);
     mob.corpseLoot = loot;
-    mob.corpseGold = this.rng.int(table.goldMin, table.goldMax);
+    mob.corpseGold = this.rng.int(gold.min, gold.max);
   }
 
   private awardXp(player: Entity, amount: number): void {
@@ -928,7 +947,8 @@ export class World {
       return;
     }
 
-    const needsTarget = skill.kind === 'damage' || skill.kind === 'dot';
+    const needsTarget =
+      skill.kind === 'damage' || skill.kind === 'dot' || skill.kind === 'interrupt';
     let targetId: EntityId | null = e.targetId;
     if (needsTarget) {
       const target = this.entities.get(targetId ?? -1);
@@ -1037,6 +1057,49 @@ export class World {
         });
         break;
       }
+      case 'interrupt': {
+        const target = this.entities.get(targetId ?? -1);
+        if (!target || target.dead) return;
+        if (dist(source.pos.x, source.pos.z, target.pos.x, target.pos.z) > skill.range) {
+          this.events.push({ t: 'error', entityId: source.id, message: 'Out of range.' });
+          return;
+        }
+
+        const cast = target.cast;
+        const ability = cast?.kind === 'ability' ? this.findAbility(target, cast.id) : undefined;
+        // Only an interruptible ability can be stopped. A missed interrupt still
+        // costs its cooldown — that is what makes timing it a real decision.
+        if (!cast || !ability?.interruptible) {
+          this.events.push({ t: 'interruptWasted', sourceId: source.id, targetId: target.id });
+          break;
+        }
+
+        target.cast = null;
+        const lockoutMs = skill.lockoutMs ?? 5000;
+        target.abilityLockouts = target.abilityLockouts ?? {};
+        target.abilityLockouts[ability.id] = lockoutMs;
+        this.events.push({
+          t: 'castInterrupted',
+          sourceId: target.id,
+          kind: 'ability',
+          id: ability.id,
+        });
+        this.events.push({
+          t: 'interrupted',
+          sourceId: source.id,
+          targetId: target.id,
+          abilityId: ability.id,
+          abilityName: ability.name,
+          lockoutMs,
+        });
+        if (skill.threatBonus && target.kind === 'mob') {
+          target.threat = target.threat ?? {};
+          target.threat[source.id] = (target.threat[source.id] ?? 0) + skill.threatBonus;
+        }
+        this.markCombat(source.id);
+        this.markCombat(target.id);
+        break;
+      }
       case 'buff': {
         const target = this.entities.get(targetId ?? source.id) ?? source;
         this.addEffect(target, {
@@ -1113,6 +1176,14 @@ export class World {
     const def = getItem(itemId);
     if (!def.slot) {
       this.events.push({ t: 'error', entityId: player.id, message: `${def.name} cannot be equipped.` });
+      return;
+    }
+    if (!canEquip(def, player.classId)) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `${def.name} cannot be used by a ${player.classId ?? 'character'}.`,
+      });
       return;
     }
     if (!this.removeItem(player, itemId, 1)) return;

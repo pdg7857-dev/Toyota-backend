@@ -3,7 +3,15 @@
  * hammer it without standing up a World. If a number feels wrong in play, this
  * is the only file that should need editing.
  */
-import type { Attributes, DamageType, DerivedStats, ItemDef, MobDef, StarRating } from './types.js';
+import type {
+  Attributes,
+  ClassId,
+  DamageType,
+  DerivedStats,
+  ItemDef,
+  MobDef,
+  StarRating,
+} from './types.js';
 import type { Rng } from './rng.js';
 
 export const TICK_MS = 50;
@@ -72,6 +80,47 @@ export const STAR_MODIFIERS: Record<StarRating, { health: number; damage: number
   6: { health: 15.0, damage: 2.15, defense: 1.75 },
 };
 
+/**
+ * Gold multiplier per star.
+ *
+ * Harder mobs pay better. Gold is the *reliable* reward — it scales hard and
+ * drops every kill — which is what lets equipment drops stay genuinely rare
+ * without the grind feeling unrewarding. Vendor trash works the same way.
+ */
+export const STAR_GOLD_MULTIPLIER: Record<StarRating, number> = {
+  1: 1.0,
+  2: 1.6,
+  3: 2.6,
+  4: 4.2,
+  5: 26,
+  6: 55,
+};
+
+/**
+ * Gold dropped by a mob of the given level and stars.
+ *
+ * Derived rather than hand-set per table so a new mob can never accidentally
+ * pay less than something easier. `goldMultiplier` on a loot table is the
+ * deliberate override.
+ */
+export function goldForKill(
+  level: number,
+  stars: StarRating,
+  multiplier = 1,
+): { min: number; max: number } {
+  const base = (2 + level * 1.9) * STAR_GOLD_MULTIPLIER[stars] * multiplier;
+  return { min: Math.max(1, Math.round(base * 0.7)), max: Math.max(2, Math.round(base * 1.35)) };
+}
+
+/**
+ * Ceiling on how often a mob may drop *any* equipment.
+ *
+ * The design rule is "harder mobs drop better things, not more things". Gear
+ * stays rare at every tier; what improves with difficulty is the quality of
+ * what you get and the gold alongside it. `balance.test.ts` enforces this.
+ */
+export const MAX_EQUIPMENT_DROP_CHANCE = 0.3;
+
 /** XP multiplier per star. Bosses are worth a real dent in the bar. */
 export const STAR_XP_MULTIPLIER: Record<StarRating, number> = {
   1: 1.0,
@@ -114,9 +163,27 @@ export function addAttributes(a: Attributes, b: Partial<Attributes>): Attributes
   };
 }
 
+/**
+ * Which attribute drives a class's attack rating.
+ *
+ * Melee classes scale off Strength, casters off Focus. Keeping this as a
+ * mapping rather than branching inside `deriveStats` means the combat maths
+ * stays identical for every class — only the input attribute changes — so a
+ * Priest and a Warrior are balanced against the same formula.
+ */
+export const PRIMARY_ATTRIBUTE: Record<ClassId, keyof Attributes> = {
+  warrior: 'strength',
+  priest: 'focus',
+  ranger: 'dexterity',
+  rogue: 'dexterity',
+  mage: 'focus',
+};
+
 export interface DeriveInput {
   level: number;
   attributes: Attributes;
+  /** Attribute driving attack rating — see `PRIMARY_ATTRIBUTE`. */
+  primaryAttribute: keyof Attributes;
   /** Summed armor from equipped gear. */
   armor: number;
   weapon: {
@@ -142,7 +209,7 @@ export function deriveStats(input: DeriveInput): DerivedStats {
   return {
     maxHealth: Math.round(60 + a.vitality * 8 + level * 12),
     maxEnergy: Math.round(30 + a.focus * 5 + level * 3),
-    attack: Math.round(10 + a.strength * 2 + level * 3),
+    attack: Math.round(10 + a[input.primaryAttribute] * 2 + level * 3),
     defense: Math.round(a.vitality * 1.5 + armor + level * 2),
     critChance: Math.min(0.5, 0.03 + a.dexterity * 0.0025),
     swingMs: Math.max(600, Math.round(weapon.swingMs * Math.max(0.75, hasteFactor))),

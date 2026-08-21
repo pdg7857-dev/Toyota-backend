@@ -1,11 +1,12 @@
 import { World } from './sim/world.js';
 import { TICK_MS } from './sim/formulas.js';
-import { FENMARCH } from './content/zone.js';
+import { CLASSES, FENMARCH } from './content/zone.js';
 import { SceneRig } from './render/scene.js';
 import { ViewManager } from './render/views.js';
 import { Hud } from './render/hud.js';
 import { InputController } from './render/input.js';
-import type { Command, SimEvent } from './sim/types.js';
+import { chooseClass } from './render/classSelect.js';
+import type { ClassId, Command, SimEvent } from './sim/types.js';
 
 const SAVE_KEY = 'emerald-isle:save:v1';
 const AUTOSAVE_MS = 10000;
@@ -18,12 +19,24 @@ const AUTOSAVE_MS = 10000;
  * two ticks. That decoupling is what keeps the sim deterministic — and it is
  * the same structure a network client uses against server snapshots.
  */
-function boot(): void {
+async function boot(): Promise<void> {
   const container = document.getElementById('app');
   if (!container) throw new Error('#app missing');
 
-  const fresh = new URLSearchParams(location.search).has('fresh');
-  const world = loadWorld(fresh);
+  const params = new URLSearchParams(location.search);
+  const fresh = params.has('fresh');
+
+  // Resume a save if there is one; otherwise pick a class before building the
+  // world, since class decides starting attributes, weapon and skill bar.
+  let loaded = fresh ? null : loadSavedWorld();
+  if (!loaded) {
+    const forced = params.get('class');
+    const classId =
+      forced && forced in CLASSES ? (forced as ClassId) : await chooseClass(container);
+    loaded = newWorld(classId);
+  }
+  // Bind to a const so the closures below see a non-null World.
+  const world = loaded;
 
   const rig = new SceneRig(container, world.zone);
   const views = new ViewManager(rig.scene, world);
@@ -119,17 +132,19 @@ function boot(): void {
   requestAnimationFrame(frame);
 }
 
-function loadWorld(fresh: boolean): World {
-  if (!fresh) {
-    try {
-      const json = localStorage.getItem(SAVE_KEY);
-      if (json) return World.deserialize(json, FENMARCH);
-    } catch (err) {
-      // A corrupt or outdated save must never be a hard failure — start over.
-      console.warn('Could not load save, starting fresh:', err);
-    }
+function loadSavedWorld(): World | null {
+  try {
+    const json = localStorage.getItem(SAVE_KEY);
+    if (json) return World.deserialize(json, FENMARCH);
+  } catch (err) {
+    // A corrupt or outdated save must never be a hard failure — start over.
+    console.warn('Could not load save, starting fresh:', err);
   }
-  return new World({ seed: 20260821, zone: FENMARCH, classId: 'warrior', playerName: 'Wanderer' });
+  return null;
+}
+
+function newWorld(classId: ClassId): World {
+  return new World({ seed: 20260821, zone: FENMARCH, classId, playerName: 'Wanderer' });
 }
 
 function save(world: World): void {
@@ -140,4 +155,4 @@ function save(world: World): void {
   }
 }
 
-boot();
+void boot();
