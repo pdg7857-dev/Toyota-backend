@@ -1,0 +1,272 @@
+import type { ItemDef } from '../sim/types.js';
+
+/**
+ * Item registry. Data only — no behaviour. Adding gear should never require
+ * touching sim code.
+ *
+ * The progression is built for levels 1–25 in roughly four-level steps, so a
+ * player grinding a band has something to look forward to from the next one.
+ */
+export const ITEMS: Record<string, ItemDef> = {
+  // --- weapons ------------------------------------------------------------
+  rusted_blade: {
+    id: 'rusted_blade',
+    name: 'Rusted Blade',
+    slot: 'weapon',
+    quality: 'common',
+    value: 4,
+    damageMin: 3,
+    damageMax: 6,
+    damageType: 'physical',
+    swingMs: 1800,
+    attackRange: 2.4,
+  },
+  bronze_shortsword: {
+    id: 'bronze_shortsword',
+    name: 'Bronze Shortsword',
+    slot: 'weapon',
+    quality: 'common',
+    value: 18,
+    damageMin: 6,
+    damageMax: 11,
+    damageType: 'physical',
+    swingMs: 1700,
+    attackRange: 2.4,
+    attributes: { strength: 2 },
+  },
+  ironbark_cudgel: {
+    id: 'ironbark_cudgel',
+    name: 'Ironbark Cudgel',
+    slot: 'weapon',
+    quality: 'uncommon',
+    value: 55,
+    damageMin: 11,
+    damageMax: 19,
+    damageType: 'physical',
+    swingMs: 2100,
+    attackRange: 2.6,
+    attributes: { strength: 4, vitality: 2 },
+  },
+  iron_longsword: {
+    id: 'iron_longsword',
+    name: 'Iron Longsword',
+    slot: 'weapon',
+    quality: 'uncommon',
+    value: 120,
+    damageMin: 18,
+    damageMax: 28,
+    damageType: 'physical',
+    swingMs: 1900,
+    attackRange: 2.6,
+    attributes: { strength: 7, vitality: 3 },
+  },
+  outlaw_saber: {
+    id: 'outlaw_saber',
+    name: 'Outlaw Saber',
+    slot: 'weapon',
+    quality: 'rare',
+    value: 260,
+    damageMin: 26,
+    damageMax: 38,
+    damageType: 'physical',
+    swingMs: 1750,
+    attackRange: 2.5,
+    attributes: { strength: 10, dexterity: 6 },
+  },
+  boar_spear: {
+    id: 'boar_spear',
+    name: 'Boar Spear',
+    slot: 'weapon',
+    quality: 'rare',
+    value: 380,
+    damageMin: 35,
+    damageMax: 50,
+    damageType: 'physical',
+    swingMs: 2000,
+    attackRange: 3.1,
+    attributes: { strength: 13, vitality: 5 },
+  },
+  cadfaels_cleaver: {
+    id: 'cadfaels_cleaver',
+    name: "Cadfael's Cleaver",
+    slot: 'weapon',
+    quality: 'epic',
+    value: 900,
+    damageMin: 44,
+    damageMax: 62,
+    damageType: 'physical',
+    swingMs: 1900,
+    attackRange: 2.7,
+    attributes: { strength: 17, dexterity: 8, vitality: 7 },
+  },
+  scarred_fang: {
+    id: 'scarred_fang',
+    name: 'Scarred Fang',
+    slot: 'weapon',
+    quality: 'epic',
+    value: 1800,
+    damageMin: 56,
+    damageMax: 78,
+    damageType: 'physical',
+    swingMs: 1850,
+    attackRange: 2.7,
+    attributes: { strength: 22, dexterity: 11, vitality: 10 },
+  },
+
+  // --- head ---------------------------------------------------------------
+  tattered_hood: {
+    id: 'tattered_hood',
+    name: 'Tattered Hood',
+    slot: 'head',
+    quality: 'common',
+    value: 5,
+    armor: 3,
+    attributes: { vitality: 1 },
+  },
+  leather_coif: {
+    id: 'leather_coif',
+    name: 'Leather Coif',
+    slot: 'head',
+    quality: 'common',
+    value: 40,
+    armor: 9,
+    attributes: { vitality: 3 },
+  },
+  outlaw_hood: {
+    id: 'outlaw_hood',
+    name: 'Outlaw Hood',
+    slot: 'head',
+    quality: 'uncommon',
+    value: 150,
+    armor: 18,
+    attributes: { vitality: 5, dexterity: 4 },
+  },
+  bearhide_helm: {
+    id: 'bearhide_helm',
+    name: 'Bearhide Helm',
+    slot: 'head',
+    quality: 'rare',
+    value: 340,
+    armor: 28,
+    attributes: { vitality: 9, strength: 4 },
+  },
+
+  // --- chest --------------------------------------------------------------
+  boiled_leather_vest: {
+    id: 'boiled_leather_vest',
+    name: 'Boiled Leather Vest',
+    slot: 'chest',
+    quality: 'common',
+    value: 14,
+    armor: 8,
+    attributes: { vitality: 2 },
+  },
+  studded_jerkin: {
+    id: 'studded_jerkin',
+    name: 'Studded Jerkin',
+    slot: 'chest',
+    quality: 'uncommon',
+    value: 90,
+    armor: 20,
+    attributes: { vitality: 5, strength: 2 },
+  },
+  outlaw_mail: {
+    id: 'outlaw_mail',
+    name: 'Outlaw Mail',
+    slot: 'chest',
+    quality: 'rare',
+    value: 300,
+    armor: 36,
+    attributes: { vitality: 9, strength: 5 },
+  },
+  bearhide_cuirass: {
+    id: 'bearhide_cuirass',
+    name: 'Bearhide Cuirass',
+    slot: 'chest',
+    quality: 'epic',
+    value: 750,
+    armor: 52,
+    attributes: { vitality: 14, strength: 7 },
+  },
+
+  // --- legs ---------------------------------------------------------------
+  bogstrider_greaves: {
+    id: 'bogstrider_greaves',
+    name: 'Bogstrider Greaves',
+    slot: 'legs',
+    quality: 'uncommon',
+    value: 60,
+    armor: 14,
+    attributes: { vitality: 3, dexterity: 3 },
+  },
+  reaver_legguards: {
+    id: 'reaver_legguards',
+    name: 'Reaver Legguards',
+    slot: 'legs',
+    quality: 'uncommon',
+    value: 190,
+    armor: 26,
+    attributes: { vitality: 6, dexterity: 4 },
+  },
+  fenhide_leggings: {
+    id: 'fenhide_leggings',
+    name: 'Fenhide Leggings',
+    slot: 'legs',
+    quality: 'rare',
+    value: 480,
+    armor: 40,
+    attributes: { vitality: 10, dexterity: 6 },
+  },
+
+  // --- rings --------------------------------------------------------------
+  ring_of_the_fen: {
+    id: 'ring_of_the_fen',
+    name: 'Ring of the Fen',
+    slot: 'ring',
+    quality: 'rare',
+    value: 150,
+    armor: 2,
+    attributes: { focus: 5, dexterity: 3 },
+  },
+  outlaws_signet: {
+    id: 'outlaws_signet',
+    name: "Outlaw's Signet",
+    slot: 'ring',
+    quality: 'rare',
+    value: 420,
+    armor: 4,
+    attributes: { strength: 6, dexterity: 5 },
+  },
+  scarred_band: {
+    id: 'scarred_band',
+    name: 'Scarred Band',
+    slot: 'ring',
+    quality: 'epic',
+    value: 1100,
+    armor: 6,
+    attributes: { strength: 9, vitality: 8, dexterity: 5 },
+  },
+
+  // --- trade goods / vendor trash -----------------------------------------
+  hare_pelt: { id: 'hare_pelt', name: 'Hare Pelt', slot: null, quality: 'common', value: 1, stackable: true },
+  boar_tusk: { id: 'boar_tusk', name: 'Boar Tusk', slot: null, quality: 'common', value: 2, stackable: true },
+  adder_skin: { id: 'adder_skin', name: 'Adder Skin', slot: null, quality: 'common', value: 5, stackable: true },
+  wolf_pelt: { id: 'wolf_pelt', name: 'Wolf Pelt', slot: null, quality: 'common', value: 8, stackable: true },
+  stag_antler: { id: 'stag_antler', name: 'Stag Antler', slot: null, quality: 'common', value: 14, stackable: true },
+  outlaw_purse: { id: 'outlaw_purse', name: "Outlaw's Purse", slot: null, quality: 'uncommon', value: 26, stackable: true },
+  bear_claw: { id: 'bear_claw', name: 'Bear Claw', slot: null, quality: 'uncommon', value: 45, stackable: true },
+  lynx_fang: { id: 'lynx_fang', name: 'Lynx Fang', slot: null, quality: 'uncommon', value: 60, stackable: true },
+};
+
+export function getItem(id: string): ItemDef {
+  const item = ITEMS[id];
+  if (!item) throw new Error(`Unknown item: ${id}`);
+  return item;
+}
+
+export const QUALITY_COLORS: Record<ItemDef['quality'], string> = {
+  common: '#c8c8c8',
+  uncommon: '#4ad66d',
+  rare: '#4aa3ff',
+  epic: '#c77dff',
+};

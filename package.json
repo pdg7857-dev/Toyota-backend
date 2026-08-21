@@ -1,47 +1,27 @@
 {
-  "name": "toyota-backend",
+  "name": "emerald-isle",
   "version": "0.1.0",
-  "description": "Toyota Ontario sales-rep reference and Q&A backend",
   "private": true,
   "type": "module",
+  "description": "Single-player 3D tab-target RPG. Headless deterministic sim core + three.js renderer.",
   "scripts": {
-    "build": "tsc",
-    "dev": "tsx --env-file=.env watch src/index.ts",
-    "start": "node --env-file=.env dist/index.js",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy",
-    "prisma:studio": "prisma studio",
-    "db:seed": "tsx --env-file=.env src/db/seed.ts",
-    "scrape": "tsx --env-file=.env src/scraper/run.ts"
-  },
-  "prisma": {
-    "seed": "tsx src/db/seed.ts"
+    "typecheck": "tsc --noEmit",
+    "smoke": "node tools/smoke.mjs",
+    "verify": "npm run typecheck && npm run test"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
-    "@prisma/client": "^6.1.0",
-    "express": "^4.21.2",
-    "zod": "^3.24.1"
+    "three": "^0.169.0"
   },
   "devDependencies": {
-    "@types/express": "^5.0.0",
-    "@types/node": "^22.10.5",
-    "@types/supertest": "^6.0.2",
-    "@typescript-eslint/eslint-plugin": "^8.19.1",
-    "@typescript-eslint/parser": "^8.19.1",
-    "eslint": "^9.17.0",
-    "playwright": "^1.60.0",
-    "prisma": "^6.1.0",
-    "supertest": "^7.0.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
-  },
-  "engines": {
-    "node": ">=20"
+    "@types/three": "^0.169.0",
+    "playwright": "^1.62.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
   }
 }
