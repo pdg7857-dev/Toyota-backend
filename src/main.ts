@@ -39,11 +39,13 @@ async function boot(): Promise<void> {
   const world = loaded;
 
   const rig = new SceneRig(container, world.zone);
-  const views = new ViewManager(rig.scene, world);
+  // Sampled through the rig rather than captured, so it follows the zone the
+  // player is actually standing in after travel.
+  const views = new ViewManager(rig.scene, world, (x, z) => rig.heightAt(x, z));
   const emit = (cmd: Command): void => {
     world.submit(world.playerId, cmd);
   };
-  const hud = new Hud(container, world, emit);
+  const hud = new Hud(container, world, emit, (x, z) => rig.heightAt(x, z));
   const input = new InputController(rig.renderer.domElement, world, rig, hud, emit);
 
   views.sync();
@@ -63,6 +65,16 @@ async function boot(): Promise<void> {
     lastFrame = now;
     accumulator += dtMs;
 
+    // Reconcile the scene against the zone the sim is actually in, rather than
+    // waiting to be told. Travel emits a `zoneChanged` event, but anything that
+    // moves the world out of band — a debug jump, a load — does not, and a
+    // renderer showing the wrong zone's ground is not a subtle failure. This is
+    // the same posture a network client takes: trust state, not notification.
+    if (rig.zoneId !== world.zone.id) {
+      rig.loadZone(world.zone);
+      views.reset();
+    }
+
     views.sync();
 
     while (accumulator >= TICK_MS) {
@@ -76,6 +88,7 @@ async function boot(): Promise<void> {
 
     const alpha = accumulator / TICK_MS;
     views.update(alpha, dtMs);
+    rig.update(dtMs);
 
     const playerView = views.get(world.playerId);
     if (playerView) rig.updateCamera(playerView.group.position);

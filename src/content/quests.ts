@@ -253,9 +253,9 @@ export const QUESTS: Record<string, QuestDef> = {
     giverVendorId: 'sorcha',
     minLevel: 40,
     requires: 'ard_05',
-    summary: 'The causeway east runs to the Sunken Reach. Odhrán trades there.',
+    summary: 'The causeway east runs into the Sunken Wood. Odhrán trades there.',
     objectives: [
-      { kind: 'reach', zoneId: 'reach', text: 'Travel to the Sunken Reach' },
+      { kind: 'reach', zoneId: 'reach', text: 'Travel to the Sunken Wood' },
     ],
     rewards: {
       ...reward(40, 0.7),
@@ -269,7 +269,7 @@ export const QUESTS: Record<string, QuestDef> = {
     minLevel: 40,
     summary: 'The eels have made the shallows impassable. Clear them.',
     objectives: [
-      { kind: 'kill', mobId: 'reach_eel', count: 14, text: 'Kill Reach Eels' },
+      { kind: 'kill', mobId: 'reach_eel', count: 14, text: 'Kill Blackwater Eels' },
     ],
     rewards: {
       ...reward(40, 0.7),

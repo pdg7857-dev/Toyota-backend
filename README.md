@@ -1,8 +1,8 @@
 # Emerald Isle
 
 A single-player 3D tab-target RPG — Celtic-flavoured, grounded, original IP.
-Levels 1–25 across one hand-built zone, deliberately grind-heavy, with two
-bosses whose fights are decided by how you play rather than by your stat sheet.
+Levels 1 to 100 across four zones, deliberately grind-heavy, with eight bosses
+whose fights are decided by how you play rather than by your stat sheet.
 
 Its architecture keeps the door open to multiplayer: the whole game simulation
 is a pure, headless, deterministic module that could run as a server authority
@@ -44,8 +44,13 @@ the last one is done with you, so pushing on is a choice, not an eviction.
 |---|---|---|
 | **The Fenmarch** | 1–25 | Cadfael, the Outlaw Chief ★5 · Old Scar ★6 |
 | **Ardmoor** | 20–40 | Aonghus the Cattle-Lord ★5 · Muireann of the Nine Scars ★6 |
-| **The Sunken Reach** | 38–70 | Fiachra the Wrecker ★5 · Old Cauldron ★6 |
+| **The Sunken Wood** | 38–70 | Fiachra the Wrecker ★5 · Old Cauldron ★6 |
 | **Caer Dubh** | 66–100 | Ruadhán the Blackshield ★5 · Donnchadh, Lord of Caer Dubh ★6 |
+
+Each zone looks like somewhere else, too: the Fenmarch is open moor, Ardmoor
+is broken high crags, the Sunken Wood is a drowned forest lit by its own fungus,
+and Caer Dubh is violet Otherworld twilight. Ground shape, palette, light, fog
+and scatter all come from a `ZoneTheme` in `content/terrain.ts`.
 
 Each zone has a trader who also hands out work. Their quest chain walks you band
 by band toward the bosses and then points at the road onward — that is what
@@ -125,14 +130,15 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 - Fixed 20 Hz deterministic simulation with render interpolation
 - Tab-target combat: swing timers, hit/crit rolls, armour mitigation, level-gap
   scaling, global cooldown
-- Two playable classes with separate skill trees, weapon ladders and identities
+- Five playable classes with separate skill trees, weapon ladders and identities
 - 31 skills across five classes — instant, cast-time, damage-over-time,
   heal, buff and interrupt — unlocking across the whole 1–25 band
 - Mob abilities: telegraphed dodgeable AoEs, interruptible heals and summons,
   enrage thresholds, adds that despawn with their summoner and drop no loot
 - Mob AI: aggro radius, threat tables, chase, leash-and-heal, respawn timers
 - 39 creatures across ★1–★6 including 8 bosses, 142 items, class-aware boss drops
-- Four zones with overlapping level bands and travel between them
+- Four zones with overlapping level bands and travel between them, each with
+  its own terrain, palette, lighting and scatter
 - Quest chains per zone: kill, collect and travel objectives, chained by
   prerequisite, with class-matched rewards
 - Levelling to 100, spendable attribute points, skill unlocks
@@ -141,7 +147,7 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 ## Development
 
 ```bash
-npm run verify     # typecheck + 127 unit and balance tests
+npm run verify     # typecheck + 135 unit and balance tests
 npm run smoke      # plays the game in real Chromium, writes screenshots/
 ```
 

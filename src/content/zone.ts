@@ -55,6 +55,12 @@ export interface ZoneDef {
   exits: ZoneExit[];
   /** Level band this zone is built for, shown in the UI and used by tests. */
   levelRange: [number, number];
+  /**
+   * Which entry in `content/terrain.ts` decides how this place looks: ground
+   * shape, palette, light, fog and scatter. Renderer-only — the sim never reads
+   * it. Omitted means the default plains theme, which is what test arenas want.
+   */
+  theme?: string;
 }
 
 /**
@@ -156,6 +162,7 @@ export const FENMARCH: ZoneDef = {
     { toZoneId: 'ardmoor', pos: { x: 78, z: -60 }, label: 'The Hill Road to Ardmoor', minLevel: 20 },
   ],
   levelRange: [1, 25],
+  theme: 'plains',
 };
 
 // --------------------------------------------------------------------------
@@ -190,6 +197,7 @@ export const ARDMOOR: ZoneDef = {
   halfSize: 140,
   playerStart: { x: 0, z: 104 },
   levelRange: [20, 40],
+  theme: 'crags',
   spawns: [
     ...bands([
       { mobId: 'crag_goat', z: 88, wide: true },
@@ -216,10 +224,11 @@ export const ARDMOOR: ZoneDef = {
 
 export const SUNKEN_REACH: ZoneDef = {
   id: 'reach',
-  name: 'The Sunken Reach',
+  name: 'The Sunken Wood',
   halfSize: 140,
   playerStart: { x: 0, z: 104 },
   levelRange: [38, 70],
+  theme: 'wyldwood',
   spawns: [
     ...bands([
       { mobId: 'reach_eel', z: 88, wide: true },
@@ -249,6 +258,7 @@ export const CAER_DUBH: ZoneDef = {
   halfSize: 140,
   playerStart: { x: 0, z: 104 },
   levelRange: [66, 100],
+  theme: 'otherworld',
   spawns: [
     ...bands([
       { mobId: 'fort_mastiff', z: 88, wide: true },
@@ -267,7 +277,7 @@ export const CAER_DUBH: ZoneDef = {
   ],
   vendors: [{ vendorId: 'aoife', pos: { x: 0, z: 112 } }],
   exits: [
-    { toZoneId: 'reach', pos: { x: -58, z: 112 }, label: 'The Black Road to the Reach', minLevel: 1 },
+    { toZoneId: 'reach', pos: { x: -58, z: 112 }, label: 'The Black Road to the Sunken Wood', minLevel: 1 },
   ],
 };
 

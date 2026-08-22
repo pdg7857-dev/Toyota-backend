@@ -38,7 +38,7 @@ export const POINTS_PER_LEVEL = 3;
  *
  *   The Fenmarch      1–25
  *   Ardmoor           20–40
- *   The Sunken Reach  40–70
+ *   The Sunken Wood   40–70
  *   Caer Dubh         70–100
  *
  * Never raise this above what the zones actually cover; a cap beyond the
@@ -343,6 +343,43 @@ export function mitigation(defense: number, attackerLevel = 1): number {
 export function scaledDefenseBonus(base: number, level: number): number {
   return base * (1 + Math.max(0, level - 25) * 0.06);
 }
+
+/**
+ * Roughly the defence a well-geared character of this level carries.
+ *
+ * Fitted to the gear ladders (level 25 ~260, level 50 ~550, level 95 ~1065) so
+ * anything expressed as a RATIO against it stays meaningful at every level
+ * instead of drifting the way flat constants do.
+ */
+export function expectedDefense(level: number): number {
+  return Math.max(20, level * 11.5 - 26);
+}
+
+/**
+ * Chance a single ordinary hit breaks a cast outright.
+ *
+ * The design: a mob's SPELLS and HEAVY ATTACKS always break your concentration
+ * — those are the moments you are meant to plan around. A plain auto-attack
+ * only *might*, and how often is a property of the character: armour and
+ * levels are what let you finish a cast while being hit. A hit that fails to
+ * break the cast still delays it (see CAST_PUSHBACK_MS), so being attacked
+ * always costs something.
+ */
+export function castBreakChance(
+  defense: number,
+  defenderLevel: number,
+  attackerLevel: number,
+): number {
+  // Defence relative to what this level is expected to have. Out-gearing the
+  // content makes you steadier; being under-geared makes you easy to rattle.
+  const ratio = Math.min(2.5, Math.max(0.4, defense / expectedDefense(defenderLevel)));
+  // A mob well above your level breaks concentration more easily.
+  const levelPressure = 1 + Math.max(-0.5, Math.min(0.8, (attackerLevel - defenderLevel) * 0.05));
+  return Math.min(0.6, Math.max(0.05, (BASE_CAST_BREAK_CHANCE / ratio) * levelPressure));
+}
+
+/** Chance an ordinary hit breaks a cast for a character at exactly par defence. */
+export const BASE_CAST_BREAK_CHANCE = 0.35;
 
 export const CRIT_MULTIPLIER = 1.5;
 

@@ -128,7 +128,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
     ],
   },
 
-  // --- Ardmoor, the Sunken Reach and Caer Dubh ---
+  // --- Ardmoor, the Sunken Wood and Caer Dubh ---
   crag_goat_loot: generatedLoot('crag_goat_loot', 'goat_horn', ['honed_head', 'honed_chest', 'honed_legs', 'honed_ring']),
   hill_wolf_loot: generatedLoot('hill_wolf_loot', 'clan_torc', ['honed_head', 'honed_chest', 'honed_legs', 'honed_ring']),
   cattle_raider_loot: generatedLoot('cattle_raider_loot', 'clan_torc', ['bloodiron_head', 'bloodiron_chest', 'bloodiron_legs', 'bloodiron_ring']),
@@ -842,7 +842,7 @@ Object.assign(MOBS, {
   }),
   reach_eel: generated({
     id: 'reach_eel',
-    name: 'Reach Eel',
+    name: 'Blackwater Eel',
     level: 42,
     stars: 2,
     archetype: 'beast',
@@ -998,7 +998,7 @@ Object.assign(MOBS, {
   }),
   old_cauldron: generated({
     id: 'old_cauldron',
-    name: 'Old Cauldron, the Reach Pike',
+    name: 'Old Cauldron, the Drowned Pike',
     level: 70,
     stars: 6,
     archetype: 'beast',

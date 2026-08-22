@@ -49,8 +49,10 @@ input / HUD click ──> Command ──> World.submit()
 | `src/sim/formulas.ts` | **All** balance math, including the grind dials. Tune here. |
 | `src/sim/types.ts` | Entities, Commands, Events, star ratings, mob abilities. |
 | `src/sim/rng.ts` | Seeded, serializable PRNG. |
-| `src/content/` | Pure data: items, skills, mobs, loot tables, the zone, classes. |
+| `src/content/` | Pure data: items, skills, mobs, loot tables, the zones, classes. |
+| `src/content/terrain.ts` | Zone themes: ground shape, palette, light, fog, scatter. |
 | `src/render/` | three.js, DOM, input. Nothing gameplay-authoritative. |
+| `src/render/scene.ts` | Builds a zone from its theme. Knows *how*, not *which*. |
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
 | `tools/smoke.mjs` | Boots the real game in Chromium, plays it, screenshots it. |
 
@@ -72,7 +74,7 @@ progression. Reach for stars first.
 |---|---|---|
 | The Fenmarch | 1–25 | Cadfael ★5 (20), Old Scar ★6 (25) |
 | Ardmoor | 20–40 | Aonghus ★5 (30), Muireann ★6 (40) |
-| The Sunken Reach | 38–70 | Fiachra ★5 (55), Old Cauldron ★6 (70) |
+| The Sunken Wood | 38–70 | Fiachra ★5 (55), Old Cauldron ★6 (70) |
 | Caer Dubh | 66–100 | Ruadhán ★5 (85), Donnchadh ★6 (100) |
 
 The bands **overlap on purpose**, and a test enforces it: the next zone opens
@@ -149,6 +151,23 @@ If everything were interruptible, the interrupt would just be a strictly better
 dodge and one of the two mechanics would be dead weight. A missed interrupt still
 burns its cooldown, so timing it is a real decision.
 
+### What breaks *your* cast
+
+The mirror of the above: a cast of yours is not equally fragile to everything
+that hits you. `applyDamage` takes a `castBreak` mode.
+
+| Damage | Effect on your cast | Why |
+|---|---|---|
+| A mob spell or heavy attack | **Always** breaks it | The moment you are meant to plan around. Casting through a telegraphed slam should not be an option. |
+| An ordinary auto-attack | **Rolls** — `castBreakChance` | Chip damage is constant. If every swing broke a cast, no caster could act in melee at all. |
+| A damage-over-time tick | **Never** | Otherwise standing in a bleed silently disables casting, which no player would ever attribute to the bleed. |
+
+A roll that fails is not free: the cast still takes pushback, capped so it
+always eventually lands. `castBreakChance` is defence, level gap and nothing
+else — armour is what makes you steady under fire, so gear reads as
+*composure* and not just as a bigger health bar, and a mob well above your
+level rattles you more than an equal one.
+
 ## Loot: better, not more
 
 The rule, enforced by tests:
@@ -214,7 +233,8 @@ tests caught their absence:
 - **Cast pushback instead of cast cancellation** — damage used to cancel an
   interruptible cast outright, which meant a mob swinging every 1.6s made a 1.8s
   heal impossible and silently deleted every sustain class. Damage now delays a
-  cast, capped so it always eventually lands. Movement still cancels outright.
+  cast, capped so it always eventually lands. Movement still cancels outright,
+  and the three-way rule above decides which hits break rather than delay.
 - **Level-scaled mitigation and defensive buffs** — both were fixed constants
   that worked to 25 and broke by 60. "+60 defence" is a third of your total at
   level 10 and nothing at level 60; a fixed mitigation constant let a level-90
@@ -231,6 +251,42 @@ tests caught their absence:
   close enough that meleeing a boss pulls it in. Deliberate guard camps opt out
   with `guardOf` on the spawn.
 
+## Each zone looks like somewhere else
+
+`content/terrain.ts` holds a `ZoneTheme` per zone — sky, fog, ground palette,
+light, ground shape and what is scattered across it. A zone names one with
+`theme:`; the renderer does the rest.
+
+| Zone | Theme | Reads as |
+|---|---|---|
+| The Fenmarch | `plains` | Open moor, low hills, broadleaf and standing stones. |
+| Ardmoor | `crags` | High country: terraced shelves, boulders, thin conifers, cold grey light. |
+| The Sunken Wood | `wyldwood` | A drowned forest gone strange — close canopy, standing water, fungus that glows. |
+| Caer Dubh | `otherworld` | Violet twilight that never breaks, lit stones, crystal, drifting motes. |
+
+Two rules hold this together:
+
+- **The look is data, `render/scene.ts` is the engine.** That file knows how to
+  build a hill, a tree and a fog bank; it does not know Ardmoor is grey. A new
+  zone's appearance is a table entry, not renderer work.
+- **Terrain is renderer-only, and a test enforces it.** The sim stays 2D:
+  positions are (x, z), distances are flat, nothing in `sim/` samples a height.
+  Ground height moves the *view* of an entity and nothing else. Making it
+  authoritative means line-of-sight, slope costs and a heightmap both sides must
+  agree on — a lot of new surface for something a follow camera barely sells.
+  `HeightField` is pure, so if terrain ever does become gameplay it moves into
+  `sim/` intact.
+
+**Boss arenas and shopfronts are levelled flat** by `HeightField`, out to a
+plateau and then smoothed to the surrounding ground. This is not tidiness: a
+telegraph is a flat circle you dodge by reading its edge, and draped over a
+slope it either clips into the hill or floats above it. A test samples the
+slam radius around every boss and fails if its arena is on a slope.
+
+Themes also carry a minimum light level, asserted by test. Caer Dubh was first
+authored at true dusk and shipped with the mobs as black shapes on a black
+hill — atmosphere is not worth a fight you cannot read.
+
 ## Animation
 
 Currently procedural placeholders on capsules. `render/anim.ts` is the seam:
@@ -244,7 +300,7 @@ file changes** — the events that drive animation (`swing`, `castBegin`,
 ## Verifying a change
 
 ```bash
-npm run verify        # typecheck + 127 unit and balance tests
+npm run verify        # typecheck + 135 unit and balance tests
 npm run build && npm run preview &
 npm run smoke         # real browser, plays the game, writes screenshots/
 ```
@@ -263,7 +319,7 @@ debug handle exposed in `main.ts`.
 
 ## Deliberately not built yet
 
-Quests, dialogue, crafting, vendors, a second zone, the four unimplemented
-real terrain height, pathfinding (mobs walk straight lines), and entity
-collision. Vendor stock is also static — traders never run out and never restock,
-which is fine while there is one zone but wants inventory if that changes.
+Dialogue, crafting, real art, **gameplay-authoritative terrain**, pathfinding
+(mobs walk straight lines) and entity collision. Vendor stock is static too —
+traders never run out and never restock, which wants an inventory model if the
+economy ever grows past four zones.

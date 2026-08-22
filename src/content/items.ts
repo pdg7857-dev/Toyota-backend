@@ -378,12 +378,12 @@ export const ITEMS: Record<string, ItemDef> = {
   lynx_fang: { id: 'lynx_fang', name: 'Lynx Fang', slot: null, quality: 'uncommon', value: 210, stackable: true, merchantGood: true },
   smugglers_ledger: { id: 'smugglers_ledger', name: "Smuggler's Ledger", slot: null, quality: 'rare', value: 420, stackable: true, merchantGood: true },
   chieftains_seal: { id: 'chieftains_seal', name: "Chieftain's Seal", slot: null, quality: 'rare', value: 900, stackable: true, merchantGood: true },
-  // --- Ardmoor, the Sunken Reach and Caer Dubh ---
+  // --- Ardmoor, the Sunken Wood and Caer Dubh ---
   goat_horn: { id: 'goat_horn', name: 'Crag Goat Horn', slot: null, quality: 'common', value: 207, stackable: true, merchantGood: true },
   clan_torc: { id: 'clan_torc', name: 'Clan Torc', slot: null, quality: 'uncommon', value: 345, stackable: true, merchantGood: true },
   eagle_feather: { id: 'eagle_feather', name: 'Moor Eagle Feather', slot: null, quality: 'uncommon', value: 517, stackable: true, merchantGood: true },
   cattle_lords_ring: { id: 'cattle_lords_ring', name: 'Cattle-Lord\'s Ring', slot: null, quality: 'rare', value: 722, stackable: true, merchantGood: true },
-  eel_skin: { id: 'eel_skin', name: 'Reach Eel Skin', slot: null, quality: 'uncommon', value: 961, stackable: true, merchantGood: true },
+  eel_skin: { id: 'eel_skin', name: 'Blackwater Eel Skin', slot: null, quality: 'uncommon', value: 961, stackable: true, merchantGood: true },
   wreckers_salvage: { id: 'wreckers_salvage', name: 'Wrecker\'s Salvage', slot: null, quality: 'uncommon', value: 1332, stackable: true, merchantGood: true },
   pike_jaw: { id: 'pike_jaw', name: 'Great Pike Jaw', slot: null, quality: 'rare', value: 1760, stackable: true, merchantGood: true },
   tidewatch_seal: { id: 'tidewatch_seal', name: 'Tidewatch Seal', slot: null, quality: 'rare', value: 2247, stackable: true, merchantGood: true },
@@ -531,7 +531,7 @@ Object.assign(ITEMS, buildWeaponLadders());
 // gear, which stays the reference. Twelve tiers, grouped four to a zone, so
 // each zone has its own uncommon -> rare -> epic arc rather than one flat climb.
 
-/** Level each late tier is built for. Four per zone: Ardmoor, Reach, Caer Dubh. */
+/** Level each late tier is built for. Four per zone: Ardmoor, the Sunken Wood, Caer Dubh. */
 const LATE_TIER_LEVELS = [28, 32, 36, 40, 48, 56, 63, 70, 78, 86, 93, 100];
 
 /** Escalating names, one per late tier. */

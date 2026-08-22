@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { World } from '../src/sim/world.js';
-import { MAX_LEVEL, TICK_MS, xpToNext } from '../src/sim/formulas.js';
-import { FENMARCH, getZone } from '../src/content/zone.js';
+import { MAX_LEVEL, TICK_MS, castBreakChance, expectedDefense, xpToNext } from '../src/sim/formulas.js';
+import { FENMARCH, ZONES, getZone } from '../src/content/zone.js';
+import { HeightField, getTheme, type Clearing } from '../src/content/terrain.js';
 import { countEvents, duelZone, emptyZone, levelPlayer, simulateFight, vendorZone } from './helpers.js';
 import { buyPrice, sellPrice } from '../src/content/vendors.js';
 import { getQuest } from '../src/content/quests.js';
 import { skillBarFor, getSkill } from '../src/content/skills.js';
 import { canEquip, getItem } from '../src/content/items.js';
+import { getMob } from '../src/content/mobs.js';
+import { isBoss } from '../src/sim/types.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
 
 function newWorld(seed = 1, zone = duelZone('mossback_boar')) {
@@ -121,25 +124,124 @@ describe('combat', () => {
     expect(dotHits.length).toBe(4);
   });
 
-  it('delays a cast when the caster takes damage, but still lands it', () => {
-    const world = newWorld(14);
-    const player = levelPlayer(world, { level: 6 });
-    player.health = world.statsOf(player).maxHealth * 0.5; // hurt, not dying
-    world.submit(player.id, { t: 'useSkill', skillId: 'rally' });
+  it('sometimes breaks a cast on an ordinary hit, and otherwise only delays it', () => {
+    // Auto-attacks are a roll, not a certainty: over many attempts a caster
+    // being chipped at should see both outcomes.
+    let broken = 0;
+    let landed = 0;
+    let pushed = 0;
+    for (let seed = 0; seed < 40; seed++) {
+      const world = newWorld(seed * 977 + 3);
+      const player = levelPlayer(world, { level: 6 });
+      player.health = world.statsOf(player).maxHealth * 0.5;
+      world.submit(player.id, { t: 'useSkill', skillId: 'rally' });
 
-    // Hold the boar alive so it keeps swinging through the whole cast.
-    const boar = theMob(world);
-    const events: SimEvent[] = [];
-    for (let i = 0; i < 120; i++) {
-      boar.health = world.statsOf(boar).maxHealth;
-      events.push(...world.tick());
+      const boar = theMob(world);
+      for (let i = 0; i < 120; i++) {
+        boar.health = world.statsOf(boar).maxHealth;
+        for (const ev of world.tick()) {
+          if (ev.t === 'castInterrupted' && ev.id === 'rally') broken++;
+          if (ev.t === 'castComplete' && ev.id === 'rally') landed++;
+          if (ev.t === 'castPushback') pushed++;
+        }
+        if (player.cast === null && (broken > 0 || landed > 0)) break;
+      }
     }
-    expect(events.some((e) => e.t === 'castBegin' && e.id === 'rally')).toBe(true);
-    expect(events.some((e) => e.t === 'castPushback' && e.id === 'rally')).toBe(true);
-    // Being hit must not stop a heal from ever completing — that would delete
-    // the whole point of every sustain class.
+    console.log(`  rally under fire: broken ${broken}, landed ${landed}, pushbacks ${pushed}`);
+    expect(broken, 'ordinary hits never break a cast').toBeGreaterThan(0);
+    expect(landed, 'ordinary hits always break a cast').toBeGreaterThan(0);
+    expect(pushed, 'surviving a hit should still cost time').toBeGreaterThan(0);
+  });
+
+  it('makes a better-defended character much harder to interrupt', () => {
+    // The whole point of tying this to defence: gear should make you steadier.
+    const flimsy = castBreakChance(40, 20, 20);
+    const armoured = castBreakChance(expectedDefense(20) * 2, 20, 20);
+    expect(armoured).toBeLessThan(flimsy * 0.6);
+    // And a mob far above your level rattles you more than an equal one.
+    expect(castBreakChance(200, 20, 28)).toBeGreaterThan(castBreakChance(200, 20, 20));
+  });
+
+  it("always breaks a cast with a boss's heavy attack", () => {
+    // A telegraphed slam is the moment you are meant to plan a cast around, so
+    // it is never a roll.
+    let slamsSeen = 0;
+    let brokenBySlam = 0;
+    for (let seed = 0; seed < 6; seed++) {
+      const world = new World({ seed: seed * 131 + 5, zone: duelZone('old_scar'), classId: 'priest' });
+      const player = levelPlayer(world, { level: 25, gear: ['bonecarved_stave', 'bearhide_cuirass'] });
+      const boss = theMob(world);
+      for (let i = 0; i < 1200; i++) {
+        player.health = world.statsOf(player).maxHealth;
+        boss.health = world.statsOf(boss).maxHealth;
+        // Keep a heal rolling essentially continuously, or the 1.4s cast and a
+        // slam every ~20s almost never overlap and the test proves nothing.
+        player.skillCooldowns = {};
+        player.gcdMs = 0;
+        if (!player.cast) {
+          player.health = world.statsOf(player).maxHealth * 0.5;
+          world.submit(player.id, { t: 'useSkill', skillId: 'mend_wounds' });
+        }
+        // Capture this BEFORE the tick: a slam that breaks the cast leaves
+        // player.cast null afterwards, which read as 'there was no cast'.
+        const wasCasting = player.cast !== null;
+        const events = world.tick();
+        // Resolve the ability rather than pattern-matching its id — bosses name
+        // their slams differently and a name filter silently matched nothing.
+        const heavy = getMob(boss.defId!).abilities?.filter((a) => a.kind === 'heavySlam') ?? [];
+        const slamAt = events.findIndex(
+          (e) =>
+            e.t === 'damage' &&
+            e.targetId === player.id &&
+            e.abilityId !== null &&
+            heavy.some((a) => a.id === e.abilityId),
+        );
+        // A cast that FINISHED earlier in this same tick is not a cast the slam
+        // could break — counting those made one landed-on-a-caster slam look
+        // like the rule had failed.
+        const finishedFirst = events
+          .slice(0, slamAt < 0 ? 0 : slamAt)
+          .some((e) => e.t === 'castComplete' && e.sourceId === player.id);
+        if (slamAt >= 0 && wasCasting && !finishedFirst) {
+          slamsSeen++;
+          if (
+            events.some(
+              (e) => e.t === 'castInterrupted' && e.kind === 'skill' && e.sourceId === player.id,
+            )
+          ) {
+            brokenBySlam++;
+          }
+        }
+      }
+    }
+    console.log(`  heavy attacks landed on a caster: ${slamsSeen}, casts broken: ${brokenBySlam}`);
+    expect(slamsSeen, 'no heavy attack ever landed while casting').toBeGreaterThan(0);
+    expect(brokenBySlam).toBe(slamsSeen);
+  });
+
+  it('never breaks a cast with a damage-over-time tick', () => {
+    // Otherwise nothing could ever cast while bleeding, which is most of a fight.
+    const world = new World({ seed: 21, zone: emptyZone(), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 10 });
+    player.health = world.statsOf(player).maxHealth * 0.5;
+    player.effects = [
+      {
+        id: 'test-bleed',
+        kind: 'dot',
+        sourceId: player.id,
+        sourceAbilityId: 'rend',
+        remainingMs: 8000,
+        tickMs: 200,
+        sinceTickMs: 0,
+        damageType: 'physical',
+        dotPower: 3,
+      },
+    ];
+    world.submit(player.id, { t: 'useSkill', skillId: 'rally' });
+    const events = world.advance(4000);
+    expect(events.some((e) => e.t === 'damage' && e.abilityId === 'rend')).toBe(true);
+    expect(events.some((e) => e.t === 'castInterrupted')).toBe(false);
     expect(events.some((e) => e.t === 'castComplete' && e.id === 'rally')).toBe(true);
-    expect(events.some((e) => e.t === 'heal' && e.targetId === player.id)).toBe(true);
   });
 
   it('still cancels a cast outright when the caster moves', () => {
@@ -1057,5 +1159,98 @@ describe('zone travel', () => {
     const restored = World.deserialize(world.serialize(), getZone('fenmarch'));
     expect(restored.zone.id).toBe('ardmoor');
     expect([...restored.entities.values()].some((e) => e.defId === 'crag_goat')).toBe(true);
+  });
+});
+
+describe('zone terrain and theme', () => {
+  /** The clearings the renderer levels: spawn, boss arenas, shopfronts, exits. */
+  function clearingsOf(zone: ReturnType<typeof getZone>): Clearing[] {
+    const out: Clearing[] = [{ x: zone.playerStart.x, z: zone.playerStart.z, r: 11 }];
+    for (const sp of zone.spawns) {
+      if (isBoss(getMob(sp.mobId).stars)) out.push({ x: sp.pos.x, z: sp.pos.z, r: 18 });
+    }
+    for (const v of zone.vendors) out.push({ x: v.pos.x, z: v.pos.z, r: 9 });
+    for (const e of zone.exits) out.push({ x: e.pos.x, z: e.pos.z, r: 8 });
+    return out;
+  }
+
+  it('gives every zone its own look', () => {
+    const ids = Object.values(ZONES).map((z) => z.theme);
+    // Four zones, four distinct places. Travel that lands you somewhere that
+    // looks like where you left is not travel.
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const zone of Object.values(ZONES)) {
+      const theme = getTheme(zone.theme);
+      expect(theme.props.length, `${zone.name} has nothing in it`).toBeGreaterThan(2);
+      // Fog you cannot see a camp through makes tab-targeting guesswork.
+      expect(theme.fog.far).toBeGreaterThan(theme.fog.near + 40);
+      expect(theme.fog.far).toBeGreaterThan(85);
+      // Nor can a theme be so dim you cannot see what is hitting you. Caer
+      // Dubh was authored at dusk and shipped with the mobs as black blobs on
+      // a black hill — atmosphere is not worth an unreadable fight.
+      expect(
+        theme.sun.intensity + theme.hemisphere.intensity,
+        `${zone.name} is too dark to fight in`,
+      ).toBeGreaterThan(2);
+    }
+  });
+
+  it('gets rougher as you go inland, and the Fenmarch stays gentle', () => {
+    // The starting zone is the reference for feel as well as for balance:
+    // whatever the later zones do, the moor stays walkable and readable.
+    const amp = (id: string): number => getTheme(getZone(id).theme).terrain.amplitude;
+    expect(amp('fenmarch')).toBeLessThan(3);
+    expect(amp('ardmoor')).toBeGreaterThan(amp('fenmarch') * 2);
+    expect(amp('caer_dubh')).toBeGreaterThan(amp('fenmarch'));
+  });
+
+  it('keeps the ground continuous and inside the amplitude it declares', () => {
+    for (const zone of Object.values(ZONES)) {
+      const spec = getTheme(zone.theme).terrain;
+      const field = new HeightField(spec, clearingsOf(zone));
+      let last = field.at(-zone.halfSize, 0);
+      for (let x = -zone.halfSize; x <= zone.halfSize; x += 0.5) {
+        const h = field.at(x, 0);
+        expect(Math.abs(h)).toBeLessThanOrEqual(spec.amplitude * 1.05);
+        // No cliffs: a half-metre step must not move the ground more than the
+        // player's own height, or entities visibly pop as they walk.
+        expect(Math.abs(h - last)).toBeLessThan(1.8);
+        last = h;
+      }
+    }
+  });
+
+  it('levels every boss arena, so a telegraph circle reads as a circle', () => {
+    for (const zone of Object.values(ZONES)) {
+      const spec = getTheme(zone.theme).terrain;
+      const field = new HeightField(spec, clearingsOf(zone));
+      for (const sp of zone.spawns) {
+        if (!isBoss(getMob(sp.mobId).stars)) continue;
+        const centre = field.at(sp.pos.x, sp.pos.z);
+        // Sample the ring a slam actually covers.
+        for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
+          const h = field.at(sp.pos.x + Math.cos(a) * 7, sp.pos.z + Math.sin(a) * 7);
+          expect(
+            Math.abs(h - centre),
+            `${getMob(sp.mobId).name}'s arena is on a slope`,
+          ).toBeLessThan(0.9);
+        }
+      }
+    }
+  });
+
+  it('is renderer-only — the sim never reads a height', () => {
+    // The whole reason terrain is cheap: it cannot desync anything. If this
+    // ever fails, terrain has become gameplay and needs to move into sim/.
+    const sim = import.meta.glob('../src/sim/*.ts', {
+      query: '?raw',
+      import: 'default',
+      eager: true,
+    }) as Record<string, string>;
+    expect(Object.keys(sim).length).toBeGreaterThan(3);
+    for (const [path, src] of Object.entries(sim)) {
+      expect(/terrainHeight|HeightField|heightAt/.test(src), `${path} samples terrain`).toBe(false);
+      expect(/content\/terrain/.test(src), `${path} imports the theme table`).toBe(false);
+    }
   });
 });

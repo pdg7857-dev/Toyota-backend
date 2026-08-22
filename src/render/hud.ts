@@ -98,6 +98,12 @@ export class Hud {
     container: HTMLElement,
     private readonly world: World,
     private readonly emit: Emit,
+    /**
+     * Ground height under a world position. Plates and floating text are
+     * projected from a world point, so on sloped terrain they detach from the
+     * entity entirely unless they start from the ground it is standing on.
+     */
+    private readonly groundAt: (x: number, z: number) => number = () => 0,
   ) {
     this.root = document.createElement('div');
     this.root.id = 'hud';
@@ -393,7 +399,8 @@ export class Hud {
   private float(camera: THREE.Camera, entity: Entity, text: string, cls: string): void {
     // Sits above the nameplate, which occupies roughly height + 0.35.
     const height = entity.kind === 'mob' ? getMob(entity.defId!).view.height : 1.8;
-    const screen = this.toScreen(camera, entity.pos.x, height + 1.5, entity.pos.z);
+    const base = this.groundAt(entity.pos.x, entity.pos.z);
+    const screen = this.toScreen(camera, entity.pos.x, base + height + 1.5, entity.pos.z);
     if (!screen) return;
     const el = document.createElement('div');
     el.className = `float ${cls}`;
@@ -529,7 +536,12 @@ export class Hud {
 
       const def = entity.kind === 'mob' ? getMob(entity.defId!) : null;
       const height = def?.view.height ?? 1.8;
-      const screen = this.toScreen(camera, entity.pos.x, height + 0.35, entity.pos.z);
+      const screen = this.toScreen(
+        camera,
+        entity.pos.x,
+        this.groundAt(entity.pos.x, entity.pos.z) + height + 0.35,
+        entity.pos.z,
+      );
       const distance = Math.hypot(entity.pos.x - player.pos.x, entity.pos.z - player.pos.z);
 
       const lootable =
@@ -597,7 +609,12 @@ export class Hud {
     }
     plate.className = 'nameplate vendor';
 
-    const screen = this.toScreen(camera, entity.pos.x, 2.9, entity.pos.z);
+    const screen = this.toScreen(
+      camera,
+      entity.pos.x,
+      this.groundAt(entity.pos.x, entity.pos.z) + 2.9,
+      entity.pos.z,
+    );
     const distance = Math.hypot(entity.pos.x - player.pos.x, entity.pos.z - player.pos.z);
     // Traders are landmarks, so they stay legible from much further than a mob.
     if (!screen || distance > 55) {

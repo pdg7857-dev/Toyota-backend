@@ -35,6 +35,11 @@ export class EntityView {
   constructor(
     readonly id: EntityId,
     entity: Entity,
+    /**
+     * Ground height under a world position. The sim is flat — this is the only
+     * thing that puts an entity on a hill rather than through it.
+     */
+    private readonly groundAt: (x: number, z: number) => number,
   ) {
     const view =
       entity.kind === 'mob'
@@ -89,7 +94,7 @@ export class EntityView {
       o.userData.entityId = id;
     });
 
-    this.prev.set(entity.pos.x, 0, entity.pos.z);
+    this.prev.set(entity.pos.x, this.groundAt(entity.pos.x, entity.pos.z), entity.pos.z);
     this.next.copy(this.prev);
     this.group.position.copy(this.prev);
   }
@@ -97,10 +102,12 @@ export class EntityView {
   /** Called once per sim tick: last tick's target becomes this tick's origin. */
   pushTick(entity: Entity): void {
     this.prev.copy(this.next);
-    this.next.set(entity.pos.x, 0, entity.pos.z);
+    this.next.set(entity.pos.x, this.groundAt(entity.pos.x, entity.pos.z), entity.pos.z);
     this.prevFacing = this.nextFacing;
     this.nextFacing = entity.facing;
-    this.anim.setMoving(this.prev.distanceToSquared(this.next) > 0.0004);
+    const dx = this.next.x - this.prev.x;
+    const dz = this.next.z - this.prev.z;
+    this.anim.setMoving(dx * dx + dz * dz > 0.0004);
   }
 
   onDamaged(): void {
@@ -191,7 +198,9 @@ class TelegraphRing {
   update(dtMs: number, center: THREE.Vector3): boolean {
     this.elapsed += dtMs;
     const t = Math.min(1, this.elapsed / this.durationMs);
-    this.group.position.set(center.x, 0, center.z);
+    // Sit on the ground under the caster. Boss arenas are levelled by the
+    // height field precisely so this circle reads as a circle.
+    this.group.position.set(center.x, center.y, center.z);
     this.fill.scale.setScalar(Math.max(0.001, this.radius * t));
     // Pulse faster as it approaches detonation.
     const pulse = 0.6 + 0.4 * Math.sin(this.elapsed * 0.012 * (1 + t * 2));
@@ -218,6 +227,7 @@ export class ViewManager {
   constructor(
     private readonly scene: THREE.Scene,
     private readonly world: World,
+    private readonly groundAt: (x: number, z: number) => number = () => 0,
   ) {}
 
   /** Draw the danger zone for a winding-up AoE. */
@@ -236,11 +246,30 @@ export class ViewManager {
     return this.views.get(id);
   }
 
+  /**
+   * Drop every view and telegraph. Called on zone change: the entities are all
+   * new and the ground under them is a different shape, so interpolating from
+   * where things were is meaningless — and looks like the whole zone sliding
+   * into place.
+   */
+  reset(): void {
+    for (const view of this.views.values()) {
+      this.scene.remove(view.group);
+      view.dispose();
+    }
+    this.views.clear();
+    for (const ring of this.telegraphs) {
+      this.scene.remove(ring.group);
+      ring.dispose();
+    }
+    this.telegraphs = [];
+  }
+
   /** Create views for new entities; drop views whose entity is gone. */
   sync(): void {
     for (const entity of this.world.entities.values()) {
       if (this.views.has(entity.id)) continue;
-      const view = new EntityView(entity.id, entity);
+      const view = new EntityView(entity.id, entity, this.groundAt);
       this.views.set(entity.id, view);
       this.scene.add(view.group);
     }

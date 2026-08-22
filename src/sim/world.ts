@@ -26,6 +26,7 @@ import {
   MAX_LEVEL,
   PRIMARY_ATTRIBUTE,
   goldForKill,
+  castBreakChance,
   resolveAttack,
   scaledDefenseBonus,
   threatFromDamage,
@@ -446,6 +447,7 @@ export class World {
             false,
             eff.damageType,
             eff.sourceAbilityId,
+            'never',
           );
         }
         if (eff.remainingMs > 0) keep.push(eff);
@@ -646,7 +648,17 @@ export class World {
             flatPower: 0,
             alwaysHits: true,
           });
-          this.applyDamage(mob.id, target, result.amount, result.crit, stats.damageType, abilityId);
+          // A telegraphed slam is exactly the kind of hit you are meant to
+          // plan a cast around, so it always breaks one.
+          this.applyDamage(
+            mob.id,
+            target,
+            result.amount,
+            result.crit,
+            stats.damageType,
+            abilityId,
+            'always',
+          );
         }
         break;
       }
@@ -848,6 +860,14 @@ export class World {
     this.lastCombatTick.set(id, this.tickCount);
   }
 
+  /**
+   * How a given source of damage treats an in-progress cast.
+   *
+   *   'always' — mob spells and heavy attacks. The moments you plan around.
+   *   'chance' — ordinary auto-attacks. Rolled against the target's defence.
+   *   'never'  — damage-over-time ticks, which would otherwise make casting
+   *              impossible for anything standing in a bleed.
+   */
   private applyDamage(
     sourceId: EntityId,
     target: Entity,
@@ -855,6 +875,7 @@ export class World {
     crit: boolean,
     damageType: ActiveEffect['damageType'],
     abilityId: string | null,
+    castBreak: 'always' | 'chance' | 'never' = 'chance',
   ): void {
     if (target.dead) return;
     // Traders are scenery with a shop attached, not combatants.
@@ -882,27 +903,47 @@ export class World {
       }
     }
 
-    // Damage DELAYS an interruptible player cast rather than cancelling it.
-    //
-    // Full cancellation reads fine on paper and is unplayable in practice: a mob
-    // swinging every 1.6s means a 1.8s heal never once completes, which silently
-    // deleted the Priest's entire reason to exist. Pushback keeps the tension —
-    // casting while being hit is worse — without making it impossible. Movement
-    // still cancels outright, and mob interrupts still cancel outright; this is
-    // only about incidental damage.
-    if (target.cast && target.cast.kind === 'skill' && getSkill(target.cast.id).interruptible) {
-      const already = target.cast.pushbackMs ?? 0;
-      // A cast can be delayed by at most its own duration, so it always lands.
-      const delay = Math.min(CAST_PUSHBACK_MS, Math.max(0, target.cast.totalMs - already));
-      if (delay > 0) {
-        target.cast.remainingMs += delay;
-        target.cast.pushbackMs = already + delay;
+    // What this hit does to an in-progress cast.
+    if (
+      castBreak !== 'never' &&
+      target.cast &&
+      target.cast.kind === 'skill' &&
+      getSkill(target.cast.id).interruptible
+    ) {
+      const attacker = this.entities.get(sourceId);
+      const breaks =
+        castBreak === 'always' ||
+        this.rng.chance(
+          castBreakChance(
+            this.statsOf(target).defense,
+            target.level,
+            attacker?.level ?? target.level,
+          ),
+        );
+
+      if (breaks) {
         this.events.push({
-          t: 'castPushback',
+          t: 'castInterrupted',
           sourceId: target.id,
+          kind: 'skill',
           id: target.cast.id,
-          delayMs: delay,
         });
+        target.cast = null;
+      } else {
+        // Survived it, but concentration still slips. Capped so a cast that
+        // is never broken always eventually lands.
+        const already = target.cast.pushbackMs ?? 0;
+        const delay = Math.min(CAST_PUSHBACK_MS, Math.max(0, target.cast.totalMs - already));
+        if (delay > 0) {
+          target.cast.remainingMs += delay;
+          target.cast.pushbackMs = already + delay;
+          this.events.push({
+            t: 'castPushback',
+            sourceId: target.id,
+            id: target.cast.id,
+            delayMs: delay,
+          });
+        }
       }
     }
 
