@@ -16,6 +16,9 @@ export function duelZone(mobId: string, distance = 2.5): ZoneDef {
     vendors: [],
     exits: [],
     levelRange: [1, 100],
+    // No rare spawns in an arena: a test that occasionally fights a named
+    // variant instead is a test measuring the wrong creature.
+    rareSpawns: false,
   };
 }
 
@@ -30,6 +33,9 @@ export function emptyZone(): ZoneDef {
     vendors: [],
     exits: [],
     levelRange: [1, 100],
+    // No rare spawns in an arena: a test that occasionally fights a named
+    // variant instead is a test measuring the wrong creature.
+    rareSpawns: false,
   };
 }
 
@@ -44,6 +50,9 @@ export function vendorZone(vendorId: string, distance = 2): ZoneDef {
     vendors: [{ vendorId, pos: { x: distance, z: 0 } }],
     exits: [],
     levelRange: [1, 100],
+    // No rare spawns in an arena: a test that occasionally fights a named
+    // variant instead is a test measuring the wrong creature.
+    rareSpawns: false,
   };
 }
 

@@ -6,12 +6,14 @@ import {
   MAX_LEVEL,
   STAR_MODIFIERS,
   baseMobXp,
+  deriveMobStats,
   goldForKill,
   xpForKill,
   xpToNext,
 } from '../src/sim/formulas.js';
 import { BOSS_STARS, type ClassId, type MobDef } from '../src/sim/types.js';
 import { LOOT_TABLES, MOBS } from '../src/content/mobs.js';
+import { RARES, RARE_SPAWN_CHANCE, rareMobId } from '../src/content/rares.js';
 import { FENMARCH, PLAYABLE_CLASSES, ZONES } from '../src/content/zone.js';
 import { QUESTS } from '../src/content/quests.js';
 import { ITEMS, WEAPON_LADDER, canEquip, gearSetFor, getItem } from '../src/content/items.js';
@@ -462,9 +464,16 @@ describe('level gaps matter', () => {
 // --------------------------------------------------------------------------
 
 describe('loot scales with difficulty', () => {
-  /** Ordinary mobs, ordered from easiest to hardest by level then stars. */
+  /**
+   * Ordinary mobs, ordered from easiest to hardest by level then stars.
+   *
+   * Rare spawns are excluded, and not as a convenience: every rule below is
+   * about what a CAMP pays out. A named creature you see once an hour is
+   * governed by the opposite rules — guaranteed epic, double gold — and
+   * mixing the two would either forbid the rare or licence the camp.
+   */
   const ladder = Object.values(MOBS)
-    .filter((m) => m.stars < BOSS_STARS)
+    .filter((m) => m.stars < BOSS_STARS && !m.rareOf)
     .sort((a, b) => a.level - b.level || a.stars - b.stars);
 
   /** Average gold a kill yields. */
@@ -572,7 +581,7 @@ describe('loot scales with difficulty', () => {
     }
   });
 
-  it('only lets epics come from bosses', () => {
+  it('only lets epics come from bosses and rare spawns', () => {
     for (const mob of ladder) {
       for (const entry of LOOT_TABLES[mob.lootTableId]!.entries) {
         const item = getItem(entry.itemId);
@@ -910,6 +919,79 @@ describe('zone-taught skills are worth going to get', () => {
       }
     }
     console.log('\nTAUGHT KIT vs LEVEL KIT (Warrior and Rogue shown; all five asserted)\n' + rows.join('\n'));
+  });
+});
+
+describe('rare spawns are a fight, and worth the wait', () => {
+  it('beats the camp it hides in without being a boss', () => {
+    const rows: string[] = [];
+    for (const spec of RARES) {
+      const rare = MOBS[rareMobId(spec)]!;
+      const host = MOBS[spec.hostMobId]!;
+      // Fought at the rare's own level, geared for it: what a player farming
+      // that camp actually brings.
+      for (const cls of PLAYABLE_CLASSES) {
+        const level = rare.level;
+        const versus = (mobId: string): Summary =>
+          runEncounter(
+            {
+              name: cls.name,
+              level,
+              gear: gearSetFor(cls.id, level),
+              mobId,
+              skills: skillsForClass(cls.id, level, learnedAt(cls.id, level)).map((sk) => sk.id),
+              classId: cls.id,
+              dodge: true,
+            },
+            12,
+          );
+        const named = versus(rare.id);
+        if (cls.id === 'warrior') {
+          const camp = versus(host.id);
+          rows.push(
+            `  ${rare.name.padEnd(36)} ttk ${named.medianTtk.toFixed(1).padStart(5)}s ` +
+              `hp ${(named.medianHealthLeft * 100).toFixed(0).padStart(3)}%  ` +
+              `(camp mob ${camp.medianTtk.toFixed(1)}s hp ${(camp.medianHealthLeft * 100).toFixed(0)}%)`,
+          );
+          // "Bigger fight" is asserted on the stat block rather than on the
+          // clock: at low levels both die inside a handful of swings and the
+          // times quantise to the same tick, which says nothing either way.
+          const namedStats = deriveMobStats(rare);
+          const campStats = deriveMobStats(host);
+          expect(namedStats.maxHealth, `${rare.name} is no tougher than the camp`).toBeGreaterThan(
+            campStats.maxHealth * 1.4,
+          );
+          expect(namedStats.damageMax).toBeGreaterThan(campStats.damageMax);
+          expect(named.medianTtk).toBeGreaterThanOrEqual(camp.medianTtk);
+        }
+        // But a rare is not a boss: someone farming its camp must be able to
+        // take it, or the whole mechanic is a taunt.
+        expect(named.winRate, `${cls.id} cannot beat ${rare.name}`).toBeGreaterThanOrEqual(0.85);
+        expect(named.timeouts, `${cls.id} times out on ${rare.name}`).toBe(0);
+      }
+    }
+    console.log('\nRARE SPAWNS (Warrior shown; all five asserted)\n' + rows.join('\n'));
+  });
+
+  it('takes real camping to find, but not a second job', () => {
+    // How long a player parked on a host camp waits, in minutes. Every rare
+    // hides in a camp of roughly a dozen spawn points on ~30s timers.
+    const rows: string[] = [];
+    for (const spec of RARES) {
+      const points = Object.values(ZONES)
+        .flatMap((z) => z.spawns)
+        .filter((sp) => sp.mobId === spec.hostMobId).length;
+      const host = MOBS[spec.hostMobId]!;
+      const rollsPerMinute = (points * 60000) / host.respawnMs;
+      const minutes = 1 / (rollsPerMinute * RARE_SPAWN_CHANCE);
+      rows.push(
+        `  ${spec.epithet.padEnd(16)} ${String(points).padStart(2)} spawn points → ` +
+          `~${minutes.toFixed(0)} min of camping`,
+      );
+      expect(minutes, `${spec.epithet} turns up too often to feel rare`).toBeGreaterThan(4);
+      expect(minutes, `${spec.epithet} needs a second job`).toBeLessThan(90);
+    }
+    console.log('\nRARE SPAWN WAIT\n' + rows.join('\n'));
   });
 });
 

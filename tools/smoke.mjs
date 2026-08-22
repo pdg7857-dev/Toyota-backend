@@ -285,6 +285,71 @@ async function main() {
     untaught: document.querySelectorAll('#skill-bar .slot.unlearned').length,
   }));
 
+  // --- a rare spawn -------------------------------------------------------
+  // Force one up on a camp spawn point and check the four things that make it
+  // findable: it is visibly a different creature, the plate reads from further
+  // away than an ordinary mob's, the log calls it out, and it actually carries
+  // its signature item.
+  const rareCheck = await page.evaluate(async () => {
+    const g = window.__game;
+    g.world.travelTo('fenmarch');
+    await new Promise((r) => setTimeout(r, 400));
+
+    const player = g.world.player;
+    player.level = 20;
+    const host = [...g.world.entities.values()].find(
+      (e) => e.kind === 'mob' && g.mobOf(e.defId).rareVariant,
+    );
+    if (!host) return { ok: false, why: 'no host camp in the zone' };
+    const rareId = g.mobOf(host.defId).rareVariant;
+    const rare = g.mobOf(rareId);
+
+    // Take over the spawn point the way a respawn would.
+    host.defId = rareId;
+    host.name = rare.name;
+    host.level = rare.level;
+    host.dead = false;
+    host.health = g.world.statsOf(host).maxHealth;
+    player.pos.x = host.pos.x + 3;
+    player.pos.z = host.pos.z;
+    g.world.submit(player.id, { t: 'target', id: host.id });
+    // Hold it alive for a moment: the view rebuilds at the rare's size on the
+    // next frame, and a screenshot of a corpse proves nothing about that.
+    g.__rare = host;
+    await new Promise((r) => setTimeout(r, 900));
+
+    return {
+      ok: true,
+      name: rare.name,
+      taller: rare.view.height > g.mobOf(rare.rareOf).view.height,
+    };
+  });
+  await wait(300);
+  await page.screenshot({ path: join(OUT, '10-rare-spawn.png') });
+  const rarePlate = await page.evaluate(
+    () => document.querySelectorAll('.nameplate.rare').length,
+  );
+
+  // Now kill it and check what it was carrying.
+  const rareLoot = await page.evaluate(async () => {
+    const g = window.__game;
+    const host = g.__rare;
+    const rare = g.mobOf(host.defId);
+    host.health = 1;
+    g.world.submit(g.world.player.id, { t: 'autoAttack', on: true });
+    await new Promise((r) => setTimeout(r, 1600));
+    const loot = (host.corpseLoot ?? []).map((st) => g.itemOf(st.itemId));
+    return {
+      ok: host.dead && loot.some((i) => i.quality === 'epic'),
+      name: rare.name,
+      signature: loot.filter((i) => i.quality === 'epic').map((i) => i.name),
+      // Named for what it carries: the creature's first word opens the item.
+      namedForItem: loot.some((i) => i.name.startsWith(rare.name.split(' ')[0])),
+    };
+  });
+  await wait(400);
+  await page.screenshot({ path: join(OUT, '10b-rare-killed.png') });
+
   // --- boss scene ---------------------------------------------------------
   // Jump straight to Old Scar via the debug handle so we can actually see a
   // telegraph render. Reaching him legitimately is a 25-level grind.
@@ -368,6 +433,10 @@ async function main() {
     ['bought and learned a zone skill', taught.ok],
     ['skill bar built two rows', bar.rows === 2 && bar.slots >= 15],
     ['unlearned skills still marked', bar.untaught > 0],
+    ['rare spawn killed and carried its signature', rareLoot.ok],
+    ['rare is named for what it carries', rareLoot.namedForItem === true],
+    ['rare renders bigger than its camp', rareCheck.taller === true],
+    ['rare nameplate marked', rarePlate > 0],
     ['no page errors', errors.length === 0],
   ];
 
@@ -375,6 +444,7 @@ async function main() {
   for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
   console.log('\nplayer:', state.hp, '| xp:', state.xp, '| target:', state.target);
   console.log('log tail:', state.log.slice(0, 6));
+  console.log('rare:', JSON.stringify({ ...rareCheck, ...rareLoot }), '| rare plates:', rarePlate);
   console.log('taught:', JSON.stringify(taught), '| bar:', JSON.stringify(bar));
   console.log('zones:', looks.map((l) => `${l.zone}/${l.theme} sky#${l.sky.toString(16)}`).join('  '));
   if (errors.length) console.log('\nerrors:\n' + errors.join('\n'));

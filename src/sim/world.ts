@@ -19,6 +19,7 @@ import {
   deriveMobStats,
   deriveStats,
   dist,
+  emptyAffixes,
   emptyAttributes,
   energyRegenPerSec,
   healthRegenPerSec,
@@ -44,6 +45,7 @@ import type {
   EquipSlot,
   ItemStack,
   MobAbilityDef,
+  MobDef,
   QuestObjective,
   SimEvent,
   SkillDef,
@@ -51,6 +53,7 @@ import type {
 } from './types.js';
 import { canEquip, getItem } from '../content/items.js';
 import { getLootTable, getMob } from '../content/mobs.js';
+import { RARE_SPAWN_CHANCE } from '../content/rares.js';
 import { getSkill, skillsForClass } from '../content/skills.js';
 import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
 import { CLASSES, ZONES, getZone, type ZoneDef } from '../content/zone.js';
@@ -150,7 +153,30 @@ export class World {
     player.energy = stats.maxEnergy;
   }
 
-  private spawnMob(defId: string, pos: Vec2, summonedBy?: EntityId): Entity {
+  /**
+   * Which creature a camp spawn point puts out this time.
+   *
+   * Ordinary almost always; on a `RARE_SPAWN_CHANCE` hit, the named variant.
+   * The roll goes through `this.rng` like everything else, so a rare spawn
+   * replays exactly from (seed, commands) — a one-in-four-hundred event that
+   * could not be reproduced would be untestable and unreportable.
+   *
+   * Summoned adds never roll: they belong to a fight, not to a camp.
+   */
+  private spawnChoice(baseId: string, summoned: boolean): string {
+    const base = getMob(baseId);
+    if (summoned || !base.rareVariant || this.zone.rareSpawns === false) return baseId;
+    return this.rng.chance(RARE_SPAWN_CHANCE) ? base.rareVariant : baseId;
+  }
+
+  private spawnMob(requestedId: string, pos: Vec2, summonedBy?: EntityId): Entity {
+    // A rare asked for BY NAME is spawned as itself. Only a camp spawn point
+    // rolls — and unwrapping `rareOf` here as well silently turned every
+    // deliberate rare spawn back into its host, which had a balance test
+    // measuring the ordinary mob twice and reporting it as a match.
+    const defId = getMob(requestedId).rareOf
+      ? requestedId
+      : this.spawnChoice(requestedId, summonedBy !== undefined);
     const def = getMob(defId);
     const id = this.nextId++;
     const mob: Entity = {
@@ -182,7 +208,19 @@ export class World {
     };
     this.entities.set(id, mob);
     mob.health = this.statsOf(mob).maxHealth;
+    if (def.rareOf) this.announceRare(mob, def);
     return mob;
+  }
+
+  /** Tell the renderer a named creature is up, and what it looks like. */
+  private announceRare(mob: Entity, def: MobDef): void {
+    this.events.push({
+      t: 'rareSpawn',
+      entityId: mob.id,
+      mobId: def.id,
+      name: def.name,
+      sighting: def.sighting ?? '',
+    });
   }
 
   /**
@@ -242,7 +280,11 @@ export class World {
     if (e.kind === 'mob') {
       stats = deriveMobStats(getMob(e.defId!));
     } else {
-      const acc = { attributes: { ...(e.attributes ?? emptyAttributes()) }, armor: 0 };
+      const acc = {
+        attributes: { ...(e.attributes ?? emptyAttributes()) },
+        armor: 0,
+        affix: emptyAffixes(),
+      };
       let weapon = {
         damageMin: 1,
         damageMax: 3,
@@ -270,6 +312,7 @@ export class World {
         attributes: acc.attributes,
         primaryAttribute: PRIMARY_ATTRIBUTE[e.classId ?? 'warrior'],
         armor: acc.armor,
+        affix: acc.affix,
         weapon,
       });
     }
@@ -840,6 +883,17 @@ export class World {
       }
       e.respawnInMs -= TICK_MS;
       if (e.respawnInMs > 0) continue;
+      // Every respawn is a fresh roll on this spawn point — which is both how
+      // a rare turns up and how the camp goes back to normal after one dies.
+      // Resolve to the ordinary mob first: the point belongs to the camp, not
+      // to whatever named creature last stood on it.
+      const defId = this.spawnChoice(getMob(e.defId!).rareOf ?? e.defId!, false);
+      if (defId !== e.defId) {
+        const def = getMob(defId);
+        e.defId = defId;
+        e.name = def.name;
+        e.level = def.level;
+      }
       const stats = this.statsOf(e);
       e.dead = false;
       e.aiState = 'idle';
@@ -855,6 +909,8 @@ export class World {
       e.corpseLoot = [];
       e.corpseGold = 0;
       this.events.push({ t: 'spawn', entityId: e.id });
+      const spawnedDef = getMob(e.defId!);
+      if (spawnedDef.rareOf) this.announceRare(e, spawnedDef);
     }
   }
 

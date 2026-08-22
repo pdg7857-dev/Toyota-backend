@@ -27,6 +27,16 @@ export class EntityView {
   prevFacing = 0;
   nextFacing = 0;
 
+  /**
+   * Which mob definition this body was built from.
+   *
+   * A spawn point can change creature under an entity — that is exactly what a
+   * rare spawn is — and the capsule is built once at construction. Without
+   * this, a named rare took over the point and rendered at the camp mob's size:
+   * the one thing that is meant to make it visible across a field.
+   */
+  readonly builtFrom: string | undefined;
+
   /** Seconds of red flash remaining after taking damage. */
   private flash = 0;
   /** Overhead "interact with me" marker; vendors only. */
@@ -41,6 +51,7 @@ export class EntityView {
      */
     private readonly groundAt: (x: number, z: number) => number,
   ) {
+    this.builtFrom = entity.defId;
     const view =
       entity.kind === 'mob'
         ? getMob(entity.defId!).view
@@ -268,7 +279,15 @@ export class ViewManager {
   /** Create views for new entities; drop views whose entity is gone. */
   sync(): void {
     for (const entity of this.world.entities.values()) {
-      if (this.views.has(entity.id)) continue;
+      const existing = this.views.get(entity.id);
+      if (existing) {
+        // Same entity, different creature: rebuild rather than leave a rare
+        // wearing the camp mob's body.
+        if (existing.builtFrom === entity.defId) continue;
+        this.scene.remove(existing.group);
+        existing.dispose();
+        this.views.delete(entity.id);
+      }
       const view = new EntityView(entity.id, entity, this.groundAt);
       this.views.set(entity.id, view);
       this.scene.add(view.group);

@@ -61,6 +61,15 @@ export interface ZoneDef {
    * it. Omitted means the default plains theme, which is what test arenas want.
    */
   theme?: string;
+  /**
+   * Whether this zone's camps can turn up rare spawns. Defaults to true.
+   *
+   * Test arenas set it false. A duel against a named mob you did not ask for
+   * is a test measuring the wrong creature, and even the roll itself is not
+   * free: it draws from the same `Rng` as combat, so leaving it on would shift
+   * every seeded fight in the balance corpus.
+   */
+  rareSpawns?: boolean;
 }
 
 /**

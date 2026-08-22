@@ -1,3 +1,5 @@
+import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from './curves.js';
+import { buildSignatureItems } from './rares.js';
 import { skillsTaughtBy, tomeNoun } from './skills.js';
 import type { Attributes, ClassId, DamageType, ItemDef, ItemQuality } from '../sim/types.js';
 
@@ -558,33 +560,6 @@ const LATE_ARMOR_NOUNS: Record<'head' | 'chest' | 'legs' | 'ring', [string, stri
   ring: ['Band', 'Signet', 'Seal'],
 };
 
-/**
- * Weapon DPS for a given level, fitted to the 1-25 ladders so tier 9 picks up
- * exactly where the hand-written tier 8 left off.
- */
-function curveWeaponDps(level: number): number {
-  return 0.62 * Math.pow(level, 1.28);
-}
-
-/**
- * Total armour a fully geared player of this level should carry.
- *
- * Linear, because player defence also grows from Vitality and level; making
- * armour superlinear too was what previously let high-level characters shrug
- * off everything. 5 per level reproduces the hand-tuned level-25 set (~125).
- */
-function curveArmorTotal(level: number): number {
-  return 5 * level;
-}
-
-/** How that total splits across slots, matching the hand-built level-25 set. */
-const ARMOR_SLOT_SHARE: Record<'head' | 'chest' | 'legs' | 'ring', number> = {
-  head: 0.22,
-  chest: 0.4,
-  legs: 0.31,
-  ring: 0.05,
-};
-
 /** Within a zone's four tiers: uncommon, uncommon, rare, epic. */
 function lateTierQuality(indexInZone: number): ItemQuality {
   return (['uncommon', 'uncommon', 'rare', 'epic'] as const)[indexInZone]!;
@@ -801,6 +776,10 @@ const TAUGHT_ZONE_IDS = ['ardmoor', 'reach', 'caer_dubh'];
 const PLAYABLE_CLASS_IDS: ClassId[] = ['warrior', 'priest', 'ranger', 'rogue', 'mage'];
 
 Object.assign(ITEMS, buildTomes());
+
+// Signature gear from rare spawns. Generated in `rares.ts` because the
+// creature and its item are one piece of content — see the note there.
+Object.assign(ITEMS, buildSignatureItems());
 
 export function getItem(id: string): ItemDef {
   const item = ITEMS[id];

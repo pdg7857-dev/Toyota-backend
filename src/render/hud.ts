@@ -30,6 +30,14 @@ function hotkeyLabel(index: number): string {
  */
 const NAMEPLATE_RANGE = 13;
 
+/**
+ * How close a rare spawn has to be before the log mentions it.
+ *
+ * Deliberately about as far as you can see one. Announcing it zone-wide would
+ * turn the thing you are hunting into a notification you follow.
+ */
+const RARE_SIGHTING_RANGE = 45;
+
 /** ★ string for a mob's difficulty rating. ★5 is a boss, ★6 an elite boss. */
 function starText(stars: number): string {
   return '★'.repeat(stars);
@@ -268,6 +276,19 @@ export class Hud {
         case 'levelUp':
           this.log(`You have reached level ${ev.level}!`, 'log-good');
           break;
+        case 'rareSpawn': {
+          // Only when it is close enough to see. A world-wide announcement
+          // would replace the hunt with a notification.
+          const mob = this.world.entity(ev.entityId);
+          const player = this.world.player;
+          if (!mob) break;
+          const d = Math.hypot(mob.pos.x - player.pos.x, mob.pos.z - player.pos.z);
+          if (d > RARE_SIGHTING_RANGE) break;
+          this.log(ev.sighting, 'log-rare');
+          this.log(`${ev.name} is here.`, 'log-rare');
+          this.showZoneBanner(ev.name, 'rare');
+          break;
+        }
         case 'skillUnlocked':
           this.log(`New skill learned: ${getSkill(ev.skillId).name}.`, 'log-good');
           break;
@@ -583,20 +604,26 @@ export class Hud {
       // Plates are the noisiest thing on screen in a populated camp, and they
       // have no depth occlusion, so keep them tight: only what you are fighting,
       // what is fighting you, or what is close enough to matter.
+      // A rare spawn is the exception to the tight plate range: the whole
+      // mechanic is spotting one in a camp you have walked past a hundred
+      // times, and a plate you can only read from melee range does not help.
+      const rare = !!def?.rareOf;
+      const range = rare ? NAMEPLATE_RANGE * 3 : NAMEPLATE_RANGE;
       const relevant =
         entity.id === player.targetId ||
         entity.targetId === player.id ||
-        distance < NAMEPLATE_RANGE ||
-        (lootable && distance < NAMEPLATE_RANGE * 1.5);
+        distance < range ||
+        (lootable && distance < range * 1.5);
 
       if (!screen || !relevant || (entity.dead && !lootable)) {
         plate.style.display = 'none';
         continue;
       }
       // Fade with distance so the near ones read as the important ones.
-      plate.style.opacity = `${Math.max(0.35, Math.min(1, 1.4 - distance / NAMEPLATE_RANGE))}`;
+      plate.style.opacity = `${Math.max(0.35, Math.min(1, 1.4 - distance / range))}`;
 
       plate.style.display = 'block';
+      plate.classList.toggle('rare', rare);
       plate.style.left = `${screen.x}px`;
       plate.style.top = `${screen.y}px`;
       plate.classList.toggle('dead', entity.dead);
@@ -756,9 +783,10 @@ export class Hud {
     if (!visible) this.renderQuestLog();
   }
 
-  private showZoneBanner(name: string): void {
+  private showZoneBanner(name: string, cls = ''): void {
     const banner = this.els.zoneBanner;
     banner.textContent = name;
+    banner.className = cls;
     banner.classList.remove('show');
     // Restart the animation rather than letting a second arrival be silent.
     void banner.offsetWidth;

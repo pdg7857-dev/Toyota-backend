@@ -53,6 +53,12 @@ is broken high crags, the Sunken Wood is a drowned forest lit by its own fungus,
 and Caer Dubh is violet Otherworld twilight. Ground shape, palette, light, fog
 and scatter all come from a `ZoneTheme` in `content/terrain.ts`.
 
+Each zone also hides four **rare spawns** — named creatures that take over an
+ordinary camp spawn point about once every ten to twenty minutes of camping.
+Each is named for the one item it carries (`Mirefang the Bog Wolf` drops the
+`Mirefang Blade`), each drops it guaranteed, and each of those items carries an
+affix — crit, health, movement speed — that no ladder item has.
+
 Each zone also teaches three skills per class. The trader sells the first, its
 ★5 boss carries the second and its ★6 elite boss the third — so what you can
 *do* changes as you travel, not just what you hit for.
@@ -143,7 +149,8 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 - Mob abilities: telegraphed dodgeable AoEs, interruptible heals and summons,
   enrage thresholds, adds that despawn with their summoner and drop no loot
 - Mob AI: aggro radius, threat tables, chase, leash-and-heal, respawn timers
-- 39 creatures across ★1–★6 including 8 bosses, 142 items, class-aware boss drops
+- 55 creatures across ★1–★6 including 8 bosses and 16 named rare spawns,
+  275 items, class-aware boss and rare drops
 - Four zones with overlapping level bands and travel between them, each with
   its own terrain, palette, lighting, scatter and skills to learn
 - Quest chains per zone: kill, collect and travel objectives, chained by
@@ -154,7 +161,7 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 ## Development
 
 ```bash
-npm run verify     # typecheck + 144 unit and balance tests
+npm run verify     # typecheck + 154 unit and balance tests
 npm run smoke      # plays the game in real Chromium, writes screenshots/
 ```
 

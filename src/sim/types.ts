@@ -100,6 +100,17 @@ export interface ItemDef {
   swingMs?: number;
   attackRange?: number;
   armor?: number;
+
+  // --- signature affixes ---------------------------------------------------
+  // Carried only by the pieces rare spawns drop. No ladder item has one, which
+  // is the point: a signature piece is not "the next tier early", it does
+  // something the tiers never do.
+  /** Added to crit chance, 0-1. */
+  critBonus?: number;
+  /** Flat maximum health. */
+  healthBonus?: number;
+  /** Flat movement speed, in world units per second. */
+  moveSpeedBonus?: number;
 }
 
 export interface ItemStack {
@@ -315,6 +326,17 @@ export interface MobDef {
   lootTableId: string;
   respawnMs: number;
   abilities?: MobAbilityDef[];
+  /**
+   * Rare-spawn linkage, generated in pairs so neither half can go stale.
+   *
+   * `rareVariant` on an ordinary mob names the creature its spawn points can
+   * come back as; `rareOf` on that creature names the mob it replaces, which
+   * is how the world puts the camp back to normal afterwards.
+   */
+  rareVariant?: string;
+  rareOf?: string;
+  /** Rares only: the line shown when one turns up. */
+  sighting?: string;
   /** Renderer hints only — the sim never reads these. */
   view: { color: number; height: number; radius: number };
 }
@@ -507,4 +529,6 @@ export type SimEvent =
   | { t: 'sold'; entityId: EntityId; itemId: string; qty: number; gold: number }
   | { t: 'bought'; entityId: EntityId; itemId: string; gold: number }
   | { t: 'skillUnlocked'; entityId: EntityId; skillId: string }
+  /** A named rare spawn has taken over a camp spawn point. */
+  | { t: 'rareSpawn'; entityId: EntityId; mobId: string; name: string; sighting: string }
   | { t: 'error'; entityId: EntityId; message: string };

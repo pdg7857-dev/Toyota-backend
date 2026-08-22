@@ -1,20 +1,40 @@
 import { describe, expect, it } from 'vitest';
 import { World } from '../src/sim/world.js';
-import { MAX_LEVEL, TICK_MS, castBreakChance, expectedDefense, xpToNext } from '../src/sim/formulas.js';
+import {
+  MAX_LEVEL,
+  TICK_MS,
+  castBreakChance,
+  expectedDefense,
+  goldForKill,
+  xpToNext,
+} from '../src/sim/formulas.js';
 import { FENMARCH, PLAYABLE_CLASSES, ZONES, getZone } from '../src/content/zone.js';
 import { HeightField, getTheme, type Clearing } from '../src/content/terrain.js';
 import { countEvents, duelZone, emptyZone, levelPlayer, simulateFight, vendorZone } from './helpers.js';
 import { VENDORS, buyPrice, sellPrice } from '../src/content/vendors.js';
 import { getQuest } from '../src/content/quests.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
-import { canEquip, getItem } from '../src/content/items.js';
-import { LOOT_TABLES, getMob } from '../src/content/mobs.js';
-import { isBoss } from '../src/sim/types.js';
+import { ITEMS, canEquip, getItem } from '../src/content/items.js';
+import { curveWeaponDps } from '../src/content/curves.js';
+import {
+  RARES,
+  RARE_LEVEL_BONUS,
+  RARE_SPAWN_CHANCE,
+  rareMobId,
+  signatureWeaponId,
+} from '../src/content/rares.js';
+import { LOOT_TABLES, MOBS, getMob } from '../src/content/mobs.js';
+import { BOSS_STARS, isBoss } from '../src/sim/types.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
 
 function newWorld(seed = 1, zone = duelZone('mossback_boar')) {
   return new World({ seed, zone, classId: 'warrior' });
 }
+
+/** Which mob owns each loot table, for tracing a drop back to its source. */
+const MOBS_BY_TABLE: Record<string, string> = Object.fromEntries(
+  Object.values(MOBS).map((m) => [m.lootTableId, m.id]),
+);
 
 function theMob(world: World): Entity {
   const mob = [...world.entities.values()].find((e) => e.kind === 'mob');
@@ -1413,5 +1433,180 @@ describe('zone-taught skills', () => {
     world.player.learnedSkills = [skill.id];
     const restored = World.deserialize(world.serialize(), getZone('fenmarch'));
     expect(restored.player.learnedSkills).toContain(skill.id);
+  });
+});
+
+describe('rare spawns', () => {
+  /** A camp of one host mob, with rare spawns left switched on. */
+  function campZone(mobId: string, count = 1) {
+    return {
+      ...duelZone(mobId),
+      id: 'test-camp',
+      spawns: Array.from({ length: count }, (_, i) => ({ mobId, pos: { x: 3 + i * 4, z: 0 } })),
+      rareSpawns: true,
+    };
+  }
+
+  /** Force the next spawn on this point to be the named variant. */
+  function makeRare(world: World, mob: Entity): void {
+    const host = getMob(mob.defId!);
+    const rare = getMob(host.rareVariant!);
+    mob.defId = rare.id;
+    mob.name = rare.name;
+    mob.level = rare.level;
+    mob.health = world.statsOf(mob).maxHealth;
+  }
+
+  it('names every rare after what it carries', () => {
+    for (const spec of RARES) {
+      const rare = getMob(rareMobId(spec));
+      const host = getMob(spec.hostMobId);
+      // "Mirefang the Bog Wolf" — epithet, then the camp it hides in.
+      expect(rare.name).toBe(`${spec.epithet} the ${host.name}`);
+      expect(rare.rareOf).toBe(spec.hostMobId);
+      expect(host.rareVariant).toBe(rare.id);
+      // Harder than the camp, but never a boss: ★5 means boss everywhere else.
+      expect(rare.level).toBe(spec.hostLevel + RARE_LEVEL_BONUS);
+      expect(rare.stars).toBeGreaterThan(host.stars - 1);
+      expect(rare.stars).toBeLessThan(BOSS_STARS);
+      expect(rare.sighting!.length).toBeGreaterThan(10);
+
+      // And the thing it carries shares its name.
+      const table = LOOT_TABLES[rare.lootTableId]!;
+      const carried = [
+        ...Object.values(table.classWeapons ?? {}),
+        ...table.entries.filter((e) => e.chance === 1).map((e) => e.itemId),
+      ].map((id) => getItem(id));
+      const signature = carried.filter((item) => item.quality === 'epic');
+      if (spec.carries === 'lore') {
+        // A lorekeeper carries the zone's capstone tome rather than gear.
+        expect(Object.keys(table.classTomes ?? {}).length).toBe(PLAYABLE_CLASSES.length);
+      } else {
+        expect(signature.length, `${rare.name} carries nothing signature`).toBeGreaterThan(0);
+        for (const item of signature) {
+          expect(item.name.startsWith(spec.epithet), `${item.name} is not a ${spec.epithet}`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('drops its signature nowhere else in the game', () => {
+    const signatures = Object.values(ITEMS).filter((i) => i.id.startsWith('sig_'));
+    expect(signatures.length).toBeGreaterThan(20);
+    for (const item of signatures) {
+      const from = Object.values(LOOT_TABLES).filter(
+        (t) =>
+          Object.values(t.classWeapons ?? {}).includes(item.id) ||
+          t.entries.some((e) => e.itemId === item.id),
+      );
+      expect(from.length, `${item.name} comes from ${from.length} tables`).toBe(1);
+      expect(getMob(MOBS_BY_TABLE[from[0]!.id]!).rareOf).toBeDefined();
+      // And no trader ever stocks one.
+      for (const vendor of Object.values(VENDORS)) {
+        expect(vendor.stock).not.toContain(item.id);
+      }
+    }
+  });
+
+  it('carries an affix no ladder item has', () => {
+    const ladder = Object.values(ITEMS).filter((i) => !i.id.startsWith('sig_'));
+    for (const item of ladder) {
+      expect(item.critBonus ?? 0).toBe(0);
+      expect(item.healthBonus ?? 0).toBe(0);
+      expect(item.moveSpeedBonus ?? 0).toBe(0);
+    }
+    for (const item of Object.values(ITEMS).filter((i) => i.id.startsWith('sig_'))) {
+      const affixes = (item.critBonus ?? 0) + (item.healthBonus ?? 0) + (item.moveSpeedBonus ?? 0);
+      expect(affixes, `${item.name} is just a better statline`).toBeGreaterThan(0);
+    }
+  });
+
+  it('turns up rarely, and hands the camp back afterwards', () => {
+    // Statistical, over many respawns of one host camp.
+    const world = new World({ seed: 900, zone: campZone('bog_wolf', 6), classId: 'warrior' });
+    const mobs = [...world.entities.values()].filter((e) => e.kind === 'mob');
+    let respawns = 0;
+    let rares = 0;
+
+    for (let i = 0; i < 4000; i++) {
+      for (const mob of mobs) {
+        if (mob.dead) continue;
+        mob.dead = true;
+        mob.respawnInMs = 1;
+        respawns++;
+      }
+      for (const ev of world.tick()) {
+        if (ev.t === 'rareSpawn') rares++;
+      }
+    }
+    const rate = rares / respawns;
+    console.log(`  rare spawns: ${rares} in ${respawns} respawns (${(rate * 100).toFixed(2)}%)`);
+    // Wide bounds: this is a statistical check that the roll happens at all and
+    // is in the right order of magnitude, not a test of the PRNG.
+    expect(rate).toBeGreaterThan(RARE_SPAWN_CHANCE * 0.4);
+    expect(rate).toBeLessThan(RARE_SPAWN_CHANCE * 2.5);
+    // Whatever is standing at the end, the camp is not permanently named.
+    const stillRare = mobs.filter((m) => getMob(m.defId!).rareOf).length;
+    expect(stillRare).toBeLessThan(mobs.length);
+  });
+
+  it('never replaces a mob in a zone that switched them off', () => {
+    // Test arenas rely on this: a duel against a creature you did not ask for
+    // measures the wrong thing, and the roll itself would shift the rng stream.
+    const world = new World({ seed: 901, zone: duelZone('bog_wolf'), classId: 'warrior' });
+    const mob = theMob(world);
+    for (let i = 0; i < 3000; i++) {
+      mob.dead = true;
+      mob.respawnInMs = 1;
+      const events = world.tick();
+      expect(events.some((e) => e.t === 'rareSpawn')).toBe(false);
+      expect(mob.defId).toBe('bog_wolf');
+    }
+  });
+
+  it('guarantees the signature to whoever kills it', () => {
+    for (const classId of ['warrior', 'mage'] as const) {
+      const world = new World({ seed: 902, zone: campZone('bog_wolf'), classId });
+      const player = levelPlayer(world, { level: 20 });
+      const mob = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+      makeRare(world, mob);
+
+      mob.health = 1;
+      world.submit(player.id, { t: 'target', id: mob.id });
+      world.submit(player.id, { t: 'autoAttack', on: true });
+      world.advance(8000);
+      expect(mob.dead, `${classId} could not kill the rare`).toBe(true);
+
+      const expected = signatureWeaponId(RARES.find((r) => r.epithet === 'Mirefang')!, classId);
+      expect(mob.corpseLoot?.some((s) => s.itemId === expected)).toBe(true);
+      // Every time, not on a roll — finding it was the luck.
+      expect(getItem(expected).classes).toEqual([classId]);
+    }
+  });
+
+  it('pays far better than the camp it hides in', () => {
+    const rare = getMob('rare_mirefang');
+    const host = getMob('bog_wolf');
+    const gold = (mob: typeof rare): number => {
+      const table = LOOT_TABLES[mob.lootTableId]!;
+      const g = goldForKill(mob.level, mob.stars, table.goldMultiplier ?? 1);
+      return (g.min + g.max) / 2;
+    };
+    expect(gold(rare)).toBeGreaterThan(gold(host) * 3);
+  });
+
+  it('makes a signature piece better than the tier, but not a different game', () => {
+    for (const spec of RARES) {
+      if (spec.carries !== 'weapon') continue;
+      const level = spec.hostLevel + RARE_LEVEL_BONUS;
+      for (const cls of PLAYABLE_CLASSES) {
+        const signature = getItem(signatureWeaponId(spec, cls.id));
+        const dps =
+          (((signature.damageMin! + signature.damageMax!) / 2) * 1000) / signature.swingMs!;
+        const ladderDps = curveWeaponDps(level);
+        expect(dps / ladderDps, `${signature.name} is no better than the ladder`).toBeGreaterThan(1.1);
+        expect(dps / ladderDps, `${signature.name} outclasses the game`).toBeLessThan(1.4);
+      }
+    }
   });
 });

@@ -293,6 +293,12 @@ canvas { display: block; }
 }
 
 .nameplate .np-fill { height: 100%; background: #cf4a3c; }
+.nameplate.rare .np-name {
+  color: #ffd25e;
+  font-weight: 700;
+  text-shadow: 0 0 10px rgba(255, 200, 70, 0.55);
+}
+
 .nameplate.hostile { color: #ffbdb4; }
 .nameplate.dead { opacity: 0.45; }
 .nameplate.lootable { color: #ffd76a; }
@@ -660,6 +666,14 @@ canvas { display: block; }
 
 #zone-banner.show { animation: zoneFade 3.4s ease-out forwards; }
 
+/* A named rare is not an arrival: same slot, different colour and urgency. */
+#zone-banner.rare {
+  color: #ffd25e;
+  font-size: 28px;
+  letter-spacing: 4px;
+  text-transform: none;
+}
+
 @keyframes zoneFade {
   0% { opacity: 0; letter-spacing: 16px; }
   18% { opacity: 1; letter-spacing: 7px; }
@@ -751,3 +765,6 @@ canvas { display: block; }
 
 .quest-row.clickable:hover { background: rgba(200, 170, 90, 0.14); }
 .quest-row.ready { color: #8fe08a; }
+
+/* A rare sighting in the combat log — the one line worth scrolling back for. */
+.log-rare { color: #ffd25e; font-weight: 600; }

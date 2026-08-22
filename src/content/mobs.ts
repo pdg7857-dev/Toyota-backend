@@ -1,5 +1,17 @@
-import { baseMobXp, curveMobDamageRange, curveMobHealth } from '../sim/formulas.js';
+import { STAR_MODIFIERS, baseMobXp, curveMobDamageRange, curveMobHealth } from '../sim/formulas.js';
 import { zoneTomes } from './skills.js';
+import {
+  RARES,
+  rareLevel,
+  rareLootTableId,
+  rareMobId,
+  rareMobName,
+  rareStars,
+  signatureRelicId,
+  signatureTomes,
+  signatureWeapons,
+  type RareSpec,
+} from './rares.js';
 import type { LootTable, MobAbilityDef, MobDef, StarRating } from '../sim/types.js';
 
 /**
@@ -1050,6 +1062,93 @@ export function getMob(id: string): MobDef {
   if (!mobDef) throw new Error(`Unknown mob: ${id}`);
   return mobDef;
 }
+
+// --------------------------------------------------------------------------
+// Rare spawns.
+//
+// Built from the roster in `rares.ts` so the creature, its name and its item
+// are one piece of content. Each is a harder version of the camp mob it hides
+// among — two levels up, one star up (capped at ★4, because ★5 means boss
+// everywhere else) — and each carries exactly one signature drop.
+//
+// The signature is GUARANTEED, and resolved against the killer's class where
+// it can be. Finding the creature is the grind; failing a loot roll on top of
+// that would just be the same bad luck charged twice.
+// --------------------------------------------------------------------------
+
+/** How much tougher a rare is than the camp mob it replaces, effective. */
+const RARE_TOUGHNESS = 1.75;
+
+/** And how much harder it hits. Kept well under the health bump: a rare should
+ * take a while, not delete a player who found one at the right level. */
+const RARE_MENACE = 1.2;
+
+function rareMob(spec: RareSpec): MobDef {
+  const host = MOBS[spec.hostMobId];
+  if (!host) throw new Error(`Rare ${spec.epithet} hides among an unknown mob: ${spec.hostMobId}`);
+  const level = rareLevel(spec);
+  const stars = rareStars(spec);
+  // Scaled from the HOST rather than re-derived from the curves. The Fenmarch's
+  // bestiary is hand-authored and does not follow them, so a curve-built rare
+  // in the starting zone would be a different creature from the camp it hides
+  // in.
+  //
+  // The scaling is expressed as a target multiple of the host's EFFECTIVE
+  // numbers, then divided back out through the star modifiers. A rare gains a
+  // star where it can, but a ★4 host has nowhere to go — ★5 means boss — and a
+  // flat base-health bonus left those rares no tougher than the camp around
+  // them. This way every rare lands on the same multiple either way.
+  const starHealth = STAR_MODIFIERS[host.stars].health / STAR_MODIFIERS[stars].health;
+  const starDamage = STAR_MODIFIERS[host.stars].damage / STAR_MODIFIERS[stars].damage;
+  return {
+    ...host,
+    id: rareMobId(spec),
+    name: rareMobName(spec, host.name),
+    level,
+    stars,
+    baseHealth: Math.round(host.baseHealth * RARE_TOUGHNESS * starHealth),
+    damageMin: Math.round(host.damageMin * RARE_MENACE * starDamage),
+    damageMax: Math.round(host.damageMax * RARE_MENACE * starDamage),
+    xp: baseMobXp(level, stars),
+    lootTableId: rareLootTableId(spec),
+    // Long enough that killing one clears the camp of it for a while, short
+    // enough that a farmer is not punished for finding it early.
+    respawnMs: 120000,
+    aggroRadius: host.aggroRadius + 2,
+    rareOf: spec.hostMobId,
+    sighting: spec.sighting,
+    // Visibly not one of the others: bigger, and lit in gold.
+    view: { ...host.view, color: 0xf0c94c, height: host.view.height * 1.25, radius: host.view.radius * 1.2 },
+  };
+}
+
+function rareLoot(spec: RareSpec): LootTable {
+  const hostTable = getLootTable(getMob(spec.hostMobId).lootTableId);
+  return {
+    id: rareLootTableId(spec),
+    // Named creatures carry a purse to match.
+    goldMultiplier: 2.5,
+    ...(spec.carries === 'weapon' ? { classWeapons: signatureWeapons(spec) } : {}),
+    ...(spec.carries === 'lore' ? { classTomes: signatureTomes(spec) } : {}),
+    entries: [
+      ...hostTable.entries,
+      // A relic is class-neutral, so it needs no resolution — just a certainty.
+      ...(spec.carries === 'relic'
+        ? [{ itemId: signatureRelicId(spec), chance: 1, min: 1, max: 1 }]
+        : []),
+    ],
+  };
+}
+
+for (const spec of RARES) {
+  const mob = rareMob(spec);
+  MOBS[mob.id] = mob;
+  MOBS[spec.hostMobId] = { ...MOBS[spec.hostMobId]!, rareVariant: mob.id };
+  LOOT_TABLES[mob.lootTableId] = rareLoot(spec);
+}
+
+/** Every rare spawn, for content that needs to walk them. */
+export const RARE_MOBS: MobDef[] = RARES.map((spec) => MOBS[rareMobId(spec)]!);
 
 export function getLootTable(id: string): LootTable {
   const table = LOOT_TABLES[id];

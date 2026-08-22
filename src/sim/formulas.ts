@@ -201,6 +201,8 @@ export interface DeriveInput {
   primaryAttribute: keyof Attributes;
   /** Summed armor from equipped gear. */
   armor: number;
+  /** Summed signature affixes. Absent for anyone wearing only ladder gear. */
+  affix?: Affixes;
   weapon: {
     damageMin: number;
     damageMax: number;
@@ -219,20 +221,25 @@ export interface DeriveInput {
  */
 export function deriveStats(input: DeriveInput): DerivedStats {
   const { level, attributes: a, armor, weapon } = input;
+  const affix = input.affix ?? emptyAffixes();
   // Dexterity shaves up to ~25% off swing time, with diminishing returns.
   const hasteFactor = 1 - (a.dexterity * 0.008) / (1 + a.dexterity * 0.008);
   return {
-    maxHealth: Math.round(60 + a.vitality * 8 + level * 12),
+    maxHealth: Math.round(60 + a.vitality * 8 + level * 12 + affix.health),
     maxEnergy: Math.round(30 + a.focus * 5 + level * 3),
     attack: Math.round(10 + a[input.primaryAttribute] * 2 + level * 3),
     defense: Math.round(a.vitality * 1.5 + armor + level * 2),
-    critChance: Math.min(0.5, 0.03 + a.dexterity * 0.0025),
+    // Attributes alone still cap at 0.5; a signature affix can push past it to
+    // 0.6. Applying one cap to the sum instead would have quietly RAISED the
+    // ceiling for high-Dexterity classes wearing ordinary gear, which the
+    // balance suite caught within a run.
+    critChance: Math.min(0.6, Math.min(0.5, 0.03 + a.dexterity * 0.0025) + affix.crit),
     swingMs: Math.max(600, Math.round(weapon.swingMs * Math.max(0.75, hasteFactor))),
     damageMin: weapon.damageMin,
     damageMax: weapon.damageMax,
     damageType: weapon.damageType,
     attackRange: weapon.attackRange,
-    moveSpeed: 5.2,
+    moveSpeed: 5.2 + affix.moveSpeed,
   };
 }
 
@@ -462,11 +469,25 @@ export function energyRegenPerSec(stats: DerivedStats, inCombat: boolean): numbe
 
 /** Fold an equipped item's contribution into an accumulating stat bundle. */
 export function applyItem(
-  acc: { attributes: Attributes; armor: number },
+  acc: { attributes: Attributes; armor: number; affix: Affixes },
   item: ItemDef,
 ): void {
   if (item.attributes) acc.attributes = addAttributes(acc.attributes, item.attributes);
   acc.armor += item.armor ?? 0;
+  acc.affix.crit += item.critBonus ?? 0;
+  acc.affix.health += item.healthBonus ?? 0;
+  acc.affix.moveSpeed += item.moveSpeedBonus ?? 0;
+}
+
+/** Signature affixes summed across equipped gear. Ladder items contribute 0. */
+export interface Affixes {
+  crit: number;
+  health: number;
+  moveSpeed: number;
+}
+
+export function emptyAffixes(): Affixes {
+  return { crit: 0, health: 0, moveSpeed: 0 };
 }
 
 export function dist(ax: number, az: number, bx: number, bz: number): number {

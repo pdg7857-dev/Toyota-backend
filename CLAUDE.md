@@ -221,12 +221,69 @@ The rule, enforced by tests:
 - **Merchant goods** drop often and climb sharply in value with difficulty.
 - **Equipment stays rare at every tier** — total gear chance per ordinary mob is
   capped by `MAX_EQUIPMENT_DROP_CHANCE`. What improves with difficulty is the
-  *quality* of the piece, not the odds. Epics come only from bosses.
+  *quality* of the piece, not the odds. Epics come only from bosses and rare
+  spawns.
 
 A loot-table `goldMultiplier` is a flavour bonus (outlaws carry coin). A test
 asserts the dominance relation — if one mob is no easier on both level and stars
 and strictly harder on one, it must pay more — which already caught an outlaw
 bonus letting a level-16 mob out-earn a level-21 one.
+
+## Rare spawns: the thing you farm for
+
+Some creatures are not in the zone layout at all. Every time a **host** camp
+spawn point's respawn timer fires, the world rolls `RARE_SPAWN_CHANCE`, and on
+a hit the mob comes back as a **named variant** instead — `RARE_TOUGHNESS`
+times the camp mob's effective health, a star higher where it can be, and
+carrying one signature item that drops nowhere else in the game.
+
+Four per zone, sixteen in all (`content/rares.ts`). Finding one takes roughly
+**9–25 minutes of deliberate camping**, and essentially never happens by
+accident while levelling past — a test prints the expected wait per rare and
+fails if it leaves that band.
+
+**Every rare is named for what it carries.** One epithet names the creature and
+its drop: `Mirefang the Bog Wolf` carries the `Mirefang Blade`, and a Priest
+killing the same creature gets the `Mirefang Stave`. That is what makes the
+class-locked weapon problem disappear — one creature, one name, an item per
+class that shares it.
+
+| It carries | What drops |
+|---|---|
+| `weapon` | a signature weapon, resolved against the killer's class |
+| `relic` | a signature armour piece or ring — class-neutral, so a flat drop |
+| `lore` | the zone's ★6 elite-boss tome, per class: a second path to the capstone skill |
+
+The drop is **guaranteed**. Finding the creature is the grind; failing a loot
+roll on top of that charges the same bad luck twice and turns a good hour into
+a wasted one.
+
+### Signature items carry affixes, and nothing else does
+
+A signature piece is not "the next tier early" — it is `SIGNATURE_POWER` (22%)
+above the ladder curve *and* carries something no ladder item has:
+`critBonus`, `healthBonus` or `moveSpeedBonus`, one per slot so a full set is a
+spread of small advantages rather than one stacked stat. A test walks every
+ladder item and fails if one grows an affix.
+
+Attributes alone still cap crit at 0.5; an affix can push to 0.6. Folding both
+into one cap quietly raised the ceiling for high-Dexterity classes wearing
+ordinary gear, and the balance suite caught it inside one run.
+
+### Two rules the rest of the codebase depends on
+
+- **Rares stop at ★4.** ★5 and ★6 mean boss and elite boss everywhere else —
+  `isBoss` gates arena clearings, telegraph tests and loot rules on exactly
+  that. A rare is a hard camp mob, not a boss that wanders. Because a ★4 host
+  has nowhere to climb, toughness is expressed as a multiple of the host's
+  *effective* stats and divided back out through `STAR_MODIFIERS`, so every
+  rare lands on the same multiple whatever its host's rating.
+- **Rares are not "ordinary mobs".** Every loot rule below is about what a camp
+  pays out; a named creature you see once an hour runs on the opposite rules
+  (guaranteed epic, 2.5x gold). The loot ladder excludes them explicitly.
+  `ZoneDef.rareSpawns: false` switches the roll off entirely, which is what
+  test arenas use — a duel against a creature you did not ask for measures the
+  wrong thing, and the roll itself draws from the same `Rng` as combat.
 
 ## Vendors close the economy
 
@@ -350,7 +407,7 @@ file changes** — the events that drive animation (`swing`, `castBegin`,
 ## Verifying a change
 
 ```bash
-npm run verify        # typecheck + 144 unit and balance tests
+npm run verify        # typecheck + 154 unit and balance tests
 npm run build && npm run preview &
 npm run smoke         # real browser, plays the game, writes screenshots/
 ```
@@ -368,6 +425,12 @@ harness before retuning content.
 
 The mirror is also true: a weak harness *hides* real problems. The rotation fix
 above is what finally exposed the late mob health curve.
+
+And a printed comparison beats a passing assertion: the rare-spawn table showed
+each named creature dying in *exactly* the same time as the camp mob it
+replaces — because `spawnMob` was unwrapping `rareOf` on the way in and handing
+back the host. Every assertion still passed. Two identical columns are what gave
+it away, which is why these tests print their tables.
 
 Always run `smoke` for renderer or HUD changes. Unit tests cannot see a panel
 overlapping another panel, nameplate clutter, or a tree planted through a boss —
