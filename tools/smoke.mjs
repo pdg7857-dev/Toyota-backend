@@ -237,6 +237,54 @@ async function main() {
   await page.evaluate(() => window.__game.world.travelTo('fenmarch'));
   await wait(900);
 
+  // --- learning a zone's skill -------------------------------------------
+  // Buy a tome from the zone's trader, read it, and check the skill actually
+  // lands on the bar. Unit tests cover the rules; only this covers the four
+  // pieces of UI that have to line up for a player to ever use one.
+  const taught = await page.evaluate(async () => {
+    const g = window.__game;
+    const player = g.world.player;
+    g.world.travelTo('ardmoor');
+    await new Promise((r) => setTimeout(r, 400));
+
+    const vendor = [...g.world.entities.values()].find((e) => e.kind === 'vendor');
+    const stock = g.vendorStock(vendor.vendorId);
+    const tomeId = stock.find((id) => g.itemOf(id).teaches && g.canUse(id));
+    if (!tomeId) return { ok: false, why: 'no tome on the shelf' };
+    const skillId = g.itemOf(tomeId).teaches;
+
+    player.level = 40;
+    player.gold = 999999;
+    player.pos.x = vendor.pos.x + 2;
+    player.pos.z = vendor.pos.z + 2;
+    const before = player.gold;
+    g.world.submit(player.id, { t: 'buy', vendorId: vendor.id, itemId: tomeId });
+    await new Promise((r) => setTimeout(r, 300));
+    const bought = player.inventory.some((st) => st.itemId === tomeId) && player.gold < before;
+
+    g.world.submit(player.id, { t: 'learnSkill', itemId: tomeId });
+    await new Promise((r) => setTimeout(r, 300));
+    return {
+      ok: bought && (player.learnedSkills ?? []).includes(skillId),
+      bought,
+      skillId,
+      learned: player.learnedSkills ?? [],
+    };
+  });
+  await wait(500);
+  await page.keyboard.press('i');
+  await wait(400);
+  await page.screenshot({ path: join(OUT, '09-taught-skill.png') });
+  await page.keyboard.press('i');
+
+  // The bar has two rows once a class has more than ten skills, and the newly
+  // learned one must stop rendering as "Untaught".
+  const bar = await page.evaluate(() => ({
+    rows: document.querySelectorAll('#skill-bar .skill-row').length,
+    slots: document.querySelectorAll('#skill-bar .slot').length,
+    untaught: document.querySelectorAll('#skill-bar .slot.unlearned').length,
+  }));
+
   // --- boss scene ---------------------------------------------------------
   // Jump straight to Old Scar via the debug handle so we can actually see a
   // telegraph render. Reaching him legitimately is a 25-level grind.
@@ -317,6 +365,9 @@ async function main() {
     ['every zone has its own sky', distinctSkies === 4],
     ['every zone resolved a theme', themesMatched],
     ['entities stand on the terrain', standingOnGround],
+    ['bought and learned a zone skill', taught.ok],
+    ['skill bar built two rows', bar.rows === 2 && bar.slots >= 15],
+    ['unlearned skills still marked', bar.untaught > 0],
     ['no page errors', errors.length === 0],
   ];
 
@@ -324,6 +375,7 @@ async function main() {
   for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
   console.log('\nplayer:', state.hp, '| xp:', state.xp, '| target:', state.target);
   console.log('log tail:', state.log.slice(0, 6));
+  console.log('taught:', JSON.stringify(taught), '| bar:', JSON.stringify(bar));
   console.log('zones:', looks.map((l) => `${l.zone}/${l.theme} sky#${l.sky.toString(16)}`).join('  '));
   if (errors.length) console.log('\nerrors:\n' + errors.join('\n'));
   console.log(`\nscreenshots in ${OUT}`);

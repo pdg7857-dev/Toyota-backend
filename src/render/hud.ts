@@ -11,6 +11,15 @@ import type { Attributes, Command, Entity, EntityId, SimEvent } from '../sim/typ
 import type { World } from '../sim/world.js';
 
 const MAX_LOG_LINES = 9;
+/** Slots on the first hotkey row, bound to 1-9 then 0. */
+const PRIMARY_ROW_SLOTS = 10;
+
+/** The key that fires slot `index`: 1-9, 0, then Shift+1 onwards. */
+function hotkeyLabel(index: number): string {
+  if (index < 9) return String(index + 1);
+  if (index === 9) return '0';
+  return `⇧${index - 9}`;
+}
 /**
  * How far away a mob can be and still show a nameplate, in world units.
  *
@@ -165,20 +174,33 @@ export class Hud {
     };
   }
 
+  /**
+   * Two rows: the level-granted kit on 1-0, everything a zone taught you on
+   * Shift+1-6. A class ends the game with up to sixteen skills, which does not
+   * fit on one row of hotkeys at any readable size.
+   */
   private buildSkillBar(): void {
     const bar = skillBarFor(this.world.player.classId ?? 'warrior');
     this.skillOrder = bar.map((s) => s.id);
+    this.els.skillBar.innerHTML = '';
+
+    const primary = document.createElement('div');
+    primary.className = 'skill-row';
+    const secondary = document.createElement('div');
+    secondary.className = 'skill-row secondary';
+    this.els.skillBar.append(primary, secondary);
+
     bar.forEach((skill, i) => {
       const skillId = skill.id;
       const el = document.createElement('div');
       el.className = 'slot clickable';
       el.title = `${skill.name} — ${skill.description} (${skill.energyCost} energy)`;
       el.innerHTML =
-        `<span class="slot-key">${i + 1}</span>` +
+        `<span class="slot-key">${hotkeyLabel(i)}</span>` +
         `<span class="slot-name">${skill.name}</span>` +
         `<div class="slot-cd" style="display:none"></div>`;
       el.addEventListener('click', () => this.emit({ t: 'useSkill', skillId }));
-      this.els.skillBar.appendChild(el);
+      (i < PRIMARY_ROW_SLOTS ? primary : secondary).appendChild(el);
       this.slots.set(skillId, {
         el,
         cd: el.querySelector<HTMLElement>('.slot-cd')!,
@@ -187,7 +209,7 @@ export class Hud {
     });
   }
 
-  /** Skill id bound to a 1-5 hotkey, or null. */
+  /** Skill id bound to a hotkey slot, or null. */
   skillForSlot(index: number): string | null {
     return this.skillOrder[index] ?? null;
   }
@@ -502,10 +524,21 @@ export class Hud {
   private updateSkillBar(player: Entity): void {
     for (const [skillId, slot] of this.slots) {
       const skill = getSkill(skillId);
-      const locked = player.level < skill.reqLevel;
-      slot.el.classList.toggle('locked', locked);
+      const underLevel = player.level < skill.reqLevel;
+      // A taught skill you are high enough for but have not found the tome for
+      // reads differently from one you are simply too low for: one is a thing
+      // to go and get, the other is a thing to wait for.
+      const unlearned =
+        !!skill.taughtBy && !(player.learnedSkills ?? []).includes(skill.id);
+      const locked = underLevel || unlearned;
+      slot.el.classList.toggle('locked', underLevel);
+      slot.el.classList.toggle('unlearned', !underLevel && unlearned);
       slot.el.classList.toggle('unaffordable', !locked && player.energy < skill.energyCost);
-      slot.name.textContent = locked ? `Lv ${skill.reqLevel}` : skill.name;
+      slot.name.textContent = underLevel
+        ? `Lv ${skill.reqLevel}`
+        : unlearned
+          ? 'Untaught'
+          : skill.name;
 
       const remaining = player.skillCooldowns?.[skillId] ?? 0;
       if (remaining > 0) {
@@ -963,18 +996,35 @@ export class Hud {
       const row = document.createElement('div');
       row.className = `inv-row${item.slot && usable ? ' clickable' : ''}${usable ? '' : ' unusable'}`;
 
+      const taught = item.teaches ? getSkill(item.teaches) : null;
+      const known = taught ? (player.learnedSkills ?? []).includes(taught.id) : false;
+      const learnable = !!taught && usable && !known && player.level >= taught.reqLevel;
+      if (learnable) row.classList.add('clickable');
+
       // Right-hand tag: the slot, or why you can't use it, or its vendor value.
       let tag: string;
-      if (item.slot && !usable) tag = `<span class="locked-class">${item.classes?.join('/')} only</span>`;
-      else if (item.slot) tag = item.slot;
-      else tag = `${item.value}g`;
+      if ((item.slot || taught) && !usable) {
+        tag = `<span class="locked-class">${item.classes?.join('/')} only</span>`;
+      } else if (taught) {
+        tag = known ? 'known' : learnable ? 'learn' : `Lv ${taught.reqLevel}`;
+      } else if (item.slot) {
+        tag = item.slot;
+      } else {
+        tag = `${item.value}g`;
+      }
 
       row.innerHTML =
         `<span style="color:${QUALITY_COLORS[item.quality]}">${item.name}` +
         `${stack.qty > 1 ? ` <span class="muted">x${stack.qty}</span>` : ''}</span>` +
         `<span class="muted">${tag}</span>`;
 
-      if (item.slot && usable) {
+      if (learnable) {
+        row.title = `Click to learn — ${taught!.description}`;
+        row.addEventListener('click', () => {
+          this.emit({ t: 'learnSkill', itemId: stack.itemId });
+          this.renderInventory();
+        });
+      } else if (item.slot && usable) {
         row.title = `Click to equip — ${describeItem(stack.itemId)}`;
         row.addEventListener('click', () => {
           this.emit({ t: 'equip', itemId: stack.itemId });
@@ -991,6 +1041,10 @@ export class Hud {
 function describeItem(itemId: string): string {
   const item = getItem(itemId);
   const parts: string[] = [];
+  if (item.teaches) {
+    const skill = getSkill(item.teaches);
+    parts.push(`teaches ${skill.name} at level ${skill.reqLevel} — ${skill.description}`);
+  }
   if (item.damageMin !== undefined) {
     parts.push(`${item.damageMin}–${item.damageMax} dmg, ${(item.swingMs ?? 2000) / 1000}s swing`);
   }
@@ -1072,7 +1126,7 @@ const TEMPLATE = `
 
   <div id="help">
     <b>WASD</b> move &nbsp; <b>Right-drag</b> look &nbsp; <b>Scroll</b> zoom<br />
-    <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–7</b> skills &nbsp; <b>T</b> auto-attack<br />
+    <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–0</b> / <b>⇧1–6</b> skills &nbsp; <b>T</b> auto-attack<br />
     <b>F</b> loot &nbsp; <b>E</b> trade &nbsp; <b>G</b> travel &nbsp; <b>J</b> quests<br />
     <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
   </div>

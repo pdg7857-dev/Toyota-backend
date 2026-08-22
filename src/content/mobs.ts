@@ -1,4 +1,5 @@
 import { baseMobXp, curveMobDamageRange, curveMobHealth } from '../sim/formulas.js';
+import { zoneTomes } from './skills.js';
 import type { LootTable, MobAbilityDef, MobDef, StarRating } from '../sim/types.js';
 
 /**
@@ -132,27 +133,28 @@ export const LOOT_TABLES: Record<string, LootTable> = {
   crag_goat_loot: generatedLoot('crag_goat_loot', 'goat_horn', ['honed_head', 'honed_chest', 'honed_legs', 'honed_ring']),
   hill_wolf_loot: generatedLoot('hill_wolf_loot', 'clan_torc', ['honed_head', 'honed_chest', 'honed_legs', 'honed_ring']),
   cattle_raider_loot: generatedLoot('cattle_raider_loot', 'clan_torc', ['bloodiron_head', 'bloodiron_chest', 'bloodiron_legs', 'bloodiron_ring']),
-  moor_eagle_loot: generatedLoot('moor_eagle_loot', 'clan_torc', ['bloodiron_head', 'bloodiron_chest', 'bloodiron_legs', 'bloodiron_ring']),
-  clan_axeman_loot: generatedLoot('clan_axeman_loot', 'eagle_feather', ['stormforged_head', 'stormforged_chest', 'stormforged_legs', 'stormforged_ring']),
-  highland_bear_loot: generatedLoot('highland_bear_loot', 'eagle_feather', ['stormforged_head', 'stormforged_chest', 'stormforged_legs', 'stormforged_ring']),
-  clan_berserker_loot: generatedLoot('clan_berserker_loot', 'cattle_lords_ring', ['stormforged_head', 'stormforged_chest', 'stormforged_legs', 'stormforged_ring']),
+  moor_eagle_loot: generatedLoot('moor_eagle_loot', 'clan_torc', ['bloodiron_head', 'bloodiron_chest', 'bloodiron_legs', 'bloodiron_ring'], undefined, 'ardmoor'),
+  clan_axeman_loot: generatedLoot('clan_axeman_loot', 'eagle_feather', ['stormforged_head', 'stormforged_chest', 'stormforged_legs', 'stormforged_ring'], undefined, 'ardmoor'),
+  highland_bear_loot: generatedLoot('highland_bear_loot', 'eagle_feather', ['stormforged_head', 'stormforged_chest', 'stormforged_legs', 'stormforged_ring'], undefined, 'ardmoor'),
+  clan_berserker_loot: generatedLoot('clan_berserker_loot', 'cattle_lords_ring', ['stormforged_head', 'stormforged_chest', 'stormforged_legs', 'stormforged_ring'], undefined, 'ardmoor'),
   reach_eel_loot: generatedLoot('reach_eel_loot', 'eel_skin', ['sunken_head', 'sunken_chest', 'sunken_legs', 'sunken_ring']),
   wrecker_scavenger_loot: generatedLoot('wrecker_scavenger_loot', 'eel_skin', ['sunken_head', 'sunken_chest', 'sunken_legs', 'sunken_ring']),
-  marsh_heron_loot: generatedLoot('marsh_heron_loot', 'wreckers_salvage', ['tidewrought_head', 'tidewrought_chest', 'tidewrought_legs', 'tidewrought_ring']),
-  smuggler_enforcer_loot: generatedLoot('smuggler_enforcer_loot', 'wreckers_salvage', ['tidewrought_head', 'tidewrought_chest', 'tidewrought_legs', 'tidewrought_ring']),
-  tidewatch_marauder_loot: generatedLoot('tidewatch_marauder_loot', 'pike_jaw', ['duskforged_head', 'duskforged_chest', 'duskforged_legs', 'duskforged_ring']),
-  great_pike_loot: generatedLoot('great_pike_loot', 'pike_jaw', ['duskforged_head', 'duskforged_chest', 'duskforged_legs', 'duskforged_ring']),
-  grey_seal_bull_loot: generatedLoot('grey_seal_bull_loot', 'tidewatch_seal', ['duskforged_head', 'duskforged_chest', 'duskforged_legs', 'duskforged_ring']),
+  marsh_heron_loot: generatedLoot('marsh_heron_loot', 'wreckers_salvage', ['tidewrought_head', 'tidewrought_chest', 'tidewrought_legs', 'tidewrought_ring'], undefined, 'reach'),
+  smuggler_enforcer_loot: generatedLoot('smuggler_enforcer_loot', 'wreckers_salvage', ['tidewrought_head', 'tidewrought_chest', 'tidewrought_legs', 'tidewrought_ring'], undefined, 'reach'),
+  tidewatch_marauder_loot: generatedLoot('tidewatch_marauder_loot', 'pike_jaw', ['duskforged_head', 'duskforged_chest', 'duskforged_legs', 'duskforged_ring'], undefined, 'reach'),
+  great_pike_loot: generatedLoot('great_pike_loot', 'pike_jaw', ['duskforged_head', 'duskforged_chest', 'duskforged_legs', 'duskforged_ring'], undefined, 'reach'),
+  grey_seal_bull_loot: generatedLoot('grey_seal_bull_loot', 'tidewatch_seal', ['duskforged_head', 'duskforged_chest', 'duskforged_legs', 'duskforged_ring'], undefined, 'reach'),
   fort_mastiff_loot: generatedLoot('fort_mastiff_loot', 'mastiff_fang', ['blackstone_head', 'blackstone_chest', 'blackstone_legs', 'blackstone_ring']),
   warband_levy_loot: generatedLoot('warband_levy_loot', 'mastiff_fang', ['blackstone_head', 'blackstone_chest', 'blackstone_legs', 'blackstone_ring']),
-  blackshield_spearman_loot: generatedLoot('blackshield_spearman_loot', 'blackshield_boss', ['dread_head', 'dread_chest', 'dread_legs', 'dread_ring']),
-  siege_engineer_loot: generatedLoot('siege_engineer_loot', 'blackshield_boss', ['dread_head', 'dread_chest', 'dread_legs', 'dread_ring']),
-  warhound_alpha_loot: generatedLoot('warhound_alpha_loot', 'blackshield_boss', ['sovereign_head', 'sovereign_chest', 'sovereign_legs', 'sovereign_ring']),
-  blackshield_champion_loot: generatedLoot('blackshield_champion_loot', 'warden_signet', ['sovereign_head', 'sovereign_chest', 'sovereign_legs', 'sovereign_ring']),
-  fort_warden_loot: generatedLoot('fort_warden_loot', 'warden_signet', ['sovereign_head', 'sovereign_chest', 'sovereign_legs', 'sovereign_ring']),
+  blackshield_spearman_loot: generatedLoot('blackshield_spearman_loot', 'blackshield_boss', ['dread_head', 'dread_chest', 'dread_legs', 'dread_ring'], undefined, 'caer_dubh'),
+  siege_engineer_loot: generatedLoot('siege_engineer_loot', 'blackshield_boss', ['dread_head', 'dread_chest', 'dread_legs', 'dread_ring'], undefined, 'caer_dubh'),
+  warhound_alpha_loot: generatedLoot('warhound_alpha_loot', 'blackshield_boss', ['sovereign_head', 'sovereign_chest', 'sovereign_legs', 'sovereign_ring'], undefined, 'caer_dubh'),
+  blackshield_champion_loot: generatedLoot('blackshield_champion_loot', 'warden_signet', ['sovereign_head', 'sovereign_chest', 'sovereign_legs', 'sovereign_ring'], undefined, 'caer_dubh'),
+  fort_warden_loot: generatedLoot('fort_warden_loot', 'warden_signet', ['sovereign_head', 'sovereign_chest', 'sovereign_legs', 'sovereign_ring'], undefined, 'caer_dubh'),
   aonghus_loot: {
     id: 'aonghus_loot',
     goldMultiplier: 1.2,
+    classTomes: zoneTomes('ardmoor', 'rare'),
     classWeapons: {
       warrior: 'stormforged_warrior_weapon',
       priest: 'stormforged_priest_weapon',
@@ -171,6 +173,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
   muireann_loot: {
     id: 'muireann_loot',
     goldMultiplier: 1.2,
+    classTomes: zoneTomes('ardmoor', 'epic'),
     classWeapons: {
       warrior: 'gravebound_warrior_weapon',
       priest: 'gravebound_priest_weapon',
@@ -189,6 +192,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
   fiachra_loot: {
     id: 'fiachra_loot',
     goldMultiplier: 1.2,
+    classTomes: zoneTomes('reach', 'rare'),
     classWeapons: {
       warrior: 'tidewrought_warrior_weapon',
       priest: 'tidewrought_priest_weapon',
@@ -207,6 +211,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
   old_cauldron_loot: {
     id: 'old_cauldron_loot',
     goldMultiplier: 1.2,
+    classTomes: zoneTomes('reach', 'epic'),
     classWeapons: {
       warrior: 'wraithbound_warrior_weapon',
       priest: 'wraithbound_priest_weapon',
@@ -225,6 +230,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
   ruadhan_loot: {
     id: 'ruadhan_loot',
     goldMultiplier: 1.2,
+    classTomes: zoneTomes('caer_dubh', 'rare'),
     classWeapons: {
       warrior: 'dread_warrior_weapon',
       priest: 'dread_priest_weapon',
@@ -243,6 +249,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
   donnchadh_loot: {
     id: 'donnchadh_loot',
     goldMultiplier: 1.2,
+    classTomes: zoneTomes('caer_dubh', 'epic'),
     classWeapons: {
       warrior: 'godsbane_warrior_weapon',
       priest: 'godsbane_priest_weapon',
@@ -529,10 +536,20 @@ function generatedLoot(
   merchantGoodId: string,
   gear: string[],
   goldMultiplier?: number,
+  /**
+   * Zone whose RARE skill tome this mob can drop, at long odds.
+   *
+   * Only ★3 and ★4 camps carry one. The zone's ★5 boss guarantees the same
+   * tome, so this is the grinder's path to it rather than a second source of
+   * something new — a skill gated behind exactly one kill is a skill a player
+   * can get permanently stuck without.
+   */
+  tomeZoneId?: string,
 ): LootTable {
   return {
     id,
     ...(goldMultiplier ? { goldMultiplier } : {}),
+    ...(tomeZoneId ? { classTomes: zoneTomes(tomeZoneId, 'rare'), classTomeChance: 0.02 } : {}),
     entries: [
       { itemId: merchantGoodId, chance: 0.55, min: 1, max: 2 },
       // Four pieces at 4.5% each keeps total gear chance at 18%, comfortably

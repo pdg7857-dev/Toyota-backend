@@ -86,6 +86,13 @@ export interface ItemDef {
   classes?: ClassId[];
   /** Marks an item whose only purpose is to be sold. */
   merchantGood?: boolean;
+  /**
+   * Skill this item teaches when used. Consumed on learning.
+   *
+   * Tomes are class-locked through `classes` for the same reason weapons are:
+   * a reward you cannot use is not a reward.
+   */
+  teaches?: string;
   attributes?: Partial<Attributes>;
   damageMin?: number;
   damageMax?: number;
@@ -134,6 +141,16 @@ export interface SkillDef {
    * a wasted global cooldown.
    */
   lockoutMs?: number;
+  /**
+   * Item that teaches this skill, if it is not simply granted by level.
+   *
+   * A skill with `taughtBy` is invisible until you find or buy the item and
+   * learn it — that is how a zone gives you something no earlier zone could.
+   * Reaching the level is necessary but no longer sufficient.
+   */
+  taughtBy?: string;
+  /** Zone that teaches it. Undefined for the level-granted starting kit. */
+  zoneId?: string;
   description: string;
 }
 
@@ -213,6 +230,14 @@ export interface LootTable {
    * rather than a class-locked item you have to vendor.
    */
   classWeapons?: Partial<Record<ClassId, string>>;
+  /**
+   * A skill tome matched to the looting player's class, same resolution as
+   * `classWeapons`. Suppressed if that player already knows the skill, so
+   * farming a boss for its gear never buries you in tomes you cannot use.
+   */
+  classTomes?: Partial<Record<ClassId, string>>;
+  /** Odds the class tome drops at all. Omitted means guaranteed — bosses. */
+  classTomeChance?: number;
 }
 
 // --------------------------------------------------------------------------
@@ -353,6 +378,8 @@ export interface Entity {
   inventory?: ItemStack[];
   equipment?: Partial<Record<EquipSlot, string>>;
   skillCooldowns?: Record<string, number>;
+  /** Skills learned from a tome. Level-granted skills are not listed here. */
+  learnedSkills?: string[];
   /** Accepted quests and their per-objective counters. */
   quests?: QuestProgress[];
   /** Ids of quests already turned in; a quest is never repeatable. */
@@ -398,6 +425,7 @@ export type Command =
   | { t: 'useSkill'; skillId: string }
   | { t: 'loot'; id: EntityId }
   | { t: 'equip'; itemId: string }
+  | { t: 'learnSkill'; itemId: string }
   | { t: 'unequip'; slot: EquipSlot }
   | { t: 'spendPoint'; attr: keyof Attributes }
   | { t: 'sell'; vendorId: EntityId; itemId: string; qty: number }

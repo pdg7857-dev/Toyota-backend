@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { World } from '../src/sim/world.js';
 import { MAX_LEVEL, TICK_MS, castBreakChance, expectedDefense, xpToNext } from '../src/sim/formulas.js';
-import { FENMARCH, ZONES, getZone } from '../src/content/zone.js';
+import { FENMARCH, PLAYABLE_CLASSES, ZONES, getZone } from '../src/content/zone.js';
 import { HeightField, getTheme, type Clearing } from '../src/content/terrain.js';
 import { countEvents, duelZone, emptyZone, levelPlayer, simulateFight, vendorZone } from './helpers.js';
-import { buyPrice, sellPrice } from '../src/content/vendors.js';
+import { VENDORS, buyPrice, sellPrice } from '../src/content/vendors.js';
 import { getQuest } from '../src/content/quests.js';
-import { skillBarFor, getSkill } from '../src/content/skills.js';
+import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { canEquip, getItem } from '../src/content/items.js';
-import { getMob } from '../src/content/mobs.js';
+import { LOOT_TABLES, getMob } from '../src/content/mobs.js';
 import { isBoss } from '../src/sim/types.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
 
@@ -1252,5 +1252,166 @@ describe('zone terrain and theme', () => {
       expect(/terrainHeight|HeightField|heightAt/.test(src), `${path} samples terrain`).toBe(false);
       expect(/content\/terrain/.test(src), `${path} imports the theme table`).toBe(false);
     }
+  });
+});
+
+describe('zone-taught skills', () => {
+  const TAUGHT_ZONES = ['ardmoor', 'reach', 'caer_dubh'];
+
+  /** Everywhere a tome can come from: a trader's shelf or a loot table. */
+  function sources(tomeId: string): string[] {
+    const out: string[] = [];
+    for (const vendor of Object.values(VENDORS)) {
+      if (vendor.stock.includes(tomeId)) out.push(`vendor:${vendor.id}`);
+    }
+    for (const table of Object.values(LOOT_TABLES)) {
+      if (Object.values(table.classTomes ?? {}).includes(tomeId)) out.push(`loot:${table.id}`);
+      if (table.entries.some((e) => e.itemId === tomeId)) out.push(`loot:${table.id}`);
+    }
+    return out;
+  }
+
+  it('gives every class something new in every zone past the Fenmarch', () => {
+    // The level-granted kit finishes at 15. Without this, levels 16-100 add
+    // bigger numbers and no new decisions.
+    for (const zoneId of TAUGHT_ZONES) {
+      for (const cls of PLAYABLE_CLASSES) {
+        const taught = skillsTaughtBy(zoneId).filter((s) => s.classId === cls.id);
+        expect(taught.length, `${cls.name} learns nothing in ${zoneId}`).toBe(3);
+        // And they unlock inside that zone's band, not somewhere unreachable.
+        const [lo, hi] = getZone(zoneId).levelRange;
+        for (const skill of taught) {
+          expect(skill.reqLevel).toBeGreaterThanOrEqual(lo);
+          expect(skill.reqLevel).toBeLessThanOrEqual(hi);
+        }
+      }
+    }
+    // The Fenmarch teaches by level alone — it is the tutorial for the game,
+    // not for the tome system.
+    expect(skillsTaughtBy('fenmarch')).toHaveLength(0);
+  });
+
+  it('can actually be obtained — every tome has a source', () => {
+    for (const skill of Object.values(SKILLS)) {
+      if (!skill.taughtBy) continue;
+      const tome = getItem(skill.taughtBy);
+      expect(tome.teaches, `${tome.id} does not teach back`).toBe(skill.id);
+      expect(tome.classes, `${tome.id} is not locked to a class`).toEqual([skill.classId]);
+      expect(
+        sources(skill.taughtBy).length,
+        `${tome.name} drops from nowhere and no one sells it`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it('sells the cheap one and makes you kill for the rest', () => {
+    // Same rule as gear: a trader is a safety net, never a shortcut. The
+    // uncommon tome is stocked; the rare and epic ones are boss drops.
+    for (const zoneId of TAUGHT_ZONES) {
+      for (const cls of PLAYABLE_CLASSES) {
+        const [first, second, third] = skillsTaughtBy(zoneId).filter((s) => s.classId === cls.id);
+        expect(getItem(first!.taughtBy!).quality).toBe('uncommon');
+        expect(sources(first!.taughtBy!).some((s) => s.startsWith('vendor:'))).toBe(true);
+
+        for (const skill of [second!, third!]) {
+          const tome = getItem(skill.taughtBy!);
+          expect(['rare', 'epic']).toContain(tome.quality);
+          expect(
+            sources(skill.taughtBy!).some((s) => s.startsWith('vendor:')),
+            `${tome.name} is on a shelf; it should be killed for`,
+          ).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('refuses to cast a skill you have not been taught', () => {
+    const world = new World({ seed: 610, zone: duelZone('crag_goat'), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 40, learned: [] });
+    const skill = skillsTaughtBy('ardmoor').find((s) => s.classId === 'warrior')!;
+
+    world.submit(player.id, { t: 'target', id: theMob(world).id });
+    world.submit(player.id, { t: 'useSkill', skillId: skill.id });
+    const refused = world.tick();
+    expect(refused.some((e) => e.t === 'error' && /have not learned/i.test(e.message))).toBe(true);
+
+    // Learn it from the tome, and the same command works.
+    world.addItem(player, { itemId: skill.taughtBy!, qty: 1 });
+    world.submit(player.id, { t: 'learnSkill', itemId: skill.taughtBy! });
+    const learned = world.tick();
+    expect(learned.some((e) => e.t === 'skillUnlocked' && e.skillId === skill.id)).toBe(true);
+    expect(player.learnedSkills).toContain(skill.id);
+    // The tome is spent.
+    expect(player.inventory?.some((s) => s.itemId === skill.taughtBy)).toBe(false);
+
+    world.advance(3000);
+    world.submit(player.id, { t: 'useSkill', skillId: skill.id });
+    const cast = world.advance(200);
+    expect(cast.some((e) => e.t === 'error' && /have not learned/i.test(e.message))).toBe(false);
+  });
+
+  it('will not teach the wrong class, the under-levelled, or the same thing twice', () => {
+    const world = new World({ seed: 611, zone: emptyZone(), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 22, learned: [] });
+    const warriorSkill = skillsTaughtBy('ardmoor').find((s) => s.classId === 'warrior')!;
+    const priestSkill = skillsTaughtBy('ardmoor').find((s) => s.classId === 'priest')!;
+    const lateSkill = skillsTaughtBy('caer_dubh').find((s) => s.classId === 'warrior')!;
+
+    for (const [itemId, pattern] of [
+      [priestSkill.taughtBy!, /means nothing/i],
+      [lateSkill.taughtBy!, /needs level/i],
+    ] as const) {
+      world.addItem(player, { itemId, qty: 1 });
+      world.submit(player.id, { t: 'learnSkill', itemId });
+      const events = world.tick();
+      expect(events.some((e) => e.t === 'error' && pattern.test(e.message))).toBe(true);
+      // A refused tome is never consumed.
+      expect(player.inventory?.some((s) => s.itemId === itemId)).toBe(true);
+    }
+
+    world.addItem(player, { itemId: warriorSkill.taughtBy!, qty: 2 });
+    world.submit(player.id, { t: 'learnSkill', itemId: warriorSkill.taughtBy! });
+    world.tick();
+    world.submit(player.id, { t: 'learnSkill', itemId: warriorSkill.taughtBy! });
+    const again = world.tick();
+    expect(again.some((e) => e.t === 'error' && /already know/i.test(e.message))).toBe(true);
+    expect(player.learnedSkills!.filter((id) => id === warriorSkill.id)).toHaveLength(1);
+  });
+
+  it('hands a boss tome to the class that killed it, and only once', () => {
+    // Close enough for a Rogue's short reach — the default duel distance is
+    // just outside it, which reads as "the boss never died".
+    const world = new World({ seed: 612, zone: duelZone('aonghus', 2), classId: 'rogue' });
+    const player = levelPlayer(world, { level: 40, learned: [] });
+    const boss = theMob(world);
+    const expected = LOOT_TABLES.aonghus_loot!.classTomes!.rogue!;
+
+    boss.health = 1;
+    world.submit(player.id, { t: 'target', id: boss.id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+    world.advance(6000);
+    expect(boss.dead).toBe(true);
+    expect(boss.corpseLoot?.some((s) => s.itemId === expected)).toBe(true);
+    // A Warrior's tome is not in there — the drop is resolved against the killer.
+    const warriorTome = LOOT_TABLES.aonghus_loot!.classTomes!.warrior!;
+    expect(boss.corpseLoot?.some((s) => s.itemId === warriorTome)).toBe(false);
+
+    // Learn it, kill the boss again, and it does not hand over a second copy.
+    player.learnedSkills = [getItem(expected).teaches!];
+    boss.dead = false;
+    boss.health = 1;
+    boss.corpseLoot = [];
+    world.submit(player.id, { t: 'target', id: boss.id });
+    world.advance(6000);
+    expect(boss.corpseLoot?.some((s) => s.itemId === expected)).toBe(false);
+  });
+
+  it('remembers what you learned across a save', () => {
+    const world = new World({ seed: 613, zone: getZone('fenmarch'), classId: 'mage' });
+    const skill = skillsTaughtBy('ardmoor').find((s) => s.classId === 'mage')!;
+    world.player.level = 30;
+    world.player.learnedSkills = [skill.id];
+    const restored = World.deserialize(world.serialize(), getZone('fenmarch'));
+    expect(restored.player.learnedSkills).toContain(skill.id);
   });
 });

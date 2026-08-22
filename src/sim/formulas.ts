@@ -248,9 +248,31 @@ export function deriveStats(input: DeriveInput): DerivedStats {
 // Both return the ★1-equivalent value; STAR_MODIFIERS is applied on top.
 // --------------------------------------------------------------------------
 
-/** Base health for a mob of this level, before star scaling. */
+/**
+ * Base health for a mob of this level, before star scaling.
+ *
+ * Linear at its base — that is the fit to the hand-tuned Fenmarch — and then
+ * up to 45% more, phased in across Ardmoor's band.
+ *
+ * The uplift is not padding. Player damage climbs superlinearly (weapon dps
+ * curve, attributes, and from Ardmoor on nine zone-taught skills), so flat
+ * linear health meant fights got SHORTER the further you got: a level-56
+ * character was killing a level-appropriate ★3 in three seconds. That was
+ * always true — it only became visible when `test/helpers.ts` started firing
+ * skills in a priority a real player would use instead of in list order.
+ * Mobs from Ardmoor south fight a far better-armed player than the Fenmarch
+ * ever does, and their health says so. Same shape as `mitigation` and
+ * `scaledDefenseBonus`, and the Fenmarch is numerically untouched either way:
+ * every one of its creatures is hand-authored and none of them read this.
+ */
 export function curveMobHealth(level: number): number {
-  return Math.round(68 + level * 13);
+  // Ramps in across Ardmoor's band, then holds. It starts at 20 rather than 25
+  // because that is where the curve is first USED: the Fenmarch's bestiary is
+  // hand-authored with explicit health and never calls this, so an early ramp
+  // costs the reference zone nothing and stops the first Ardmoor camps being
+  // the one soft spot in the game.
+  const lateFactor = 1 + Math.min(0.45, Math.max(0, level - 20) * 0.03);
+  return Math.round((68 + level * 13) * lateFactor);
 }
 
 /** Average hit for a mob of this level, before star scaling. */

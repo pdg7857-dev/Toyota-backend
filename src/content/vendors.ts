@@ -1,3 +1,4 @@
+import { zoneTomes } from './skills.js';
 import type { ItemDef, VendorDef } from '../sim/types.js';
 
 /**
@@ -9,6 +10,12 @@ import type { ItemDef, VendorDef } from '../sim/types.js';
  *
  * They are deliberately NOT a shortcut past the grind — stock tops out at the
  * uncommon tier, so rares and epics still come from killing things.
+ *
+ * That cap is why a trader can sell SKILLS as well as gear without becoming a
+ * shortcut. Each zone teaches three skills per class; the trader stocks the
+ * uncommon one, and the other two are killed for. It also finally gives gold
+ * something to do late on — a level-70 player has more coin than uses for it,
+ * and a tome is the one purchase that changes how the character plays.
  */
 
 /** What a vendor pays for an item. */
@@ -78,6 +85,8 @@ function lateVendor(
   greeting: string,
   tierAdjectives: [string, string],
   color: number,
+  /** Zone whose uncommon skill tomes this trader teaches from. */
+  zoneId: string,
 ): VendorDef {
   const stock: string[] = [];
   for (const adjective of tierAdjectives) {
@@ -87,6 +96,9 @@ function lateVendor(
     }
     for (const slot of ['head', 'chest', 'legs', 'ring']) stock.push(`${slug}_${slot}`);
   }
+  // One tome per class: the zone's first taught skill. The rare and epic ones
+  // are on its bosses, and no trader anywhere carries them.
+  stock.push(...Object.values(zoneTomes(zoneId, 'uncommon')));
   return { id, name, greeting, stock, view: { color, height: 1.82, radius: 0.45 } };
 }
 
@@ -97,6 +109,7 @@ Object.assign(VENDORS, {
     'The clans up here trade in cattle and grudges. I prefer coin.',
     ['Honed', 'Bloodiron'],
     0xc9b98d,
+    'ardmoor',
   ),
   odhran: lateVendor(
     'odhran',
@@ -104,6 +117,7 @@ Object.assign(VENDORS, {
     'Everything the tide takes, it gives back to somebody. Usually me.',
     ['Sunken', 'Tidewrought'],
     0x9fb3a8,
+    'reach',
   ),
   aoife: lateVendor(
     'aoife',
@@ -111,6 +125,7 @@ Object.assign(VENDORS, {
     'I follow the warband and bury what it leaves. Buy something useful.',
     ['Blackstone', 'Dread'],
     0xb0a8bc,
+    'caer_dubh',
   ),
 });
 

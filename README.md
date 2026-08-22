@@ -24,7 +24,8 @@ Add `?fresh` to the URL to discard your save and start over.
 | `WASD` | Move (camera-relative) |
 | Right-drag / Scroll | Orbit / zoom the camera |
 | Click or `Tab` | Target |
-| `1`–`7` | Skills |
+| `1`–`0` | Skills (first row) |
+| `Shift`+`1`–`6` | Skills (second row — what the zones taught you) |
 | `T` | Toggle auto-attack |
 | `F` | Loot a nearby corpse |
 | `E` | Trade with a nearby vendor |
@@ -51,6 +52,10 @@ Each zone looks like somewhere else, too: the Fenmarch is open moor, Ardmoor
 is broken high crags, the Sunken Wood is a drowned forest lit by its own fungus,
 and Caer Dubh is violet Otherworld twilight. Ground shape, palette, light, fog
 and scatter all come from a `ZoneTheme` in `content/terrain.ts`.
+
+Each zone also teaches three skills per class. The trader sells the first, its
+★5 boss carries the second and its ★6 elite boss the third — so what you can
+*do* changes as you travel, not just what you hit for.
 
 Each zone has a trader who also hands out work. Their quest chain walks you band
 by band toward the bosses and then points at the road onward — that is what
@@ -131,14 +136,16 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 - Tab-target combat: swing timers, hit/crit rolls, armour mitigation, level-gap
   scaling, global cooldown
 - Five playable classes with separate skill trees, weapon ladders and identities
-- 31 skills across five classes — instant, cast-time, damage-over-time,
-  heal, buff and interrupt — unlocking across the whole 1–25 band
+- 76 skills across five classes — instant, cast-time, damage-over-time,
+  heal, buff and interrupt. Six or seven per class come from levelling; the
+  other nine are **taught by the zones**, from a tome you buy from that zone's
+  trader or take off its bosses
 - Mob abilities: telegraphed dodgeable AoEs, interruptible heals and summons,
   enrage thresholds, adds that despawn with their summoner and drop no loot
 - Mob AI: aggro radius, threat tables, chase, leash-and-heal, respawn timers
 - 39 creatures across ★1–★6 including 8 bosses, 142 items, class-aware boss drops
 - Four zones with overlapping level bands and travel between them, each with
-  its own terrain, palette, lighting and scatter
+  its own terrain, palette, lighting, scatter and skills to learn
 - Quest chains per zone: kill, collect and travel objectives, chained by
   prerequisite, with class-matched rewards
 - Levelling to 100, spendable attribute points, skill unlocks
@@ -147,7 +154,7 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 ## Development
 
 ```bash
-npm run verify     # typecheck + 135 unit and balance tests
+npm run verify     # typecheck + 144 unit and balance tests
 npm run smoke      # plays the game in real Chromium, writes screenshots/
 ```
 

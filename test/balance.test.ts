@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { World } from '../src/sim/world.js';
-import { duelZone, levelPlayer, simulateFight, type FightResult } from './helpers.js';
+import { duelZone, learnedAt, levelPlayer, simulateFight, type FightResult } from './helpers.js';
 import {
   MAX_EQUIPMENT_DROP_CHANCE,
   MAX_LEVEL,
@@ -16,7 +16,7 @@ import { FENMARCH, PLAYABLE_CLASSES, ZONES } from '../src/content/zone.js';
 import { QUESTS } from '../src/content/quests.js';
 import { ITEMS, WEAPON_LADDER, canEquip, gearSetFor, getItem } from '../src/content/items.js';
 import { MAX_STOCK_QUALITY, VENDORS, buyPrice, sellPrice } from '../src/content/vendors.js';
-import { skillBarFor, skillsForClass } from '../src/content/skills.js';
+import { skillBarFor, skillsForClass, skillsTaughtBy } from '../src/content/skills.js';
 
 /**
  * Balance is measured, not guessed.
@@ -38,6 +38,8 @@ interface Encounter {
   dodge?: boolean;
   classId?: ClassId;
   interruptSkill?: string;
+  /** Taught skills the character knows; defaults to everything for the level. */
+  learned?: string[];
 }
 
 interface Summary {
@@ -60,7 +62,11 @@ function runEncounter(enc: Encounter, trials = TRIALS): Summary {
       zone: duelZone(enc.mobId),
       classId: enc.classId ?? 'warrior',
     });
-    levelPlayer(world, { level: enc.level, gear: enc.gear });
+    levelPlayer(world, {
+      level: enc.level,
+      gear: enc.gear,
+      ...(enc.learned ? { learned: enc.learned } : {}),
+    });
     results.push(
       simulateFight(world, {
         skills: enc.skills,
@@ -849,6 +855,64 @@ describe('every class is viable', () => {
 // Vendors close the economy: gold gets a sink, merchant goods get a buyer.
 // --------------------------------------------------------------------------
 
+describe('zone-taught skills are worth going to get', () => {
+  /**
+   * The same shape as the dodge and interrupt comparisons: measure the player
+   * who did the thing against the player who did not.
+   *
+   * A skill you cross a zone and kill a boss for has to be visibly better than
+   * not having it, or the tome is just an item with extra steps.
+   */
+  it('measurably beats the level-granted kit alone', () => {
+    const rows: string[] = [];
+    for (const [level, mobId] of [
+      [40, 'clan_berserker'],
+      [70, 'grey_seal_bull'],
+      [100, 'fort_warden'],
+    ] as const) {
+      for (const cls of PLAYABLE_CLASSES) {
+        const untaught = runEncounter(
+          {
+            name: cls.name,
+            level,
+            gear: gearSetFor(cls.id, level),
+            mobId,
+            skills: skillsForClass(cls.id, level).map((sk) => sk.id),
+            classId: cls.id,
+            learned: [],
+          },
+          20,
+        );
+        const taught = runEncounter(
+          {
+            name: cls.name,
+            level,
+            gear: gearSetFor(cls.id, level),
+            mobId,
+            skills: skillsForClass(cls.id, level, learnedAt(cls.id, level)).map((sk) => sk.id),
+            classId: cls.id,
+          },
+          20,
+        );
+        if (cls.id === 'warrior' || cls.id === 'rogue') {
+          rows.push(
+            `  lv${String(level).padStart(3)} ${cls.name.padEnd(8)} ` +
+              `untaught ttk ${untaught.medianTtk.toFixed(1).padStart(5)}s hp ${(untaught.medianHealthLeft * 100).toFixed(0).padStart(3)}%  ` +
+              `taught ttk ${taught.medianTtk.toFixed(1).padStart(5)}s hp ${(taught.medianHealthLeft * 100).toFixed(0).padStart(3)}%`,
+          );
+        }
+        // Faster kills, more health left, or both — but never worse.
+        const better =
+          taught.medianTtk < untaught.medianTtk * 0.95 ||
+          taught.medianHealthLeft > untaught.medianHealthLeft + 0.03;
+        expect(better, `${cls.id}'s taught kit changes nothing at ${level}`).toBe(true);
+        expect(taught.medianHealthLeft).toBeGreaterThanOrEqual(untaught.medianHealthLeft - 0.05);
+      }
+    }
+    console.log('\nTAUGHT KIT vs LEVEL KIT (Warrior and Rogue shown; all five asserted)\n' + rows.join('\n'));
+  });
+});
+
 describe('the vendor economy', () => {
   it('pays full value for merchant goods and a fraction for gear', () => {
     // Merchant goods exist to be sold, so they fetch their listed value.
@@ -906,6 +970,28 @@ describe('the vendor economy', () => {
     expect(kills).toBeLessThan(40);
   });
 
+  it('prices a zone\'s taught skill within reach of the band that teaches it', () => {
+    // A tome is the one purchase that changes how the character plays, so it
+    // is allowed to be expensive — but "expensive" has to mean a session of
+    // grinding, not a second job.
+    const rows: string[] = [];
+    for (const [zoneId, mobId] of [
+      ['ardmoor', 'hill_wolf'],
+      ['reach', 'marsh_heron'],
+      ['caer_dubh', 'blackshield_spearman'],
+    ] as const) {
+      const mob = MOBS[mobId]!;
+      const gold = goldForKill(mob.level, mob.stars);
+      const perKill = (gold.min + gold.max) / 2;
+      const tome = getItem(skillsTaughtBy(zoneId).find((sk) => sk.classId === 'warrior')!.taughtBy!);
+      const kills = buyPrice(tome) / perKill;
+      rows.push(`  ${tome.name.padEnd(28)} ${buyPrice(tome)}g = ${kills.toFixed(0)} ${mob.name} kills`);
+      expect(kills, `${tome.name} is pocket change`).toBeGreaterThan(10);
+      expect(kills, `${tome.name} costs a whole band to afford`).toBeLessThan(120);
+    }
+    console.log('\n' + rows.join('\n'));
+  });
+
   it('keeps traders clear of every camp', () => {
     // A shop you get pulled off mid-trade is not a shop.
     for (const placement of FENMARCH.vendors) {
@@ -943,7 +1029,10 @@ describe('the whole 1-100 progression', () => {
     { level: 34, mobId: 'highland_bear' },
     { level: 40, mobId: 'clan_berserker' },
     { level: 48, mobId: 'marsh_heron' },
-    { level: 56, mobId: 'smuggler_enforcer' },
+    // Tidewatch Marauder, not the Smuggler Enforcer two levels BELOW: every
+    // other checkpoint pairs you with something at your level or above, and
+    // the one that did not was measuring how fast you clear trash.
+    { level: 56, mobId: 'tidewatch_marauder' },
     { level: 64, mobId: 'great_pike' },
     { level: 70, mobId: 'grey_seal_bull' },
     { level: 78, mobId: 'blackshield_spearman' },
@@ -962,7 +1051,11 @@ describe('the whole 1-100 progression', () => {
             level,
             gear: gearSetFor(cls.id, level),
             mobId,
-            skills: skillsForClass(cls.id, level).map((sk) => sk.id),
+            // A player at this level has been through the zones that taught
+            // these, so measure the kit they would actually have. Testing the
+            // level-only kit past 40 measures a character who skipped every
+            // trader and both bosses in each zone.
+            skills: skillsForClass(cls.id, level, learnedAt(cls.id, level)).map((sk) => sk.id),
             classId: cls.id,
           },
           20,

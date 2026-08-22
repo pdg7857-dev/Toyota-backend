@@ -79,7 +79,7 @@ function neededFor(objective: QuestObjective): number {
 const COMBAT_TIMEOUT_MS = 6000;
 
 /** Save format version. Bump when the Entity shape changes. */
-const SAVE_VERSION = 4;
+const SAVE_VERSION = 5;
 
 export interface WorldOptions {
   seed: number;
@@ -139,6 +139,7 @@ export class World {
       inventory: [],
       equipment: { weapon: def.startingWeapon },
       skillCooldowns: {},
+      learnedSkills: [],
       gcdMs: 0,
       cast: null,
       moveDir: { x: 0, z: 0 },
@@ -350,6 +351,9 @@ export class World {
         break;
       case 'equip':
         this.tryEquip(e, cmd.itemId);
+        break;
+      case 'learnSkill':
+        this.tryLearnSkill(e, cmd.itemId);
         break;
       case 'unequip':
         this.tryUnequip(e, cmd.slot);
@@ -999,6 +1003,18 @@ export class World {
       if (weaponId) loot.push({ itemId: weaponId, qty: 1 });
     }
 
+    // The same resolution for a skill tome, minus anything the killer already
+    // knows — a boss you farm for its gear should not keep handing you a book
+    // you have already read.
+    if (table.classTomes && killer?.kind === 'player' && killer.classId) {
+      const tomeId = table.classTomes[killer.classId];
+      const taught = tomeId ? getItem(tomeId).teaches : undefined;
+      const known = taught ? (killer.learnedSkills ?? []).includes(taught) : true;
+      if (tomeId && !known && this.rng.chance(table.classTomeChance ?? 1)) {
+        loot.push({ itemId: tomeId, qty: 1 });
+      }
+    }
+
     for (const entry of table.entries) {
       if (!this.rng.chance(entry.chance)) continue;
       loot.push({ itemId: entry.itemId, qty: this.rng.int(entry.min, entry.max) });
@@ -1024,7 +1040,7 @@ export class World {
       this.events.push({ t: 'levelUp', entityId: player.id, level: player.level });
       this.advanceQuests(player, (o) => (o.kind === 'level' && player.level >= o.level ? 1 : 0));
 
-      for (const skill of skillsForClass(player.classId!, player.level)) {
+      for (const skill of skillsForClass(player.classId!, player.level, player.learnedSkills ?? [])) {
         if (skill.reqLevel === player.level) {
           this.events.push({ t: 'skillUnlocked', entityId: player.id, skillId: skill.id });
         }
@@ -1054,6 +1070,17 @@ export class World {
 
     if (e.level < skill.reqLevel) {
       this.events.push({ t: 'error', entityId: e.id, message: `${skill.name} is not learned yet.` });
+      return;
+    }
+    // A taught skill needs its tome as well as the level. This is the whole
+    // point of zone-taught skills: reaching 44 does not hand you the Sunken
+    // Wood's kit, going there and finding it does.
+    if (skill.taughtBy && !(e.learnedSkills ?? []).includes(skill.id)) {
+      this.events.push({
+        t: 'error',
+        entityId: e.id,
+        message: `You have not learned ${skill.name}.`,
+      });
       return;
     }
     if ((e.skillCooldowns?.[skillId] ?? 0) > 0) {
@@ -1553,6 +1580,49 @@ export class World {
     stack.qty -= qty;
     if (stack.qty <= 0) inv.splice(idx, 1);
     return true;
+  }
+
+  /**
+   * Read a tome and learn the skill it teaches.
+   *
+   * Every failure path reports why. A tome is a rare, expensive thing — one
+   * that silently does nothing when clicked reads as the game being broken.
+   */
+  private tryLearnSkill(player: Entity, itemId: string): void {
+    const def = getItem(itemId);
+    if (!def.teaches) {
+      this.events.push({ t: 'error', entityId: player.id, message: `${def.name} teaches nothing.` });
+      return;
+    }
+    const skill = getSkill(def.teaches);
+    if (!canEquip(def, player.classId)) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `${def.name} means nothing to a ${player.classId ?? 'character'}.`,
+      });
+      return;
+    }
+    if (player.level < skill.reqLevel) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `${skill.name} needs level ${skill.reqLevel}.`,
+      });
+      return;
+    }
+    player.learnedSkills = player.learnedSkills ?? [];
+    if (player.learnedSkills.includes(skill.id)) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `You already know ${skill.name}.`,
+      });
+      return;
+    }
+    if (!this.removeItem(player, itemId, 1)) return;
+    player.learnedSkills.push(skill.id);
+    this.events.push({ t: 'skillUnlocked', entityId: player.id, skillId: skill.id });
   }
 
   private tryEquip(player: Entity, itemId: string): void {

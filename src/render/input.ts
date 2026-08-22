@@ -13,6 +13,9 @@ const VENDOR_RANGE = 5.5;
  * Translates raw browser input into sim Commands. Nothing here touches world
  * state — it only ever calls `emit`.
  */
+/** Slot index the second hotkey row starts at — Shift+1 is the eleventh skill. */
+const SECOND_ROW_START = 10;
+
 export class InputController {
   private keys = new Set<string>();
   private lastMove = { x: 0, z: 0 };
@@ -55,8 +58,15 @@ export class InputController {
       case 'Digit4':
       case 'Digit5':
       case 'Digit6':
-      case 'Digit7': {
-        const skillId = this.hud.skillForSlot(Number(e.code.slice(5)) - 1);
+      case 'Digit7':
+      case 'Digit8':
+      case 'Digit9':
+      case 'Digit0': {
+        // 1-9 then 0 fire the first row; holding shift reaches the second,
+        // which is where a zone's taught skills land.
+        const digit = Number(e.code.slice(5));
+        const slot = digit === 0 ? 9 : digit - 1;
+        const skillId = this.hud.skillForSlot(e.shiftKey ? SECOND_ROW_START + slot : slot);
         if (skillId) this.emit({ t: 'useSkill', skillId });
         break;
       }

@@ -3,7 +3,7 @@ import { PRIMARY_ATTRIBUTE, POINTS_PER_LEVEL, TICK_MS } from '../src/sim/formula
 import type { Attributes, ClassId, Entity, SimEvent } from '../src/sim/types.js';
 import { CLASSES, type ZoneDef } from '../src/content/zone.js';
 import { getMob } from '../src/content/mobs.js';
-import { getSkill } from '../src/content/skills.js';
+import { SKILLS, getSkill } from '../src/content/skills.js';
 
 /** A bare arena with one mob a couple of metres away — no scenery, no neighbours. */
 export function duelZone(mobId: string, distance = 2.5): ZoneDef {
@@ -68,6 +68,25 @@ export interface LevelOptions {
   level: number;
   /** Item ids to equip before the fight. */
   gear?: string[];
+  /**
+   * Taught skills the character knows. Defaults to every one their level
+   * qualifies for — see `learnedAt`.
+   */
+  learned?: string[];
+}
+
+/**
+ * Every zone-taught skill a character of this level would have.
+ *
+ * Zone-taught skills need a tome as well as a level, and the harness has to
+ * grant them explicitly: without this a levelled test character silently fails
+ * every `useSkill` for a taught skill, and the whole feature measures as though
+ * it does not exist. Which is exactly what it did the first time.
+ */
+export function learnedAt(classId: ClassId, level: number): string[] {
+  return Object.values(SKILLS)
+    .filter((s) => s.classId === classId && s.taughtBy && s.reqLevel <= level)
+    .map((s) => s.id);
 }
 
 /** Fast-forward a freshly built player to `level` with the given gear. */
@@ -75,6 +94,7 @@ export function levelPlayer(world: World, opts: LevelOptions): Entity {
   const player = world.player;
   player.level = opts.level;
   const classId = player.classId ?? 'warrior';
+  player.learnedSkills = opts.learned ?? learnedAt(classId, opts.level);
   const base = CLASSES[classId].baseAttributes;
   const build = buildFor(classId, opts.level);
   player.attributes = {
@@ -210,18 +230,34 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
     if (wantInterrupt) {
       world.submit(player.id, { t: 'useSkill', skillId: opts.interruptSkill! });
     } else {
-      for (const skillId of skills) {
-        if ((player.skillCooldowns?.[skillId] ?? 0) > 0) continue;
+      const ready = skills.filter((skillId) => {
+        if ((player.skillCooldowns?.[skillId] ?? 0) > 0) return false;
         const skill = getSkill(skillId);
         // Don't heal at full health. Casting locks out auto-attack, so firing a
         // heal on cooldown regardless of need costs real damage and drags the
         // fight out — which then costs MORE health.
-        if (skill.kind === 'heal' && healthFraction > 0.7) continue;
+        if (skill.kind === 'heal' && healthFraction > 0.7) return false;
         // Don't spend an interrupt on nothing: it burns energy and a global
         // cooldown for no effect, which penalised every class that has one.
-        if (skill.kind === 'interrupt' && !casting?.interruptible) continue;
-        world.submit(player.id, { t: 'useSkill', skillId });
-      }
+        if (skill.kind === 'interrupt' && !casting?.interruptible) return false;
+        // Don't burn a defensive cooldown while nothing is threatening you.
+        // Firing one on cooldown costs a global cooldown that would otherwise
+        // have been damage, which measured as "the taught defensive skills
+        // make you slightly worse".
+        if (skill.kind === 'buff' && skill.defenseBonus && healthFraction > 0.65) return false;
+        return true;
+      });
+      // Only ONE skill can clear the global cooldown per window, and the sim
+      // takes them in submitted order — so submission order IS the rotation.
+      //
+      // Left in list order that means "always the lowest-level skill you own",
+      // which quietly made every skill learned later in the game invisible to
+      // the balance suite: they sat at the end of the list and never once got
+      // pressed. Longest cooldown first is both a truer floor and the order a
+      // real player uses — spend the big button when it is up, filler when it
+      // is not.
+      ready.sort((a, b) => getSkill(b).cooldownMs - getSkill(a).cooldownMs);
+      for (const skillId of ready) world.submit(player.id, { t: 'useSkill', skillId });
     }
 
     if (opts.dodge) {

@@ -1,6 +1,8 @@
 import { World } from './sim/world.js';
 import { TICK_MS } from './sim/formulas.js';
 import { CLASSES, FENMARCH } from './content/zone.js';
+import { canEquip, getItem } from './content/items.js';
+import { getVendor } from './content/vendors.js';
 import { SceneRig } from './render/scene.js';
 import { ViewManager } from './render/views.js';
 import { Hud } from './render/hud.js';
@@ -139,7 +141,17 @@ async function boot(): Promise<void> {
   // (a boss fight, a given level) without a save-scumming detour, and gives you
   // a console foothold when something looks wrong in play. Read-only as far as
   // the game is concerned — anything that mutates should go through `submit`.
-  (window as unknown as Record<string, unknown>).__game = { world, views, rig, hud };
+  (window as unknown as Record<string, unknown>).__game = {
+    world,
+    views,
+    rig,
+    hud,
+    // Content lookups, so a test can ask what a trader stocks or what an item
+    // does without reaching into module internals from the page.
+    vendorStock: (vendorId: string) => getVendor(vendorId).stock,
+    itemOf: (itemId: string) => getItem(itemId),
+    canUse: (itemId: string) => canEquip(getItem(itemId), world.player.classId),
+  };
 
   window.addEventListener('beforeunload', () => save(world));
   requestAnimationFrame(frame);

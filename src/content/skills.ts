@@ -3,12 +3,14 @@ import type { ClassId, SkillDef } from '../sim/types.js';
 /**
  * Skill registry.
  *
- * Unlocks are spread across the 1–25 band so a grinding player always has a
- * next thing coming, rather than finishing their kit before the halfway point.
+ * Two halves. The starting kit below is granted by LEVEL and is spread across
+ * the Fenmarch's 1–25 band, so a grinding player always has a next thing coming
+ * rather than finishing their kit before the halfway point. Everything after
+ * that is TAUGHT by a zone — see the second half of this file.
  *
- * Both playable classes get an interrupt, but they are not the same tool: the
- * Priest's is long-ranged, comes earlier and locks out for longer — cutting a
- * cast short is the class's identity, not a bonus button.
+ * Every class gets an interrupt, but they are not the same tool: the Priest's
+ * is long-ranged, comes earlier and locks out for longer — cutting a cast short
+ * is the class's identity, not a bonus button.
  */
 export const SKILLS: Record<string, SkillDef> = {
   // === WARRIOR =============================================================
@@ -523,16 +525,310 @@ export const SKILLS: Record<string, SkillDef> = {
   },
 };
 
+// === ZONE-TAUGHT SKILLS ====================================================
+//
+// The starting kit above is granted by level and finishes at 15. Across a
+// hundred-level game that meant seventy-five levels during which nothing new
+// ever appeared on the bar — you got bigger numbers and no new decisions.
+//
+// So every zone past the Fenmarch TEACHES three skills per class, and a skill
+// is taught by an item, not by a level:
+//
+//   | Tome | Where it comes from |
+//   |---|---|
+//   | uncommon | the zone's trader sells it |
+//   | rare | the zone's ★5 boss, or rarely from its ★3–★4 camps |
+//   | epic | the zone's ★6 elite boss, and nowhere else |
+//
+// That is deliberately the same shape as the gear rule — quality climbs with
+// difficulty, the vendor never stocks above uncommon — so learning a zone's
+// kit is a reason to fight its bosses rather than a reason to grind its trash.
+//
+// Generated rather than hand-written for the same reason the late weapon
+// ladders are: five classes times nine skills is forty-five sets of numbers,
+// and a hand-typed one that lands 20% high is a class that quietly outscales
+// the rest. Every class runs the same table, so parity is structural.
+
+/** What one zone teaches: three tiers, at the levels its bosses sit at. */
+interface TaughtTier {
+  zoneId: string;
+  /** Level the skill unlocks at — set just past the boss that drops its tome. */
+  level: number;
+  quality: 'uncommon' | 'rare' | 'epic';
+  role: 'buff-defense' | 'buff-damage' | 'damage' | 'heavy' | 'dot' | 'heal' | 'interrupt';
+}
+
+const TAUGHT_TIERS: TaughtTier[] = [
+  // Ardmoor: hold the line on open ground, then hit harder.
+  { zoneId: 'ardmoor', level: 22, quality: 'uncommon', role: 'buff-defense' },
+  { zoneId: 'ardmoor', level: 31, quality: 'rare', role: 'damage' },
+  { zoneId: 'ardmoor', level: 40, quality: 'epic', role: 'dot' },
+  // The Sunken Wood: attrition. Sustain, pressure, then a burst window.
+  { zoneId: 'reach', level: 44, quality: 'uncommon', role: 'heal' },
+  { zoneId: 'reach', level: 56, quality: 'rare', role: 'damage' },
+  { zoneId: 'reach', level: 70, quality: 'epic', role: 'buff-damage' },
+  // Caer Dubh: control, then everything you have.
+  { zoneId: 'caer_dubh', level: 72, quality: 'uncommon', role: 'interrupt' },
+  { zoneId: 'caer_dubh', level: 86, quality: 'rare', role: 'damage' },
+  { zoneId: 'caer_dubh', level: 100, quality: 'epic', role: 'heavy' },
+];
+
+/** How each class delivers a skill: reach, damage school, and its buff floor. */
+const CLASS_FEEL: Record<
+  ClassId,
+  { range: number; damageType: SkillDef['damageType']; baseDefense: number; tomeNoun: string }
+> = {
+  warrior: { range: 2.8, damageType: 'physical', baseDefense: 40, tomeNoun: 'Warscroll' },
+  priest: { range: 9, damageType: 'nature', baseDefense: 55, tomeNoun: 'Psalter' },
+  ranger: { range: 14, damageType: 'physical', baseDefense: 45, tomeNoun: 'Field Notes' },
+  rogue: { range: 2.5, damageType: 'physical', baseDefense: 75, tomeNoun: 'Cipher' },
+  mage: { range: 12, damageType: 'fire', baseDefense: 70, tomeNoun: 'Grimoire' },
+};
+
+/**
+ * Names, nine per class, in tier order. Hand-written because this is the one
+ * part a player actually reads — generated names all sound like each other,
+ * and the whole point is that Ardmoor's kit feels like Ardmoor's.
+ */
+const TAUGHT_NAMES: Record<ClassId, string[]> = {
+  warrior: [
+    'Cairn Stance', 'Hillbreaker', 'Grudge Wound',
+    'Second Breath', 'Drowned Cleave', 'Blood Rising',
+    'Iron Silence', 'Blackshield Blow', 'Last Word',
+  ],
+  priest: [
+    'Stone Vigil', 'Highland Rite', 'Slow Penance',
+    'Wellspring', 'Drowned Litany', 'Kindled Faith',
+    'Binding Word', 'Duskfall Judgement', 'Final Prayer',
+  ],
+  ranger: [
+    'Crag Cover', 'Scree Shot', 'Bleeding Mark',
+    'Field Suture', 'Bogmire Volley', 'Hunting Fever',
+    'Snarecall', 'Duskloosed Arrow', 'Last Quiver',
+  ],
+  rogue: [
+    'Scree Step', 'Cutthroat', 'Slow Bleed',
+    'Stolen Breath', 'Drowned Blade', 'Feverwork',
+    'Throatlock', 'Duskstrike', 'Last Cut',
+  ],
+  mage: [
+    'Hoarfrost Ward', 'Craglance', 'Witchfire',
+    'Kindled Ember', 'Bogmire Bolt', 'Wildsurge',
+    'Unmaking', 'Duskbolt', 'Last Star',
+  ],
+};
+
+/** Flavour line per role, filled with the class's own noun. */
+function taughtDescription(role: TaughtTier['role'], power: string): string {
+  switch (role) {
+    case 'buff-defense':
+      return `Set yourself against what is coming. ${power}`;
+    case 'buff-damage':
+      return `Everything lands harder for a moment. ${power}`;
+    case 'damage':
+      return `A committed blow taught in this country. ${power}`;
+    case 'heavy':
+      return `The last thing you have. ${power}`;
+    case 'dot':
+      return `A wound that keeps working. ${power}`;
+    case 'heal':
+      return `Buy yourself the time to finish this. ${power}`;
+    case 'interrupt':
+      return `Cut a spell off at the root. ${power}`;
+  }
+}
+
+/** The tome item id for a taught skill. `items.ts` builds the item from it. */
+export function tomeIdFor(skillId: string): string {
+  return `tome_${skillId}`;
+}
+
+function buildTaughtSkills(): Record<string, SkillDef> {
+  const out: Record<string, SkillDef> = {};
+
+  for (const classId of Object.keys(CLASS_FEEL) as ClassId[]) {
+    const feel = CLASS_FEEL[classId];
+    TAUGHT_TIERS.forEach((tier, i) => {
+      const name = TAUGHT_NAMES[classId][i]!;
+      const id = `${classId}_${slug(name)}`;
+      const level = tier.level;
+      const common = {
+        id,
+        name,
+        classId,
+        reqLevel: level,
+        zoneId: tier.zoneId,
+        taughtBy: tomeIdFor(id),
+      };
+
+      switch (tier.role) {
+        case 'buff-defense':
+          out[id] = {
+            ...common,
+            energyCost: 22,
+            cooldownMs: 30000,
+            castMs: 0,
+            interruptible: false,
+            range: 0,
+            kind: 'buff',
+            // A FLAT base, deliberately: `scaledDefenseBonus` already grows a
+            // buff with level. Scaling the base too was what previously made
+            // high-level characters unhittable.
+            defenseBonus: feel.baseDefense + 25,
+            durationMs: 14000,
+            tickMs: 1000,
+            description: taughtDescription(tier.role, `+${feel.baseDefense + 25} defence for 14s.`),
+          };
+          break;
+        case 'buff-damage':
+          out[id] = {
+            ...common,
+            energyCost: 30,
+            cooldownMs: 40000,
+            castMs: 0,
+            interruptible: false,
+            range: 0,
+            kind: 'buff',
+            damageMultiplier: 1.55,
+            durationMs: 10000,
+            tickMs: 1000,
+            description: taughtDescription(tier.role, '+55% damage for 10s.'),
+          };
+          break;
+        case 'damage':
+        case 'heavy': {
+          const heavy = tier.role === 'heavy';
+          const wm = heavy ? 4.4 : 2.6 + Math.floor(i / 3) * 0.4;
+          out[id] = {
+            ...common,
+            // Deliberately expensive and slow to come back. A taught damage
+            // skill is a spike, not filler: with three zones' worth of them
+            // plus the level-15 capstone, cheap short-cooldown nukes let a
+            // Ranger open with four in a row and delete a level-appropriate
+            // ★3 in three seconds. Energy is what stops the opener being the
+            // whole fight.
+            energyCost: heavy ? 52 : 40,
+            cooldownMs: heavy ? 45000 : 24000,
+            castMs: heavy ? 1500 : 0,
+            interruptible: heavy,
+            range: feel.range,
+            kind: 'damage',
+            weaponMultiplier: wm,
+            flatPower: Math.round(level * (heavy ? 1.3 : 0.9)),
+            damageType: feel.damageType,
+            threatBonus: heavy ? 40 : 25,
+            description: taughtDescription(
+              tier.role,
+              `${Math.round(wm * 100)}% weapon damage${heavy ? ', but it must be cast.' : '.'}`,
+            ),
+          };
+          break;
+        }
+        case 'dot':
+          out[id] = {
+            ...common,
+            energyCost: 24,
+            cooldownMs: 15000,
+            castMs: 0,
+            interruptible: false,
+            range: feel.range,
+            kind: 'dot',
+            flatPower: Math.round(level * 0.6),
+            damageType: feel.damageType,
+            durationMs: 12000,
+            tickMs: 3000,
+            description: taughtDescription(tier.role, 'Damage over 12s, ignores armour.'),
+          };
+          break;
+        case 'heal':
+          out[id] = {
+            ...common,
+            energyCost: 30,
+            cooldownMs: 18000,
+            castMs: 1600,
+            interruptible: true,
+            range: 0,
+            kind: 'heal',
+            flatPower: Math.round(level * 3),
+            description: taughtDescription(tier.role, 'A strong heal, but it can be broken.'),
+          };
+          break;
+        case 'interrupt':
+          out[id] = {
+            ...common,
+            energyCost: 18,
+            cooldownMs: 11000,
+            castMs: 0,
+            interruptible: false,
+            range: feel.range + 3,
+            kind: 'interrupt',
+            lockoutMs: 12000,
+            threatBonus: 12,
+            description: taughtDescription(tier.role, 'Stops it and locks it out for 12s.'),
+          };
+          break;
+      }
+    });
+  }
+  return out;
+}
+
+function slug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+}
+
+Object.assign(SKILLS, buildTaughtSkills());
+
+/** Every skill a zone teaches, for vendors, loot tables and tests. */
+export function skillsTaughtBy(zoneId: string): SkillDef[] {
+  return Object.values(SKILLS)
+    .filter((s) => s.zoneId === zoneId)
+    .sort((a, b) => a.reqLevel - b.reqLevel);
+}
+
+/** The tome that teaches a zone's tier, per class: [uncommon, rare, epic]. */
+export function zoneTomes(zoneId: string, quality: 'uncommon' | 'rare' | 'epic'): Partial<Record<ClassId, string>> {
+  const index = { uncommon: 0, rare: 1, epic: 2 }[quality];
+  const out: Partial<Record<ClassId, string>> = {};
+  for (const classId of Object.keys(CLASS_FEEL) as ClassId[]) {
+    const forClass = skillsTaughtBy(zoneId).filter((s) => s.classId === classId);
+    const skill = forClass[index];
+    if (skill?.taughtBy) out[classId] = skill.taughtBy;
+  }
+  return out;
+}
+
+/** Noun for the item that teaches a class its skills — flavour only. */
+export function tomeNoun(classId: ClassId): string {
+  return CLASS_FEEL[classId].tomeNoun;
+}
+
 export function getSkill(id: string): SkillDef {
   const skill = SKILLS[id];
   if (!skill) throw new Error(`Unknown skill: ${id}`);
   return skill;
 }
 
-/** Skills a class has unlocked at a given level, in unlock order. */
-export function skillsForClass(classId: string, level: number): SkillDef[] {
+/**
+ * Skills a class can actually cast right now.
+ *
+ * Level is necessary but not sufficient: a taught skill also has to have been
+ * learned from its tome. `known` defaults to empty, which means "level-granted
+ * kit only" — the right answer for a fresh character and for any caller that
+ * does not care about tomes.
+ */
+export function skillsForClass(
+  classId: string,
+  level: number,
+  known: readonly string[] = [],
+): SkillDef[] {
   return Object.values(SKILLS)
-    .filter((s) => s.classId === classId && s.reqLevel <= level)
+    .filter(
+      (s) =>
+        s.classId === classId &&
+        s.reqLevel <= level &&
+        (!s.taughtBy || known.includes(s.id)),
+    )
     .sort((a, b) => a.reqLevel - b.reqLevel);
 }
 

@@ -153,14 +153,36 @@ canvas { display: block; }
 
 /* ----------------------------------------------------------------- skill bar */
 
+/*
+ * Two rows: keys 1-0 on the first, Shift+1-6 on the second.
+ *
+ * One row was enough while a class had seven skills. Zone-taught skills take
+ * that to sixteen, and sixteen slots side by side is wider than the screen.
+ */
 #skill-bar {
   position: absolute;
   left: 50%;
   bottom: 46px;
   transform: translateX(-50%);
   display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 5px;
+}
+
+.skill-row {
+  display: flex;
   gap: 7px;
 }
+
+/* The second row is a shade smaller: it is the later, less-used half. */
+.skill-row.secondary .slot {
+  width: 46px;
+  height: 44px;
+}
+
+.slot.unlearned { opacity: 0.4; }
+.slot.unlearned .slot-name { color: #8d7fa8; }
 
 .slot {
   position: relative;

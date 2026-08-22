@@ -1,3 +1,4 @@
+import { skillsTaughtBy, tomeNoun } from './skills.js';
 import type { Attributes, ClassId, DamageType, ItemDef, ItemQuality } from '../sim/types.js';
 
 /**
@@ -751,6 +752,55 @@ export function gearSetFor(classId: ClassId, level: number): string[] {
     pick(ARMOR_LADDER.ring),
   ];
 }
+
+// === SKILL TOMES ==========================================================
+//
+// One item per taught skill, generated from the skill itself so a skill can
+// never exist with no way to learn it (a test asserts exactly that).
+//
+// Price is what makes the uncommon tier a real decision rather than a
+// formality: a zone's first skill costs roughly a band's worth of pocket
+// change, which is finally something to spend gold ON at level 70. The rare
+// and epic tomes are not stocked by anyone — they are killed for.
+
+/** Value of a tome by quality, scaled by the level it unlocks at. */
+function tomeValue(level: number, quality: ItemQuality): number {
+  const qualityMultiplier = { common: 1, uncommon: 1.6, rare: 3, epic: 5 }[quality];
+  return Math.round(Math.pow(level, 1.85) * 1.1 * qualityMultiplier);
+}
+
+/** Which tier a taught skill sits at within its zone, by unlock order. */
+function buildTomes(): Record<string, ItemDef> {
+  const out: Record<string, ItemDef> = {};
+  const qualities: ItemQuality[] = ['uncommon', 'rare', 'epic'];
+
+  for (const zoneId of TAUGHT_ZONE_IDS) {
+    const taught = skillsTaughtBy(zoneId);
+    for (const classId of PLAYABLE_CLASS_IDS) {
+      const forClass = taught.filter((s) => s.classId === classId);
+      forClass.forEach((skill, tier) => {
+        const quality = qualities[tier] ?? 'epic';
+        out[skill.taughtBy!] = {
+          id: skill.taughtBy!,
+          name: `${tomeNoun(classId)}: ${skill.name}`,
+          slot: null,
+          quality,
+          classes: [classId],
+          value: tomeValue(skill.reqLevel, quality),
+          teaches: skill.id,
+        };
+      });
+    }
+  }
+  return out;
+}
+
+/** Zones that teach skills. The Fenmarch grants its kit by level instead. */
+const TAUGHT_ZONE_IDS = ['ardmoor', 'reach', 'caer_dubh'];
+
+const PLAYABLE_CLASS_IDS: ClassId[] = ['warrior', 'priest', 'ranger', 'rogue', 'mage'];
+
+Object.assign(ITEMS, buildTomes());
 
 export function getItem(id: string): ItemDef {
   const item = ITEMS[id];

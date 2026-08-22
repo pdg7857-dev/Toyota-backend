@@ -103,6 +103,46 @@ Collection objectives read the bags directly rather than counting pickups, so
 items gathered before accepting still count. That reads as a bug every time it
 does not work.
 
+## Each zone teaches you something
+
+The level-granted kit finishes at 15. Over a hundred-level game that meant
+seventy-five levels of bigger numbers and no new decisions, so every zone past
+the Fenmarch **teaches three skills per class**, and a skill is taught by an
+*item*, not by a level. Reaching 44 does not hand you the Sunken Wood's kit;
+going there and finding it does.
+
+| Tome | Where it comes from |
+|---|---|
+| uncommon | the zone's trader sells it |
+| rare | the zone's ★5 boss, or 2% from its ★3–★4 camps |
+| epic | the zone's ★6 elite boss, and nowhere else |
+
+That is deliberately the same shape as the loot rule — quality climbs with
+difficulty and no trader ever stocks above uncommon — so learning a zone's kit
+is a reason to fight its bosses rather than to farm its trash. It also finally
+gives gold something to do: a level-70 player has more coin than uses for it,
+and a tome is the one purchase that changes how the character plays.
+
+A rare tome is on the ★5 boss **and** on the camps around it on purpose. A skill
+gated behind exactly one kill is a skill a player can get permanently stuck
+without.
+
+Mechanically: `SkillDef.taughtBy` names an item, `ItemDef.teaches` names the
+skill, and the pair is generated from one table so neither can exist without the
+other (a test walks every taught skill and fails if its tome drops from nowhere).
+`Entity.learnedSkills` is what you know; `LootTable.classTomes` resolves against
+the killer's class the same way `classWeapons` does, and is suppressed if they
+already know it — farming a boss for gear should not bury you in books you have
+read.
+
+The nine taught skills are **generated** for the same reason the late weapon
+ladders are: five classes times nine skills is forty-five sets of numbers, and
+a hand-typed one that lands 20% high is a class that quietly outscales the rest.
+Only the names are hand-written, because names are the part a player reads.
+
+Sixteen skills do not fit one row of hotkeys, so the bar is two: **1–0** and
+**Shift+1–6**.
+
 ## The grind is intentional
 
 This game is deliberately grind-heavy, and kills-per-level must keep climbing
@@ -137,6 +177,10 @@ fails if any tier spreads more than 40%.
 
 Every boss declares `classWeapons` on its loot table, resolved against whoever
 lands the kill, so the guaranteed epic is always something you can actually use.
+
+Each class has six or seven skills granted by level (all by 15) and nine more
+**taught by the zones** — see "Each zone teaches you something". Sixteen skills,
+two hotkey rows.
 
 **Every class gets an interrupt** and a way to survive a spike (a heal or a
 defence buff) — both asserted by test, because a class missing either cannot
@@ -242,6 +286,12 @@ tests caught their absence:
   numerically untouched.
 - **Accuracy is level-gap only** — the old `(attack - defense)` term was a
   double-dip on `defense` and, at the cap, had mobs landing 31% of swings.
+- **The late mob health curve** (`curveMobHealth` above level 20) — player
+  damage climbs superlinearly and mob health was flat linear, so fights got
+  *shorter* the further you got: a level-56 character killed a level-appropriate
+  ★3 in three seconds. This was always true and was invisible until the harness
+  started firing skills in a sensible order (below). The Fenmarch is untouched
+  either way — its bestiary is hand-authored and never reads the curve.
 - **Rank/star modifiers** — so level scaling can stay gentle enough to leave a
   "close fight" band instead of flipping impossible-to-trivial in four levels.
 - **A weak stat term in `hitChance`** — `defense` already drives `mitigation()`,
@@ -300,17 +350,24 @@ file changes** — the events that drive animation (`swing`, `castBegin`,
 ## Verifying a change
 
 ```bash
-npm run verify        # typecheck + 135 unit and balance tests
+npm run verify        # typecheck + 144 unit and balance tests
 npm run build && npm run preview &
 npm run smoke         # real browser, plays the game, writes screenshots/
 ```
 
-The balance suite is also where four separate HARNESS bugs were caught, each of
+The balance suite is also where six separate HARNESS bugs were caught, each of
 which had looked like a game balance problem: `levelPlayer` spending points into
 an attribute three classes do not use; the setup tick killing low-Vitality
-classes before the fight began; firing heals on cooldown at full health; and
-spamming the kit so the global cooldown was never free for an interrupt. When a
-class looks weak, suspect the harness before retuning content.
+classes before the fight began; firing heals on cooldown at full health; popping
+defensive buffs at full health, which made the skills that grant them measure as
+a downgrade; spamming the kit so the global cooldown was never free for an
+interrupt; and submitting skills in list order, which meant only ever pressing
+the lowest-level skill you own — every skill learned later in the game sat at the
+end of the list and was never once tested. When a class looks weak, suspect the
+harness before retuning content.
+
+The mirror is also true: a weak harness *hides* real problems. The rotation fix
+above is what finally exposed the late mob health curve.
 
 Always run `smoke` for renderer or HUD changes. Unit tests cannot see a panel
 overlapping another panel, nameplate clutter, or a tree planted through a boss —
