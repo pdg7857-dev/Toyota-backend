@@ -7,6 +7,13 @@ import { getQuest } from '../content/quests.js';
 import { xpToNext } from '../sim/formulas.js';
 import { BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
 import { ZONES } from '../content/zone.js';
+import {
+  FACTIONS,
+  HOLDINGS,
+  getFaction,
+  standingBand,
+  type StandingBand,
+} from '../content/factions.js';
 import type { Attributes, Command, Entity, EntityId, SimEvent } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 
@@ -91,6 +98,8 @@ export class Hud {
     travelPrompt: HTMLElement;
     questLog: HTMLElement;
     questLogBody: HTMLElement;
+    realmWindow: HTMLElement;
+    realmBody: HTMLElement;
     vendorQuests: HTMLElement;
     vendorWindow: HTMLElement;
     vendorName: HTMLElement;
@@ -172,6 +181,8 @@ export class Hud {
       travelPrompt: this.q('#travel-prompt'),
       questLog: this.q('#quest-log'),
       questLogBody: this.q('#quest-log-body'),
+      realmWindow: this.q('#realm-window'),
+      realmBody: this.q('#realm-body'),
       vendorQuests: this.q('#vendor-quests'),
       vendorWindow: this.q('#vendor-window'),
       vendorName: this.q('#vendor-name'),
@@ -276,6 +287,23 @@ export class Hud {
         case 'levelUp':
           this.log(`You have reached level ${ev.level}!`, 'log-good');
           break;
+        case 'holdingChanged': {
+          const to = getFaction(ev.to).name;
+          this.log(
+            ev.byPlayer
+              ? `${to} take ${ev.name}. That was your doing.`
+              : `${ev.name} has fallen to ${to}.`,
+            'log-realm',
+          );
+          this.showZoneBanner(`${ev.name} — ${to}`, 'realm');
+          if (this.els.realmWindow.style.display === 'block') this.renderRealm();
+          break;
+        }
+        case 'standingChanged': {
+          const faction = getFaction(ev.factionId);
+          this.log(`${faction.name} now consider you ${ev.band}.`, 'log-realm');
+          break;
+        }
         case 'rareSpawn': {
           // Only when it is close enough to see. A world-wide announcement
           // would replace the hunt with a notification.
@@ -503,6 +531,7 @@ export class Hud {
     if (this.els.questLog.style.display === 'block') this.renderQuestLog();
     if (this.els.characterWindow.style.display === 'block') this.renderCharacter();
     if (this.els.inventoryWindow.style.display === 'block') this.renderInventory();
+    if (this.els.realmWindow.style.display === 'block') this.renderRealm();
   }
 
   private updateTargetFrame(): void {
@@ -808,6 +837,76 @@ export class Hud {
       : `${exit.label} — return at level ${exit.minLevel}`;
   }
 
+  toggleRealm(): void {
+    const visible = this.els.realmWindow.style.display === 'block';
+    this.els.realmWindow.style.display = visible ? 'none' : 'block';
+    if (!visible) this.renderRealm();
+  }
+
+  /**
+   * Who holds what, and what they make of you.
+   *
+   * This panel is the whole territory layer's only home. Without it the war is
+   * a number nobody sees: a front can slide for twenty minutes and the only
+   * evidence is different mobs standing in a field, which reads as a bug.
+   */
+  private renderRealm(): void {
+    const player = this.world.player;
+    const body = this.els.realmBody;
+    body.innerHTML = '';
+
+    for (const zone of Object.values(ZONES)) {
+      const holdings = HOLDINGS.filter((h) => h.zoneId === zone.id);
+      if (holdings.length === 0) continue;
+      const head = document.createElement('div');
+      head.className = 'realm-zone';
+      head.textContent = zone.name;
+      body.appendChild(head);
+
+      for (const holding of holdings) {
+        const held = this.world.controllerOf(holding.id);
+        const faction = getFaction(held);
+        // -1..1 mapped onto the bar, with the incumbent's colour filling from
+        // their end: the shape of a front is easier to read than its number.
+        const control = this.world.controlOf(holding.id);
+        const pct = Math.round(((control + 1) / 2) * 100);
+        const row = document.createElement('div');
+        row.className = 'realm-row';
+        row.innerHTML =
+          `<div class="realm-name">${holding.name}` +
+          `<span class="realm-holder" style="color:${hex(faction.color)}">${faction.name}</span></div>` +
+          `<div class="realm-bar">` +
+          `<div class="realm-fill" style="width:${pct}%;background:${hex(
+            getFaction(holding.claimants[1]).color,
+          )}"></div>` +
+          `<div class="realm-mark" style="left:${pct}%"></div>` +
+          `</div>`;
+        row.title =
+          `${getFaction(holding.claimants[0]).name} vs ${getFaction(holding.claimants[1]).name} — ` +
+          `${this.world.controllerOf(holding.id) === holding.claimants[1] ? 'holding' : 'holding'} at ${pct}%`;
+        body.appendChild(row);
+      }
+    }
+
+    const sep = document.createElement('div');
+    sep.className = 'realm-zone';
+    sep.style.marginTop = '10px';
+    sep.textContent = 'What they make of you';
+    body.appendChild(sep);
+
+    for (const faction of Object.values(FACTIONS)) {
+      const value = this.world.standingWith(player, faction.id);
+      const band = standingBand(value);
+      const row = document.createElement('div');
+      row.className = 'realm-row standing';
+      row.innerHTML =
+        `<div class="realm-name">${faction.name}` +
+        `<span class="realm-band ${bandClass(band)}">${band}</span></div>`;
+      row.title = `${faction.blurb} (${value > 0 ? '+' : ''}${Math.round(value)})`;
+      body.appendChild(row);
+    }
+  }
+
   private renderQuestLog(): void {
     const player = this.world.player;
     const body = this.els.questLogBody;
@@ -1081,6 +1180,18 @@ export class Hud {
   }
 }
 
+/** #rrggbb for a faction colour. */
+function hex(color: number): string {
+  return `#${color.toString(16).padStart(6, '0')}`;
+}
+
+function bandClass(band: StandingBand): string {
+  if (band === 'hated' || band === 'hostile') return 'band-bad';
+  if (band === 'wary') return 'band-wary';
+  if (band === 'neutral') return 'band-neutral';
+  return 'band-good';
+}
+
 function describeItem(itemId: string): string {
   const item = getItem(itemId);
   const parts: string[] = [];
@@ -1141,6 +1252,11 @@ const TEMPLATE = `
 
   <div id="travel-prompt"></div>
 
+  <div id="realm-window" class="window panel clickable">
+    <h3>The Realm</h3>
+    <div id="realm-body"></div>
+  </div>
+
   <div id="quest-log" class="window panel clickable">
     <h3>Quest Log</h3>
     <div id="quest-log-body"></div>
@@ -1171,6 +1287,6 @@ const TEMPLATE = `
     <b>WASD</b> move &nbsp; <b>Right-drag</b> look &nbsp; <b>Scroll</b> zoom<br />
     <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–0</b> / <b>⇧1–6</b> skills &nbsp; <b>T</b> auto-attack<br />
     <b>F</b> loot &nbsp; <b>E</b> trade &nbsp; <b>G</b> travel &nbsp; <b>J</b> quests<br />
-    <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
+    <b>K</b> realm &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
   </div>
 `;

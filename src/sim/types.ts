@@ -64,6 +64,12 @@ export interface DerivedStats {
   moveSpeed: number;
 }
 
+/**
+ * The powers that hold ground. Wildlife belongs to none of them — see
+ * `content/factions.ts` for why that matters.
+ */
+export type FactionId = 'freeholders' | 'outlaws' | 'clans' | 'wreckers' | 'blackshields';
+
 export type EquipSlot = 'weapon' | 'head' | 'chest' | 'legs' | 'ring';
 
 export type ItemQuality = 'common' | 'uncommon' | 'rare' | 'epic';
@@ -353,6 +359,14 @@ export interface MobDef {
   bounty?: 'gold' | 'xp';
   /** Rares only: the line shown when one turns up. */
   sighting?: string;
+  /**
+   * Which power this creature answers to, if any.
+   *
+   * Only people have one. A Bog Wolf holds no ground and takes no side, which
+   * is what keeps the territory layer a map of roads rather than a bestiary
+   * with flags on it.
+   */
+  factionId?: FactionId;
   /** Renderer hints only — the sim never reads these. */
   view: { color: number; height: number; radius: number };
 }
@@ -418,6 +432,8 @@ export interface Entity {
   skillCooldowns?: Record<string, number>;
   /** Skills learned from a tome. Level-granted skills are not listed here. */
   learnedSkills?: string[];
+  /** What each faction makes of you. See `content/factions.ts`. */
+  standing?: Partial<Record<FactionId, number>>;
   /** Accepted quests and their per-objective counters. */
   quests?: QuestProgress[];
   /** Ids of quests already turned in; a quest is never repeatable. */
@@ -433,6 +449,8 @@ export interface Entity {
   // --- mob-only ---
   defId?: string;
   spawnPos?: Vec2;
+  /** Guard post this mob stands at, if any — see `SpawnPoint.holding`. */
+  holding?: string;
   aiState?: 'idle' | 'chasing' | 'attacking' | 'returning' | 'dead';
   threat?: Record<EntityId, number>;
   abilityCooldowns?: Record<string, number>;
@@ -545,6 +563,18 @@ export type SimEvent =
   | { t: 'sold'; entityId: EntityId; itemId: string; qty: number; gold: number }
   | { t: 'bought'; entityId: EntityId; itemId: string; gold: number }
   | { t: 'skillUnlocked'; entityId: EntityId; skillId: string }
+  /** A holding changed hands. The one event the whole territory layer exists for. */
+  | {
+      t: 'holdingChanged';
+      holdingId: string;
+      name: string;
+      from: FactionId;
+      to: FactionId;
+      /** Whether the player's own actions pushed it over. */
+      byPlayer: boolean;
+    }
+  /** Standing with a faction moved across a band boundary. */
+  | { t: 'standingChanged'; entityId: EntityId; factionId: FactionId; value: number; band: string }
   /** A named rare spawn has taken over a camp spawn point. */
   | { t: 'rareSpawn'; entityId: EntityId; mobId: string; name: string; sighting: string }
   | { t: 'error'; entityId: EntityId; message: string };

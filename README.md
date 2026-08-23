@@ -31,10 +31,24 @@ Add `?fresh` to the URL to discard your save and start over.
 | `E` | Trade with a nearby vendor |
 | `G` | Take the road to the next zone |
 | `J` | Quest log |
+| `K` | The realm — who holds what, and what they make of you |
 | `C` / `I` | Character / Inventory |
 | `Esc` | Clear target |
 
 Progress autosaves to `localStorage` every 10 seconds.
+
+## The war
+
+Five factions hold eight stretches of ground between them, and the map is not
+decoration. Kill a faction's people and their claim weakens **where you are
+standing**; do enough of it and the ground changes hands — the banner changes,
+and the guards at the posts are replaced by the new holder's. Every front also
+drifts on its own, so walking away for an hour means walking back into a
+different map. Press `K` for the realm panel.
+
+Factions remember what you did. The consequence that matters most: a faction
+that has come to terms with you **stops attacking you**, and one you have
+wronged notices you from half again as far off.
 
 ## The world
 
@@ -160,6 +174,9 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
   bounty spawns; 327 items; class-aware boss, rare and quest rewards
 - Four zones with overlapping level bands and travel between them, each with
   its own terrain, palette, lighting, scatter and skills to learn
+- Five factions contesting eight holdings: territory that changes hands from
+  what you kill, drifts on its own, and garrisons itself with whoever holds it
+- Faction standing that decides who attacks you on sight and what you pay
 - Two quest chains per zone — a story chain that walks you through its bands
   and an armour line that outfits you — with kill, collect and travel
   objectives, chained by prerequisite, and class-matched rewards
@@ -169,7 +186,7 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 ## Development
 
 ```bash
-npm run verify     # typecheck + 167 unit and balance tests
+npm run verify     # typecheck + 179 unit and balance tests
 npm run smoke      # plays the game in real Chromium, writes screenshots/
 ```
 

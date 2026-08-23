@@ -772,3 +772,75 @@ canvas { display: block; }
 /* Bag tags for a collection objective: what you have against what is wanted. */
 .quest-want { color: #d8c07a; }
 .quest-have { color: #6fd08a; font-weight: 600; }
+
+/* --- The Realm panel ---------------------------------------------------- */
+/*
+ * Sits left of the quest log so both can be open at once: the map and the
+ * work you are doing on it are the same conversation.
+ */
+#realm-window {
+  position: absolute;
+  top: 90px;
+  right: 616px;
+  width: 306px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  display: none;
+}
+
+.realm-zone {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  margin: 8px 0 4px;
+  border-top: 1px solid rgba(190, 168, 110, 0.28);
+  padding-top: 6px;
+}
+
+.realm-row { margin-bottom: 7px; }
+
+.realm-name {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  gap: 8px;
+}
+
+.realm-holder { font-size: 11px; }
+
+.realm-bar {
+  position: relative;
+  height: 6px;
+  margin-top: 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+
+.realm-fill { height: 100%; opacity: 0.75; }
+
+/* The line the banner changes at, so a front's momentum is readable. */
+.realm-mark {
+  position: absolute;
+  top: -2px;
+  width: 1px;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.realm-row.standing .realm-name { font-size: 12px; }
+.band-bad { color: #e07a6a; }
+.band-wary { color: #d8a05a; }
+.band-neutral { color: #b9b3a4; }
+.band-good { color: #6fd08a; }
+
+/* A holding changing hands uses the zone banner slot, in its own colour. */
+#zone-banner.realm {
+  color: #d8c07a;
+  font-size: 26px;
+  letter-spacing: 3px;
+  text-transform: none;
+}
+
+.log-realm { color: #d8c07a; font-weight: 600; }

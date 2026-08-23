@@ -26,6 +26,13 @@ import {
 } from '../src/content/questgear.js';
 import { FENMARCH, PLAYABLE_CLASSES, ZONES } from '../src/content/zone.js';
 import { QUESTS } from '../src/content/quests.js';
+import {
+  CONTROL_LIMIT,
+  FLIP_THRESHOLD,
+  HOLDINGS,
+  PRESSURE_PER_KILL,
+  getFaction,
+} from '../src/content/factions.js';
 import { ITEMS, WEAPON_LADDER, canEquip, gearSetFor, getItem } from '../src/content/items.js';
 import { MAX_STOCK_QUALITY, VENDORS, buyPrice, sellPrice } from '../src/content/vendors.js';
 import { skillBarFor, skillsForClass, skillsTaughtBy } from '../src/content/skills.js';
@@ -1064,6 +1071,57 @@ describe('the armour lines are a plannable grind', () => {
       expect(minutes, `${bounty.name} may as well not exist`).toBeLessThan(45);
     }
     console.log('\nBOUNTY SPAWNS\n' + rows.join('\n'));
+  });
+});
+
+describe('the war is a grind, not a switch', () => {
+  it('costs a session to take a front, and shows what that session looks like', () => {
+    // Territory has to be earned in the same currency as everything else, or
+    // it is a menu option rather than a thing you did.
+    const rows: string[] = [];
+    for (const holding of HOLDINGS) {
+      const incumbent = holding.initialController;
+      const challenger = holding.claimants.find((c) => c !== incumbent)!;
+      // From fully held to flipped: across the middle and past the far mark.
+      const distance = CONTROL_LIMIT + FLIP_THRESHOLD;
+      const kills = distance / PRESSURE_PER_KILL;
+      // The drift is pushing back the whole time on a front that favours the
+      // incumbent, so the real cost is higher than the raw distance.
+      const garrison = MOBS[holding.garrison[incumbent]!]!;
+      rows.push(
+        `  ${holding.name.padEnd(22)} ${getFaction(incumbent).name.padEnd(24)} ` +
+          `~${kills.toFixed(0)} ${garrison.name} kills to flip`,
+      );
+      expect(kills, `${holding.name} flips on a whim`).toBeGreaterThan(60);
+      expect(kills, `${holding.name} is unwinnable`).toBeLessThan(400);
+      expect(getFaction(challenger)).toBeDefined();
+    }
+    console.log('\nTHE FRONTS\n' + rows.join('\n'));
+  });
+
+  it('moves the map on its own slowly enough to be a background, not a tide', () => {
+    // Fast enough that a player who walks away comes back to a changed world;
+    // slow enough that the work they did before leaving still stood for a
+    // while. A front should take tens of minutes to drift, not seconds.
+    for (const holding of HOLDINGS) {
+      const minutesToFlip = (CONTROL_LIMIT + FLIP_THRESHOLD) / Math.abs(holding.drift);
+      expect(minutesToFlip, `${holding.name} drifts too fast to matter`).toBeGreaterThan(20);
+      expect(minutesToFlip, `${holding.name} may as well be static`).toBeLessThan(2000);
+    }
+  });
+
+  it('never leaves a garrison the player cannot handle at that level', () => {
+    // Both sides of a front have to be fightable by whoever is in the zone,
+    // or flipping it makes the ground unusable.
+    for (const holding of HOLDINGS) {
+      const [lo, hi] = ZONES[holding.zoneId]!.levelRange;
+      for (const mobId of Object.values(holding.garrison)) {
+        const mob = MOBS[mobId]!;
+        expect(mob.level, `${mob.name} is below ${holding.zoneId}`).toBeGreaterThanOrEqual(lo - 4);
+        expect(mob.level, `${mob.name} is above ${holding.zoneId}`).toBeLessThanOrEqual(hi);
+        expect(mob.stars, `${mob.name} is a boss on a guard post`).toBeLessThan(BOSS_STARS);
+      }
+    }
   });
 });
 

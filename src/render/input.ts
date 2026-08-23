@@ -88,6 +88,9 @@ export class InputController {
       case 'KeyJ':
         this.hud.toggleQuestLog();
         break;
+      case 'KeyK':
+        this.hud.toggleRealm();
+        break;
       case 'KeyC':
         this.hud.toggleCharacter();
         break;

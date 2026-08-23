@@ -51,12 +51,67 @@ input / HUD click ──> Command ──> World.submit()
 | `src/sim/rng.ts` | Seeded, serializable PRNG. |
 | `src/content/` | Pure data: items, skills, mobs, loot tables, the zones, classes. |
 | `src/content/terrain.ts` | Zone themes: ground shape, palette, light, fog, scatter. |
+| `src/content/factions.ts` | Who holds what, and what they make of you. |
 | `src/render/` | three.js, DOM, input. Nothing gameplay-authoritative. |
 | `src/render/scene.ts` | Builds a zone from its theme. Knows *how*, not *which*. |
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
 | `tools/smoke.mjs` | Boots the real game in Chromium, plays it, screenshots it. |
 
 Adding a mob, item or skill should mean editing `src/content/` only.
+
+## The world answers back
+
+Everything else in this game answers *how strong is my character*. This layer
+answers a different question: **what did I change?**
+
+Five factions, eight holdings, one number per holding saying who is winning.
+Kill a faction's people and their claim weakens where you are standing; do
+enough of it and the ground changes hands, the banner changes, and the guards
+at the posts are replaced by the new holder's. See `content/factions.ts`.
+
+Four rules hold it together, and each of them is load-bearing:
+
+- **People have politics. Animals do not.** A Bog Wolf belongs to nobody and
+  holds nothing. Only the human factions garrison ground, which keeps this a
+  map of who controls a road rather than a bestiary with flags on it.
+- **Ground changes hands. Towns do not.** Every holding can flip; no trader's
+  ground is ever contested, and a test enforces the clearance. A world where
+  everything can be lost is a world where nothing feels stable, and a player
+  who comes back to find the shop gone has been punished for leaving.
+- **Territory is taken where you are standing.** A kill counts toward the front
+  it happened at — a guard's own post, or the nearest one their faction holds.
+  Spreading one kill across every front they hold was the obvious alternative
+  and it is worse: the map moves somewhere you are not, so a player fighting at
+  the Road Watch watches the Southern Marsh fall.
+- **The map moves without you.** Each front drifts at its own rate, so a zone
+  has ground quietly falling and ground quietly holding rather than one uniform
+  tide. Pushing back is what your kills are *for*, and it is why walking away
+  for an hour means walking back into a different map.
+
+A front is ~114 kills to flip against the drift — grind scale, deliberately, so
+territory is bought in the same currency as everything else.
+
+### Standing is the part you feel
+
+Factions remember. Standing moves with every kill and every quest, and the
+consequence that matters is `TRUCE_AT`: **a faction that has come to terms with
+you stops attacking you.** Walk through a camp that used to swarm you and
+nothing moves. Go the other way past `HOSTILE_AT` and they notice you from
+half again as far off.
+
+In a game with no other players in it, that is the most legible way the world
+can react to what you have done — far more legible than a number in a panel.
+Traders price by it too, but gently: a shop that refuses a hated player strands
+someone who picked the wrong fight at level 6 with nowhere to go.
+
+### What was deliberately not taken
+
+The design brief this came from is an MMO's. Clans, chat, the player economy
+and PvP are all multiplayer *by definition* — they need other people, and a
+faked version (NPC "clans" you can join, a simulated auction house) is a menu
+pretending to be a society. What those systems actually produce is a world with
+opinions about you and stakes that outlast a session, and that is what the
+faction layer is: the single-player translation, not a shrunken copy.
 
 ## Star ratings
 
@@ -453,7 +508,7 @@ file changes** — the events that drive animation (`swing`, `castBegin`,
 ## Verifying a change
 
 ```bash
-npm run verify        # typecheck + 167 unit and balance tests
+npm run verify        # typecheck + 179 unit and balance tests
 npm run build && npm run preview &
 npm run smoke         # real browser, plays the game, writes screenshots/
 ```
@@ -486,6 +541,8 @@ debug handle exposed in `main.ts`.
 ## Deliberately not built yet
 
 Dialogue, crafting, real art, **gameplay-authoritative terrain**, pathfinding
-(mobs walk straight lines) and entity collision. Vendor stock is static too —
+(mobs walk straight lines) and entity collision. Dragons as *world entities* —
+a creature with territory and a routine rather than a spawn point — is the
+obvious next thing the faction layer makes possible. Vendor stock is static too —
 traders never run out and never restock, which wants an inventory model if the
 economy ever grows past four zones.

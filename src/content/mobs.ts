@@ -1226,12 +1226,62 @@ for (const spec of BOUNTIES) {
   LOOT_TABLES[mob.lootTableId] = bountyLoot(spec);
 }
 
-/** Every bounty spawn, for content that needs to walk them. */
-export const BOUNTY_MOBS: MobDef[] = BOUNTIES.map((spec) => MOBS[bountyMobId(spec)]!);
 
+// --------------------------------------------------------------------------
+// Who answers to whom.
+//
+// Applied here rather than written into each definition so the roster is one
+// readable list. Wildlife is absent on purpose: a Bog Wolf holds no ground and
+// takes no side, and a territory map with animals on it stops being a map of
+// roads and starts being a bestiary with flags.
+// --------------------------------------------------------------------------
+
+const FACTION_ROSTER: Record<string, string[]> = {
+  outlaws: ['outlaw_bowman', 'outlaw_reaver', 'outlaw_marauder', 'cadfael', 'old_scar'],
+  clans: ['cattle_raider', 'clan_axeman', 'clan_berserker', 'aonghus', 'muireann'],
+  wreckers: [
+    'wrecker_scavenger',
+    'smuggler_enforcer',
+    'tidewatch_marauder',
+    'fiachra',
+    'old_cauldron',
+  ],
+  blackshields: [
+    'warband_levy',
+    'blackshield_spearman',
+    'siege_engineer',
+    'blackshield_champion',
+    'fort_warden',
+    'ruadhan',
+    'donnchadh',
+  ],
+};
+
+for (const [factionId, members] of Object.entries(FACTION_ROSTER)) {
+  for (const mobId of members) {
+    const mob = MOBS[mobId];
+    if (!mob) throw new Error(`${factionId} claims an unknown member: ${mobId}`);
+    MOBS[mobId] = { ...mob, factionId: factionId as MobDef['factionId'] };
+  }
+}
+
+// Named variants inherit the allegiance of the creature they replace: a rare
+// outlaw is still an outlaw, and killing one should move the same front.
+for (const mob of Object.values(MOBS)) {
+  if (!mob.rareOf) continue;
+  const host = MOBS[mob.rareOf]!;
+  if (host.factionId) MOBS[mob.id] = { ...mob, factionId: host.factionId };
+}
+
+// Both lists are built AFTER the allegiances above: the loop replaces each
+// entry in MOBS with a new object, so a list captured earlier would hold the
+// pre-faction copies and quietly report every named creature as unaligned.
 
 /** Every rare spawn, for content that needs to walk them. */
 export const RARE_MOBS: MobDef[] = RARES.map((spec) => MOBS[rareMobId(spec)]!);
+
+/** Every bounty spawn, for content that needs to walk them. */
+export const BOUNTY_MOBS: MobDef[] = BOUNTIES.map((spec) => MOBS[bountyMobId(spec)]!);
 
 export function getLootTable(id: string): LootTable {
   const table = LOOT_TABLES[id];

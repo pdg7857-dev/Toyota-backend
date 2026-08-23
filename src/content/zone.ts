@@ -18,6 +18,15 @@ export interface SpawnPoint {
    * a levelling camp that drifted too close.
    */
   guardOf?: string;
+  /**
+   * Marks this as a guard post for a holding.
+   *
+   * A post's `mobId` is a fallback: what actually stands here is decided by
+   * whoever holds the ground right now. Take the Road Watch off the outlaws
+   * and the bowmen are replaced by whatever the Freeholders keep there —
+   * which is the whole point of the territory layer being visible at all.
+   */
+  holding?: string;
 }
 
 export interface VendorPlacement {
@@ -79,6 +88,11 @@ export interface ZoneDef {
  * layout is identical on every load — spawn positions are content, not
  * simulation, and must not depend on the sim's Rng.
  */
+/** Mark a camp's spawn points as the guard posts of a holding. */
+function post(holding: string, spawns: SpawnPoint[]): SpawnPoint[] {
+  return spawns.map((sp) => ({ ...sp, holding }));
+}
+
 function camp(mobId: string, cx: number, cz: number, radius: number, count: number): SpawnPoint[] {
   const out: SpawnPoint[] = [];
   const offset = (Math.abs(cx * 7 + cz * 13) % 100) / 100;
@@ -132,8 +146,10 @@ export const FENMARCH: ZoneDef = {
     ...camp('moor_stag', 0, -10, 10, 5),
 
     // --- lv13 outlaw bowmen: the road watch --------------------------------
-    ...camp('outlaw_bowman', -26, -18, 9, 6),
-    ...camp('outlaw_bowman', 24, -20, 9, 6),
+    // These are guard POSTS, not a camp: what stands here follows whoever
+    // holds the Road Watch. Take it off the outlaws and the bowmen go.
+    ...post('road_watch', camp('outlaw_bowman', -26, -18, 9, 6)),
+    ...post('road_watch', camp('outlaw_bowman', 24, -20, 9, 6)),
 
     // --- lv16 outlaw reavers -----------------------------------------------
     ...camp('outlaw_reaver', -28, -32, 9, 6),
@@ -152,9 +168,9 @@ export const FENMARCH: ZoneDef = {
     ...camp('fen_lynx', -30, -74, 9, 6),
     ...camp('fen_lynx', 28, -76, 9, 6),
 
-    // --- lv23 marauders ----------------------------------------------------
-    ...camp('outlaw_marauder', -26, -86, 9, 5),
-    ...camp('outlaw_marauder', 26, -88, 9, 5),
+    // --- lv23 marauders: the southern marsh's guard posts -------------------
+    ...post('southern_marsh', camp('outlaw_marauder', -26, -86, 9, 5)),
+    ...post('southern_marsh', camp('outlaw_marauder', 26, -88, 9, 5)),
 
     // --- lv25 elite boss: the southern marsh, genuinely alone ---------------
     // No guards and a wide empty approach: Old Scar is meant to be fought with
@@ -188,14 +204,18 @@ interface BandSpec {
   z: number;
   /** Camp centres are mirrored either side of the road plus one on it. */
   wide?: boolean;
+  /** Makes this band the guard posts of a holding rather than a plain camp. */
+  holding?: string;
 }
 
 function bands(specs: BandSpec[]): SpawnPoint[] {
   const out: SpawnPoint[] = [];
-  for (const { mobId, z, wide } of specs) {
-    out.push(...camp(mobId, -27, z, 9, 6));
-    out.push(...camp(mobId, 27, z - 2, 9, 6));
-    if (wide) out.push(...camp(mobId, 0, z - 9, 9, 5));
+  for (const { mobId, z, wide, holding } of specs) {
+    const band: SpawnPoint[] = [];
+    band.push(...camp(mobId, -27, z, 9, 6));
+    band.push(...camp(mobId, 27, z - 2, 9, 6));
+    if (wide) band.push(...camp(mobId, 0, z - 9, 9, 5));
+    out.push(...(holding ? post(holding, band) : band));
   }
   return out;
 }
@@ -211,14 +231,14 @@ export const ARDMOOR: ZoneDef = {
     ...bands([
       { mobId: 'crag_goat', z: 88, wide: true },
       { mobId: 'hill_wolf', z: 64, wide: true },
-      { mobId: 'cattle_raider', z: 40, wide: true },
+      { mobId: 'cattle_raider', z: 40, wide: true, holding: 'cattle_road' },
       { mobId: 'moor_eagle', z: 16 },
     ]),
     // Aonghus holds the cattle-fold, with his axemen posted around it.
     ...camp('clan_axeman', 0, -6, 13, 4).map((sp) => ({ ...sp, guardOf: 'aonghus' })),
     { mobId: 'aonghus', pos: { x: 0, z: -8 } },
     ...bands([
-      { mobId: 'clan_axeman', z: -34 },
+      { mobId: 'clan_axeman', z: -34, holding: 'high_shelves' },
       { mobId: 'highland_bear', z: -58 },
       { mobId: 'clan_berserker', z: -82 },
     ]),
@@ -243,12 +263,12 @@ export const SUNKEN_REACH: ZoneDef = {
       { mobId: 'reach_eel', z: 88, wide: true },
       { mobId: 'wrecker_scavenger', z: 64, wide: true },
       { mobId: 'marsh_heron', z: 40, wide: true },
-      { mobId: 'smuggler_enforcer', z: 16 },
+      { mobId: 'smuggler_enforcer', z: 16, holding: 'drowned_causeway' },
     ]),
     ...camp('smuggler_enforcer', 0, -6, 13, 4).map((sp) => ({ ...sp, guardOf: 'fiachra' })),
     { mobId: 'fiachra', pos: { x: 0, z: -8 } },
     ...bands([
-      { mobId: 'tidewatch_marauder', z: -34 },
+      { mobId: 'tidewatch_marauder', z: -34, holding: 'deepwood' },
       { mobId: 'great_pike', z: -58 },
       { mobId: 'grey_seal_bull', z: -82 },
     ]),
@@ -272,14 +292,14 @@ export const CAER_DUBH: ZoneDef = {
     ...bands([
       { mobId: 'fort_mastiff', z: 88, wide: true },
       { mobId: 'warband_levy', z: 64, wide: true },
-      { mobId: 'blackshield_spearman', z: 40, wide: true },
+      { mobId: 'blackshield_spearman', z: 40, wide: true, holding: 'black_road' },
       { mobId: 'siege_engineer', z: 16 },
     ]),
     ...camp('blackshield_spearman', 0, -6, 13, 4).map((sp) => ({ ...sp, guardOf: 'ruadhan' })),
     { mobId: 'ruadhan', pos: { x: 0, z: -8 } },
     ...bands([
       { mobId: 'warhound_alpha', z: -34 },
-      { mobId: 'blackshield_champion', z: -58 },
+      { mobId: 'blackshield_champion', z: -58, holding: 'gatehouse' },
       { mobId: 'fort_warden', z: -82 },
     ]),
     { mobId: 'donnchadh', pos: { x: 0, z: -116 } },

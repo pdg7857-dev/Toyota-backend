@@ -458,6 +458,66 @@ async function main() {
   }
   await page.screenshot({ path: join(OUT, '07-boss-telegraph.png') });
 
+  // --- the war ------------------------------------------------------------
+  // Flip a front and check the three things that make it real: the banner
+  // changes, the panel says so, and the ground is garrisoned by the new owner.
+  const realm = await page.evaluate(async () => {
+    const g = window.__game;
+    g.world.travelTo('fenmarch');
+    await new Promise((r) => setTimeout(r, 400));
+
+    const holding = g.holdingOf('road_watch');
+    const before = g.world.controllerOf('road_watch');
+    const challenger = holding.claimants.find((c) => c !== before);
+    const postsBefore = [...g.world.entities.values()].filter((e) => e.holding === 'road_watch');
+    const garrisonBefore = postsBefore.length ? g.mobOf(postsBefore[0].defId).name : null;
+
+    // Start the front a few kills short of the line rather than grinding a
+    // hundred in a browser: what this is checking is that a kill tips it and
+    // the ground changes hands, not the arithmetic the unit tests own.
+    g.world.control['road_watch'] = -56;
+    const victim = postsBefore[0];
+    g.world.player.level = 40;
+    g.world.player.pos.x = victim.pos.x + 1;
+    g.world.player.pos.z = victim.pos.z;
+    g.world.submit(g.world.player.id, { t: 'autoAttack', on: true });
+
+    let flipped = null;
+    for (let i = 0; i < 40 && !flipped; i++) {
+      victim.dead = false;
+      victim.health = 1;
+      g.world.submit(g.world.player.id, { t: 'target', id: victim.id });
+      await new Promise((r) => setTimeout(r, 120));
+      if (g.world.controllerOf('road_watch') !== before) flipped = g.world.controllerOf('road_watch');
+    }
+
+    // Respawn every post so the new garrison actually stands there.
+    for (const post of postsBefore) {
+      post.dead = true;
+      post.respawnInMs = 1;
+    }
+    await new Promise((r) => setTimeout(r, 400));
+    const garrisonAfter = g.mobOf(postsBefore[0].defId).name;
+
+    return {
+      ok: flipped === challenger && garrisonAfter !== garrisonBefore,
+      from: before,
+      to: flipped,
+      garrisonBefore,
+      garrisonAfter,
+    };
+  });
+  await wait(500);
+  await page.keyboard.press('k');
+  await wait(500);
+  await page.screenshot({ path: join(OUT, '12-realm.png') });
+  const realmPanel = await page.evaluate(() => ({
+    open: getComputedStyle(document.querySelector('#realm-window')).display !== 'none',
+    fronts: document.querySelectorAll('#realm-body .realm-bar').length,
+    standings: document.querySelectorAll('#realm-body .realm-row.standing').length,
+  }));
+  await page.keyboard.press('k');
+
   // Pull gameplay state straight out of the running page for assertions.
   const state = await page.evaluate(() => {
     const log = [...document.querySelectorAll('#log .log-line')].map((n) => n.textContent);
@@ -504,6 +564,11 @@ async function main() {
     ['rare is named for what it carries', rareLoot.namedForItem === true],
     ['rare renders bigger than its camp', rareCheck.taller === true],
     ['rare nameplate marked', rarePlate > 0],
+    ['a front changed hands', realm.ok],
+    ['the new holder garrisons the ground', realm.garrisonAfter !== realm.garrisonBefore],
+    ['realm panel opens', realmPanel.open],
+    ['realm panel lists every front', realmPanel.fronts === 8],
+    ['realm panel lists standing', realmPanel.standings === 5],
     ['armour line paid out its piece', armour.ok],
     ['armour line piece fits a slot', !!armour.slot],
     ['bounty spawn paid a windfall', bounty.ok],
@@ -514,6 +579,7 @@ async function main() {
   for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
   console.log('\nplayer:', state.hp, '| xp:', state.xp, '| target:', state.target);
   console.log('log tail:', state.log.slice(0, 6));
+  console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('armour:', JSON.stringify(armour), '| bounty:', JSON.stringify(bounty));
   console.log('rare:', JSON.stringify({ ...rareCheck, ...rareLoot }), '| rare plates:', rarePlate);
   console.log('taught:', JSON.stringify(taught), '| bar:', JSON.stringify(bar));

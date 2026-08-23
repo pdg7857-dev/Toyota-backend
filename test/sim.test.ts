@@ -14,6 +14,11 @@ import { HeightField, getTheme, type Clearing } from '../src/content/terrain.js'
 import { countEvents, duelZone, emptyZone, levelPlayer, simulateFight, vendorZone } from './helpers.js';
 import { VENDORS, buyPrice, sellPrice } from '../src/content/vendors.js';
 import { QUESTS, getQuest } from '../src/content/quests.js';
+import {
+  HOLDINGS,
+  STANDING_LIMIT,
+  getHolding,
+} from '../src/content/factions.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { ITEMS, canEquip, getItem } from '../src/content/items.js';
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
@@ -1829,5 +1834,203 @@ describe('the armour lines', () => {
         expect(dps / curve).toBeLessThan(1.15);
       }
     }
+  });
+});
+
+describe('territory and standing', () => {
+  /** A zone with one holding's guard post and nothing else. */
+  function frontZone(holdingId: string) {
+    const holding = getHolding(holdingId);
+    return {
+      ...emptyZone(),
+      id: holding.zoneId,
+      rareSpawns: false,
+      spawns: [
+        // Inside every class's reach: the default duel distance is outside a
+        // Rogue's, which reads as "the front never moved".
+        { mobId: holding.garrison[holding.initialController]!, pos: { x: 2, z: 0 }, holding: holding.id },
+      ],
+    };
+  }
+
+  it('starts every front where the world says it starts', () => {
+    const world = new World({ seed: 700, zone: getZone('fenmarch'), classId: 'warrior' });
+    for (const holding of HOLDINGS) {
+      expect(world.controllerOf(holding.id)).toBe(holding.initialController);
+      // Held at the far end, not the midpoint: a fresh world reads as
+      // "the outlaws own the road", not "the road happens to be theirs".
+      expect(Math.abs(world.controlOf(holding.id))).toBe(1);
+      expect(holding.claimants).toContain(holding.initialController);
+      expect(new Set(holding.claimants).size).toBe(2);
+      // Both claimants keep something there, or a flip empties the ground.
+      for (const claimant of holding.claimants) {
+        expect(getMob(holding.garrison[claimant]!)).toBeDefined();
+      }
+    }
+  });
+
+  it('puts the holder\'s own people on the guard posts', () => {
+    const holding = getHolding('road_watch');
+    const world = new World({ seed: 701, zone: getZone('fenmarch'), classId: 'warrior' });
+    const posts = [...world.entities.values()].filter((e) => e.holding === 'road_watch');
+    expect(posts.length).toBeGreaterThan(6);
+    for (const post of posts) {
+      expect(post.defId).toBe(holding.garrison[holding.initialController]);
+    }
+  });
+
+  it('changes hands when you put in the work, and says so', () => {
+    const world = new World({ seed: 702, zone: frontZone('road_watch'), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 30 });
+    const guard = theMob(world);
+    const holding = getHolding('road_watch');
+    const incumbent = holding.initialController;
+    const challenger = holding.claimants.find((c) => c !== incumbent)!;
+
+    let flip: SimEvent | undefined;
+    for (let i = 0; i < 400 && !flip; i++) {
+      guard.dead = false;
+      guard.health = 1;
+      world.submit(player.id, { t: 'target', id: guard.id });
+      world.submit(player.id, { t: 'autoAttack', on: true });
+      for (const ev of world.advance(1000)) {
+        if (ev.t === 'holdingChanged') flip = ev;
+      }
+    }
+
+    expect(flip, 'the front never moved').toBeDefined();
+    // The front you actually fought at, not whichever one the faction was
+    // weakest on: territory is taken where you are standing.
+    expect(flip).toMatchObject({
+      holdingId: 'road_watch',
+      from: incumbent,
+      to: challenger,
+      byPlayer: true,
+    });
+    expect(world.controllerOf('road_watch')).toBe(challenger);
+
+    // And the ground visibly changes hands: the next respawn is the new
+    // holder's garrison, not the old one's.
+    guard.dead = true;
+    guard.respawnInMs = 1;
+    world.tick();
+    expect(guard.defId).toBe(holding.garrison[challenger]);
+  });
+
+  it('moves on its own while nobody is looking', () => {
+    // The map has to be a thing happening in the world rather than a thing
+    // waiting for the player to press start.
+    const world = new World({ seed: 703, zone: emptyZone(), classId: 'warrior' });
+    const drifting = HOLDINGS.filter((h) => h.drift !== 0);
+    expect(drifting.length).toBe(HOLDINGS.length);
+
+    const before = Object.fromEntries(HOLDINGS.map((h) => [h.id, world.controlOf(h.id)]));
+    world.advance(120000); // two minutes of world time
+    for (const holding of drifting) {
+      const moved = world.controlOf(holding.id) - before[holding.id]!;
+      // Everything at its cap can only move one way, so check the sign of
+      // whatever movement there was rather than demanding movement.
+      if (moved !== 0) expect(Math.sign(moved)).toBe(Math.sign(holding.drift));
+    }
+    // At least one front should have actually moved in two minutes.
+    expect(HOLDINGS.some((h) => world.controlOf(h.id) !== before[h.id])).toBe(true);
+  });
+
+  it('remembers what you did to people, and to whom', () => {
+    const world = new World({ seed: 704, zone: duelZone('outlaw_bowman', 2), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 30 });
+    const outlaw = theMob(world);
+
+    for (let i = 0; i < 12; i++) {
+      outlaw.dead = false;
+      outlaw.health = 1;
+      world.submit(player.id, { t: 'target', id: outlaw.id });
+      world.submit(player.id, { t: 'autoAttack', on: true });
+      world.advance(2000);
+    }
+    // Hunting outlaws costs you with the outlaws and earns you with the
+    // people they prey on.
+    expect(world.standingWith(player, 'outlaws')).toBeLessThan(0);
+    expect(world.standingWith(player, 'freeholders')).toBeGreaterThan(0);
+    // Wildlife has no opinion about any of it.
+    expect(getMob('bog_wolf').factionId).toBeUndefined();
+  });
+
+  it('lets a faction you have come to terms with leave you alone', () => {
+    // The most legible consequence available in a game with no other players
+    // in it: a camp that stops swinging at you.
+    const zone = { ...duelZone('outlaw_bowman', 4), rareSpawns: false };
+    const hated = new World({ seed: 705, zone, classId: 'warrior' });
+    const friend = new World({ seed: 705, zone, classId: 'warrior' });
+    // Standing FIRST: `levelPlayer` ticks the world on its way out, and a mob
+    // that aggroed during that tick stays on you whatever you do afterwards.
+    friend.player.standing = { outlaws: STANDING_LIMIT };
+    levelPlayer(hated, { level: 30 });
+    levelPlayer(friend, { level: 30 });
+
+    // Read the mob's state rather than the event: `levelPlayer` ticks once on
+    // the way in, so the aggro event can already have been and gone.
+    const hunted = (world: World): boolean => {
+      world.advance(4000);
+      const mob = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+      return mob.aiState !== 'idle' && mob.targetId === world.playerId;
+    };
+    expect(hunted(hated), 'an outlaw ignored a stranger').toBe(true);
+    expect(hunted(friend), 'the outlaws attacked a friend').toBe(false);
+
+    // A bear does not care about your reputation.
+    const beastZone = { ...duelZone('marsh_bear', 4), rareSpawns: false };
+    const beasts = new World({ seed: 706, zone: beastZone, classId: 'warrior' });
+    levelPlayer(beasts, { level: 30 });
+    beasts.player.standing = { outlaws: STANDING_LIMIT, freeholders: STANDING_LIMIT };
+    beasts.advance(4000);
+    const bear = [...beasts.entities.values()].find((e) => e.kind === 'mob')!;
+    expect(bear.targetId).toBe(beasts.playerId);
+  });
+
+  it('prices a trader by what they make of you', () => {
+    const world = new World({ seed: 707, zone: vendorZone('maeve'), classId: 'warrior' });
+    const player = world.player;
+    const itemId = 'bronze_shortsword';
+
+    const neutral = world.priceFor(player, itemId);
+    player.standing = { freeholders: STANDING_LIMIT };
+    const trusted = world.priceFor(player, itemId);
+    player.standing = { freeholders: -STANDING_LIMIT };
+    const hated = world.priceFor(player, itemId);
+
+    expect(trusted).toBeLessThan(neutral);
+    expect(hated).toBeGreaterThan(neutral);
+    // Never so steep that a bad reputation strands you with nowhere to shop.
+    expect(hated / neutral).toBeLessThan(1.5);
+  });
+
+  it('keeps the shops out of the war', () => {
+    // Ground changes hands; the place you keep your things does not.
+    for (const zone of Object.values(ZONES)) {
+      for (const vendor of zone.vendors) {
+        for (const holding of HOLDINGS.filter((h) => h.zoneId === zone.id)) {
+          const posts = zone.spawns.filter((sp) => sp.holding === holding.id);
+          for (const post of posts) {
+            const d = Math.hypot(post.pos.x - vendor.pos.x, post.pos.z - vendor.pos.z);
+            expect(d, `${holding.name} is fought over on ${vendor.vendorId}'s doorstep`).toBeGreaterThan(20);
+          }
+        }
+      }
+    }
+  });
+
+  it('carries the war across a save', () => {
+    const world = new World({ seed: 708, zone: getZone('fenmarch'), classId: 'warrior' });
+    const holding = HOLDINGS[0]!;
+    const challenger = holding.claimants.find((c) => c !== holding.initialController)!;
+    world.control[holding.id] = 0;
+    world.controller[holding.id] = challenger;
+    world.player.standing = { outlaws: -400 };
+
+    const restored = World.deserialize(world.serialize(), getZone('fenmarch'));
+    expect(restored.controllerOf(holding.id)).toBe(challenger);
+    expect(restored.controlOf(holding.id)).toBe(0);
+    expect(restored.player.standing?.outlaws).toBe(-400);
   });
 });

@@ -34,8 +34,10 @@ import {
   xpForKill,
   xpToNext,
 } from './formulas.js';
+import { isBoss } from './types.js';
 import type {
   ActiveEffect,
+  FactionId,
   ActorCommand,
   Attributes,
   Command,
@@ -54,6 +56,24 @@ import type {
 import { canEquip, getItem } from '../content/items.js';
 import { getLootTable, getMob } from '../content/mobs.js';
 import { BOUNTY_SPAWN_CHANCE, RARE_SPAWN_CHANCE } from '../content/rares.js';
+import {
+  CONTROL_LIMIT,
+  FLIP_THRESHOLD,
+  HOLDINGS,
+  HOSTILE_AT,
+  PRESSURE_PER_BOSS,
+  PRESSURE_PER_KILL,
+  PRESSURE_PER_QUEST,
+  STANDING_LIMIT,
+  STANDING_PER_KILL,
+  STANDING_PER_QUEST,
+  STANDING_PRICE_SWING,
+  STANDING_RIVAL_SHARE,
+  TRUCE_AT,
+  getFaction,
+  getHolding,
+  standingBand,
+} from '../content/factions.js';
 import { getSkill, skillsForClass } from '../content/skills.js';
 import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
 import { CLASSES, ZONES, getZone, type ZoneDef } from '../content/zone.js';
@@ -82,7 +102,7 @@ function neededFor(objective: QuestObjective): number {
 const COMBAT_TIMEOUT_MS = 6000;
 
 /** Save format version. Bump when the Entity shape changes. */
-const SAVE_VERSION = 5;
+const SAVE_VERSION = 6;
 
 export interface WorldOptions {
   seed: number;
@@ -99,6 +119,18 @@ export class World {
   entities = new Map<EntityId, Entity>();
   playerId: EntityId = 0;
 
+  /**
+   * Who holds what, as one number per holding.
+   *
+   * Negative is `claimants[0]`, positive is `claimants[1]`, and the sign only
+   * becomes control once it crosses `FLIP_THRESHOLD` — see
+   * `content/factions.ts`. Authoritative sim state, so it serializes with
+   * everything else and a server could own it unchanged.
+   */
+  control: Record<string, number> = {};
+  /** Which faction currently holds each holding. Derived, but cached so a flip is an event. */
+  controller: Record<string, FactionId> = {};
+
   private nextId = 1;
   private queue: ActorCommand[] = [];
   private events: SimEvent[] = [];
@@ -108,8 +140,9 @@ export class World {
   constructor(opts: WorldOptions) {
     this.zone = opts.zone;
     this.rng = new Rng(opts.seed);
+    this.resetTerritory();
     this.spawnPlayer(opts.classId, opts.playerName ?? 'Wanderer');
-    for (const sp of this.zone.spawns) this.spawnMob(sp.mobId, sp.pos);
+    for (const sp of this.zone.spawns) this.spawnMob(this.garrisonFor(sp), sp.pos, undefined, sp.holding);
     for (const v of this.zone.vendors ?? []) this.spawnVendor(v.vendorId, v.pos);
   }
 
@@ -173,7 +206,208 @@ export class World {
     return this.rng.chance(chance) ? base.rareVariant : baseId;
   }
 
-  private spawnMob(requestedId: string, pos: Vec2, summonedBy?: EntityId): Entity {
+  // ------------------------------------------------------------- territory
+
+  /**
+   * Put every front back where the world starts.
+   *
+   * Control begins at the far end for whoever holds the ground, not at the
+   * midpoint: a fresh world should read as "the outlaws own the road", not as
+   * "the road is up for grabs and happens to be theirs today".
+   */
+  private resetTerritory(): void {
+    this.control = {};
+    this.controller = {};
+    for (const holding of HOLDINGS) {
+      const sign = holding.claimants[1] === holding.initialController ? 1 : -1;
+      this.control[holding.id] = sign * CONTROL_LIMIT;
+      this.controller[holding.id] = holding.initialController;
+    }
+  }
+
+  /** Who holds a holding right now. */
+  controllerOf(holdingId: string): FactionId {
+    return this.controller[holdingId] ?? getHolding(holdingId).initialController;
+  }
+
+  /** Control as a fraction from -1 (claimant 0) to +1 (claimant 1). */
+  controlOf(holdingId: string): number {
+    return (this.control[holdingId] ?? 0) / CONTROL_LIMIT;
+  }
+
+  /**
+   * Push a front, and flip it if the push carried far enough.
+   *
+   * `byPlayer` only decides how the event reads; the arithmetic is the same
+   * either way, because the drift and the player are pushing the same rope.
+   */
+  private applyPressure(holdingId: string, toward: FactionId, amount: number, byPlayer: boolean): void {
+    const holding = getHolding(holdingId);
+    if (!holding.claimants.includes(toward)) return;
+    const sign = holding.claimants[1] === toward ? 1 : -1;
+    const before = this.control[holdingId] ?? 0;
+    const after = Math.max(-CONTROL_LIMIT, Math.min(CONTROL_LIMIT, before + sign * amount));
+    this.control[holdingId] = after;
+
+    const held = this.controllerOf(holdingId);
+    const challenger = holding.claimants[0] === held ? holding.claimants[1] : holding.claimants[0];
+    const challengerSign = holding.claimants[1] === challenger ? 1 : -1;
+    // A flip needs the far threshold, not the midpoint: crossing zero would
+    // have a contested front changing hands every couple of kills, and a
+    // banner that flickers is a banner nobody reads.
+    if (after * challengerSign >= FLIP_THRESHOLD) {
+      this.controller[holdingId] = challenger;
+      this.events.push({
+        t: 'holdingChanged',
+        holdingId,
+        name: holding.name,
+        from: held,
+        to: challenger,
+        byPlayer,
+      });
+    }
+  }
+
+  /**
+   * The war carries on without you.
+   *
+   * Called once per tick. Each front drifts at its own rate, so a zone has
+   * places quietly falling and places quietly holding rather than one uniform
+   * tide — and a player who walks away and comes back finds the map moved.
+   */
+  private tickTerritory(): void {
+    for (const holding of HOLDINGS) {
+      if (holding.drift === 0) continue;
+      const toward = holding.drift > 0 ? holding.claimants[1] : holding.claimants[0];
+      const perTick = (Math.abs(holding.drift) * TICK_MS) / 60000;
+      this.applyPressure(holding.id, toward, perTick, false);
+    }
+  }
+
+  /**
+   * What stands at a guard post right now.
+   *
+   * The zone's own `mobId` is only a fallback: the garrison follows control,
+   * which is what makes a flip something you can walk into and see rather than
+   * a number in a menu.
+   */
+  private garrisonFor(spawn: { mobId: string; holding?: string }): string {
+    if (!spawn.holding) return spawn.mobId;
+    const holding = getHolding(spawn.holding);
+    return holding.garrison[this.controllerOf(spawn.holding)] ?? spawn.mobId;
+  }
+
+  // -------------------------------------------------------------- standing
+
+  /** What a faction makes of the player, from -1000 to +1000. */
+  standingWith(entity: Entity, factionId: FactionId): number {
+    return entity.standing?.[factionId] ?? 0;
+  }
+
+  /**
+   * Move standing, and report it when the change means something.
+   *
+   * Only band crossings are announced. A player killing a camp does not need
+   * a line of log per corpse; they need to be told the moment the outlaws
+   * decide they are an enemy.
+   */
+  private addStanding(player: Entity, factionId: FactionId, amount: number): void {
+    player.standing = player.standing ?? {};
+    const before = player.standing[factionId] ?? 0;
+    const after = Math.max(-STANDING_LIMIT, Math.min(STANDING_LIMIT, before + amount));
+    player.standing[factionId] = after;
+    if (standingBand(before) !== standingBand(after)) {
+      this.events.push({
+        t: 'standingChanged',
+        entityId: player.id,
+        factionId,
+        value: after,
+        band: standingBand(after),
+      });
+    }
+  }
+
+  /**
+   * Whether this creature starts fights with the player.
+   *
+   * Wildlife always does — a bear does not care about your reputation. People
+   * are the interesting case: come to terms with a faction and its guards stop
+   * swinging at you, wrong them badly enough and they attack on sight even
+   * outside their own aggro radius. In a game with no other players in it,
+   * this is the most legible way the world can react to what you have done.
+   */
+  private isHostileTo(mob: Entity, player: Entity): boolean {
+    const factionId = getMob(mob.defId!).factionId;
+    if (!factionId) return true;
+    return this.standingWith(player, factionId) < TRUCE_AT;
+  }
+
+  /** Faction guards notice a hated enemy from further off. */
+  private aggroRadiusFor(mob: Entity, player: Entity): number {
+    const def = getMob(mob.defId!);
+    const base = def.aggroRadius;
+    if (!def.factionId) return base;
+    return this.standingWith(player, def.factionId) <= HOSTILE_AT ? base * 1.6 : base;
+  }
+
+  /**
+   * Everything a kill does to the political map.
+   *
+   * One kill is a rounding error; a session of them is a front moving. That
+   * ratio is the point — territory should be earned at grind scale, in the
+   * same currency the rest of the game is paid in.
+   */
+  private applyKillPolitics(player: Entity, victim: Entity): void {
+    const def = getMob(victim.defId!);
+    const factionId = def.factionId;
+    if (!factionId) return;
+
+    this.addStanding(player, factionId, -STANDING_PER_KILL);
+    const rival = getFaction(factionId).rival;
+    this.addStanding(player, rival, STANDING_PER_KILL * STANDING_RIVAL_SHARE);
+
+    const pressure = isBoss(def.stars) ? PRESSURE_PER_BOSS : PRESSURE_PER_KILL;
+    const front = this.frontFor(victim, factionId);
+    if (!front) return;
+    const challenger =
+      front.claimants[0] === factionId ? front.claimants[1] : front.claimants[0];
+    this.applyPressure(front.id, challenger, pressure, true);
+  }
+
+  /**
+   * Which front a kill counts toward: the one it happened at.
+   *
+   * A guard dies at their own post. Anyone else is credited to the nearest
+   * front their faction holds in this zone, so clearing a camp in the open
+   * still weakens the people who sent them.
+   *
+   * Spreading one kill across every front that faction holds was the obvious
+   * alternative and it is worse: it makes the map move somewhere you are not,
+   * so a player fighting at the Road Watch watches the Southern Marsh fall.
+   * Territory should be taken where you are standing.
+   */
+  private frontFor(victim: Entity, factionId: FactionId): (typeof HOLDINGS)[number] | undefined {
+    if (victim.holding && this.controllerOf(victim.holding) === factionId) {
+      return getHolding(victim.holding);
+    }
+    const here = HOLDINGS.filter(
+      (h) => h.zoneId === this.zone.id && this.controllerOf(h.id) === factionId,
+    );
+    if (here.length === 0) return undefined;
+    return here.reduce((closest, h) =>
+      dist(victim.pos.x, victim.pos.z, h.pos.x, h.pos.z) <
+      dist(victim.pos.x, victim.pos.z, closest.pos.x, closest.pos.z)
+        ? h
+        : closest,
+    );
+  }
+
+  private spawnMob(
+    requestedId: string,
+    pos: Vec2,
+    summonedBy?: EntityId,
+    holding?: string,
+  ): Entity {
     // A rare asked for BY NAME is spawned as itself. Only a camp spawn point
     // rolls — and unwrapping `rareOf` here as well silently turned every
     // deliberate rare spawn back into its host, which had a balance test
@@ -201,6 +435,7 @@ export class World {
       cast: null,
       defId,
       spawnPos: { ...pos },
+      ...(holding !== undefined ? { holding } : {}),
       aiState: 'idle',
       threat: {},
       abilityCooldowns: {},
@@ -446,6 +681,7 @@ export class World {
     this.queue = [];
     for (const { actorId, cmd } of pending) this.applyCommand(actorId, cmd);
 
+    this.tickTerritory();
     this.tickCooldowns();
     this.tickEffects();
     this.tickCasts();
@@ -539,7 +775,8 @@ export class World {
           const player = this.player;
           if (
             !player.dead &&
-            dist(e.pos.x, e.pos.z, player.pos.x, player.pos.z) <= def.aggroRadius
+            this.isHostileTo(e, player) &&
+            dist(e.pos.x, e.pos.z, player.pos.x, player.pos.z) <= this.aggroRadiusFor(e, player)
           ) {
             e.targetId = player.id;
             e.threat![player.id] = 1;
@@ -891,7 +1128,14 @@ export class World {
       // a rare turns up and how the camp goes back to normal after one dies.
       // Resolve to the ordinary mob first: the point belongs to the camp, not
       // to whatever named creature last stood on it.
-      const defId = this.spawnChoice(getMob(e.defId!).rareOf ?? e.defId!, false);
+      //
+      // A guard post also re-reads who holds the ground, so a front that
+      // flipped while you were standing on it visibly changes hands one
+      // respawn at a time rather than all at once.
+      const base = e.holding
+        ? this.garrisonFor({ mobId: getMob(e.defId!).rareOf ?? e.defId!, holding: e.holding })
+        : (getMob(e.defId!).rareOf ?? e.defId!);
+      const defId = this.spawnChoice(base, false);
       if (defId !== e.defId) {
         const def = getMob(defId);
         e.defId = defId;
@@ -1035,6 +1279,7 @@ export class World {
       if (killer && killer.kind === 'player') {
         this.awardXp(killer, xpForKill(def.xp, def.level, killer.level));
         this.advanceQuests(killer, (o) => (o.kind === 'kill' && o.mobId === def.id ? 1 : 0));
+        this.applyKillPolitics(killer, victim);
       }
     } else {
       // Player death: everything currently hunting them goes home.
@@ -1042,6 +1287,34 @@ export class World {
         if (e.kind === 'mob' && e.targetId === victim.id) this.leashMob(e);
       }
     }
+  }
+
+  /**
+   * What finishing a job for someone does to the map.
+   *
+   * Every trader in the game is a Freeholder, so their work pushes the
+   * Freeholder claim on whatever front is contested in the zone you did it
+   * in. This is the counterweight to the drift: a zone that is quietly losing
+   * ground can be held by a player who actually does the work there.
+   */
+  private applyQuestPolitics(player: Entity, vendorId: string): void {
+    const backer: FactionId = 'freeholders';
+    this.addStanding(player, backer, STANDING_PER_QUEST);
+    // Whichever front in this zone is furthest from Freeholder hands: a
+    // trader spends the goodwill you earned them where they need it most,
+    // which is also where the player will notice it.
+    const contested = HOLDINGS.filter(
+      (h) => h.zoneId === this.zone.id && h.claimants.includes(backer),
+    ).sort((a, b) => this.towards(a, backer) - this.towards(b, backer));
+    const front = contested[0];
+    if (front) this.applyPressure(front.id, backer, PRESSURE_PER_QUEST, true);
+    void vendorId;
+  }
+
+  /** Signed control in a faction's favour, -CONTROL_LIMIT..+CONTROL_LIMIT. */
+  private towards(holding: (typeof HOLDINGS)[number], faction: FactionId): number {
+    const sign = holding.claimants[1] === faction ? 1 : -1;
+    return (this.control[holding.id] ?? 0) * sign;
   }
 
   private rollLoot(mob: Entity, killer: Entity | undefined): void {
@@ -1433,6 +1706,8 @@ export class World {
     for (const itemId of items) this.addItem(player, { itemId, qty: 1 });
     player.gold = (player.gold ?? 0) + quest.rewards.gold;
 
+    this.applyQuestPolitics(player, quest.giverVendorId);
+
     this.events.push({
       t: 'questCompleted',
       entityId: player.id,
@@ -1565,7 +1840,7 @@ export class World {
     player.cast = null;
     player.effects = [];
 
-    for (const sp of zone.spawns) this.spawnMob(sp.mobId, sp.pos);
+    for (const sp of zone.spawns) this.spawnMob(this.garrisonFor(sp), sp.pos, undefined, sp.holding);
     for (const v of zone.vendors) this.spawnVendor(v.vendorId, v.pos);
 
     this.events.push({
@@ -1605,6 +1880,20 @@ export class World {
     this.events.push({ t: 'sold', entityId: player.id, itemId, qty: selling, gold });
   }
 
+  /**
+   * What this player pays, after the trader's opinion of them.
+   *
+   * Every trader is a Freeholder, so helping them is a discount and hunting
+   * them is a markup. It is a small number by design — a shop that refuses a
+   * hated player entirely would strand someone who wandered into the wrong
+   * fight at level 6 with nowhere to repair.
+   */
+  priceFor(player: Entity, itemId: string): number {
+    const base = buyPrice(getItem(itemId));
+    const standing = this.standingWith(player, 'freeholders') / STANDING_LIMIT;
+    return Math.max(1, Math.round(base * (1 - standing * STANDING_PRICE_SWING)));
+  }
+
   private tryBuy(player: Entity, vendorId: EntityId, itemId: string): void {
     if (player.kind !== 'player') return;
     const vendor = this.vendorInReach(player, vendorId);
@@ -1615,8 +1904,7 @@ export class World {
       this.events.push({ t: 'error', entityId: player.id, message: 'That is not for sale.' });
       return;
     }
-    const item = getItem(itemId);
-    const price = buyPrice(item);
+    const price = this.priceFor(player, itemId);
     if ((player.gold ?? 0) < price) {
       this.events.push({ t: 'error', entityId: player.id, message: 'You cannot afford that.' });
       return;
@@ -1745,6 +2033,10 @@ export class World {
       nextId: this.nextId,
       playerId: this.playerId,
       zoneId: this.zone.id,
+      // The war is world state, not player state: it has to survive a save or
+      // the map resets to "the outlaws own everything" every time you load.
+      control: this.control,
+      controller: this.controller,
       entities: [...this.entities.values()],
     });
   }
@@ -1757,6 +2049,8 @@ export class World {
       nextId: number;
       playerId: EntityId;
       zoneId?: string;
+      control?: Record<string, number>;
+      controller?: Record<string, FactionId>;
       entities: Entity[];
     };
     if (data.version !== SAVE_VERSION) {
@@ -1774,6 +2068,8 @@ export class World {
     world.tickCount = data.tickCount;
     world.nextId = data.nextId;
     world.playerId = data.playerId;
+    if (data.control) world.control = { ...world.control, ...data.control };
+    if (data.controller) world.controller = { ...world.controller, ...data.controller };
     for (const e of data.entities) {
       // JSON turns numeric threat keys into strings; normalize them back.
       if (e.threat) {
