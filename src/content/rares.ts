@@ -1,4 +1,4 @@
-import type { ClassId, EquipSlot, ItemDef, ItemQuality, StarRating } from '../sim/types.js';
+import type { ArmorSlot, ClassId, ItemDef, ItemQuality, StarRating } from '../sim/types.js';
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from './curves.js';
 import { zoneTomes } from './skills.js';
 
@@ -43,7 +43,7 @@ export interface RareSpec {
   hostStars: StarRating;
   carries: RareCarry;
   /** relic only. */
-  slot?: Exclude<EquipSlot, 'weapon'>;
+  slot?: ArmorSlot;
   /** One line for the combat log when it turns up. */
   sighting: string;
 }
@@ -168,7 +168,7 @@ const SIGNATURE_WEAPON_NOUN: Record<ClassId, string> = {
   mage: 'Rod',
 };
 
-const SIGNATURE_RELIC_NOUN: Record<Exclude<EquipSlot, 'weapon'>, string> = {
+const SIGNATURE_RELIC_NOUN: Record<ArmorSlot, string> = {
   head: 'Crown',
   chest: 'Mail',
   legs: 'Greaves',
@@ -482,7 +482,7 @@ export function buildSignatureItems(): Record<string, ItemDef> {
  * One affix per slot, chosen so a full signature set is a spread of small
  * advantages rather than one stacked stat.
  */
-const RELIC_AFFIX: Record<Exclude<EquipSlot, 'weapon'>, (level: number) => Partial<ItemDef>> = {
+const RELIC_AFFIX: Record<ArmorSlot, (level: number) => Partial<ItemDef>> = {
   head: (level) => ({ healthBonus: Math.round(level * 4) }),
   chest: (level) => ({ healthBonus: Math.round(level * 7) }),
   legs: () => ({ moveSpeedBonus: 0.35 }),

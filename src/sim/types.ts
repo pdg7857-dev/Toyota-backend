@@ -62,6 +62,10 @@ export interface DerivedStats {
   /** Melee reach / weapon range, in world units. */
   attackRange: number;
   moveSpeed: number;
+  /** Multiplier on skill damage and healing. 1 for anyone without a grimoire. */
+  skillPower: number;
+  /** Flat health per second on top of the percentage regen. */
+  regenPerSec: number;
 }
 
 /**
@@ -70,7 +74,18 @@ export interface DerivedStats {
  */
 export type FactionId = 'freeholders' | 'outlaws' | 'clans' | 'wreckers' | 'blackshields';
 
-export type EquipSlot = 'weapon' | 'head' | 'chest' | 'legs' | 'ring';
+/** The four armour slots the ladders and quest sets are built around. */
+export type ArmorSlot = 'head' | 'chest' | 'legs' | 'ring';
+
+/**
+ * Everything you can wear.
+ *
+ * `offhand`, `amulet` and `bracelet` exist for the luxury goods — see
+ * `content/luxury.ts`. They are deliberately NOT part of any ladder: no mob
+ * drops one, no quest pays one out. They are bought, and the price is the
+ * content.
+ */
+export type EquipSlot = 'weapon' | ArmorSlot | 'offhand' | 'amulet' | 'bracelet';
 
 export type ItemQuality = 'common' | 'uncommon' | 'rare' | 'epic';
 
@@ -117,6 +132,25 @@ export interface ItemDef {
   healthBonus?: number;
   /** Flat movement speed, in world units per second. */
   moveSpeedBonus?: number;
+
+  // --- luxury affixes ------------------------------------------------------
+  // The offhand slots. Bought, never dropped.
+  /** Flat damage added to every weapon swing — an offhand blade. */
+  damageBonus?: number;
+  /** Multiplier on everything a skill does: damage, ticks and heals. */
+  skillPower?: number;
+  /** Flat health per second, in and out of combat — an amulet or bracelet. */
+  regenBonus?: number;
+
+  /**
+   * Level needed to equip it.
+   *
+   * Only the luxury goods use this. Gold can be earned at any level — a
+   * bounty spawn at level 12 pays a level-12 purse, but nothing stops a
+   * patient player hoarding — and a level cap is what keeps the best gear in
+   * the game from being a shortcut past eighty levels of it.
+   */
+  reqLevel?: number;
 }
 
 export interface ItemStack {

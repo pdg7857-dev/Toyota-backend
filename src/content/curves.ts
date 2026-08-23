@@ -1,4 +1,4 @@
-import type { EquipSlot } from '../sim/types.js';
+import type { ArmorSlot } from '../sim/types.js';
 
 /**
  * Gear curves, shared by the tier ladders in `items.ts` and the signature
@@ -30,7 +30,7 @@ export function curveArmorTotal(level: number): number {
 }
 
 /** How that total splits across slots, matching the hand-built level-25 set. */
-export const ARMOR_SLOT_SHARE: Record<Exclude<EquipSlot, 'weapon'>, number> = {
+export const ARMOR_SLOT_SHARE: Record<ArmorSlot, number> = {
   head: 0.22,
   chest: 0.4,
   legs: 0.31,

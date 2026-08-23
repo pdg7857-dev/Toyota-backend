@@ -235,11 +235,13 @@ export function deriveStats(input: DeriveInput): DerivedStats {
     // balance suite caught within a run.
     critChance: Math.min(0.6, Math.min(0.5, 0.03 + a.dexterity * 0.0025) + affix.crit),
     swingMs: Math.max(600, Math.round(weapon.swingMs * Math.max(0.75, hasteFactor))),
-    damageMin: weapon.damageMin,
-    damageMax: weapon.damageMax,
+    damageMin: weapon.damageMin + affix.damage,
+    damageMax: weapon.damageMax + affix.damage,
     damageType: weapon.damageType,
     attackRange: weapon.attackRange,
     moveSpeed: 5.2 + affix.moveSpeed,
+    skillPower: affix.skillPower,
+    regenPerSec: affix.regen,
   };
 }
 
@@ -308,6 +310,9 @@ export function deriveMobStats(def: MobDef): DerivedStats {
     damageType: def.damageType,
     attackRange: def.attackRange,
     moveSpeed: def.moveSpeed,
+    // Mobs carry no luxury goods. Nothing they do reads either field.
+    skillPower: 1,
+    regenPerSec: 0,
   };
 }
 
@@ -477,6 +482,11 @@ export function applyItem(
   acc.affix.crit += item.critBonus ?? 0;
   acc.affix.health += item.healthBonus ?? 0;
   acc.affix.moveSpeed += item.moveSpeedBonus ?? 0;
+  acc.affix.damage += item.damageBonus ?? 0;
+  // Grimoires multiply rather than add: two of them should compound the way
+  // two damage buffs do, not stack into a flat doubling.
+  acc.affix.skillPower *= item.skillPower ?? 1;
+  acc.affix.regen += item.regenBonus ?? 0;
 }
 
 /** Signature affixes summed across equipped gear. Ladder items contribute 0. */
@@ -484,10 +494,16 @@ export interface Affixes {
   crit: number;
   health: number;
   moveSpeed: number;
+  /** Flat damage from an offhand blade. */
+  damage: number;
+  /** Multiplicative skill power from a grimoire. */
+  skillPower: number;
+  /** Flat health per second from an amulet or bracelet. */
+  regen: number;
 }
 
 export function emptyAffixes(): Affixes {
-  return { crit: 0, health: 0, moveSpeed: 0 };
+  return { crit: 0, health: 0, moveSpeed: 0, damage: 0, skillPower: 1, regen: 0 };
 }
 
 export function dist(ax: number, az: number, bx: number, bz: number): number {

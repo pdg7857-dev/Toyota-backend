@@ -1,3 +1,4 @@
+import { LUXURY_VENDOR_ID, luxuryMerchant } from './luxury.js';
 import { zoneTomes } from './skills.js';
 import type { ItemDef, VendorDef } from '../sim/types.js';
 
@@ -10,6 +11,12 @@ import type { ItemDef, VendorDef } from '../sim/types.js';
  *
  * They are deliberately NOT a shortcut past the grind — stock tops out at the
  * uncommon tier, so rares and epics still come from killing things.
+ *
+ * With exactly one exception. The luxury merchant (`content/luxury.ts`) sells
+ * epics, and the rule survives because for that shop **the price is the
+ * grind**: nobody buys a Sovereign Bulwark instead of playing, they buy one
+ * because they played. `MAX_STOCK_QUALITY` applies to every other trader, and
+ * a test enforces both halves.
  *
  * That cap is why a trader can sell SKILLS as well as gear without becoming a
  * shortcut. Each zone teaches three skills per class; the trader stocks the
@@ -128,6 +135,8 @@ Object.assign(VENDORS, {
     'caer_dubh',
   ),
 });
+
+Object.assign(VENDORS, { [LUXURY_VENDOR_ID]: luxuryMerchant() });
 
 export function getVendor(id: string): VendorDef {
   const vendor = VENDORS[id];

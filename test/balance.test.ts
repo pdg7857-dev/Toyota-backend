@@ -32,7 +32,7 @@ import {
   dragonMobId,
   dragonWeaponId,
 } from '../src/content/dragons.js';
-import { curveWeaponDps } from '../src/content/curves.js';
+import { curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
 import { FENMARCH, PLAYABLE_CLASSES, ZONES } from '../src/content/zone.js';
 import { QUESTS } from '../src/content/quests.js';
 import {
@@ -44,6 +44,7 @@ import {
 } from '../src/content/factions.js';
 import { ITEMS, WEAPON_LADDER, canEquip, gearSetFor, getItem } from '../src/content/items.js';
 import { MAX_STOCK_QUALITY, VENDORS, buyPrice, sellPrice } from '../src/content/vendors.js';
+import { LUXURY_VENDOR_ID } from '../src/content/luxury.js';
 import { skillBarFor, skillsForClass, skillsTaughtBy } from '../src/content/skills.js';
 
 /**
@@ -1213,6 +1214,103 @@ describe('dragons are the hardest thing in the game', () => {
   });
 });
 
+describe('the luxury merchant', () => {
+  it('prices the best gear in the game like the last thing you buy', () => {
+    const rows: string[] = [];
+    for (const itemId of VENDORS[LUXURY_VENDOR_ID]!.stock) {
+      const item = getItem(itemId);
+      const level = item.reqLevel!;
+      // Denominated in ORDINARY kills at that level — what a player actually
+      // farms. Measuring against a boss made a Sovereign Bulwark look like
+      // ten kills, because a boss pays a boss's purse and you cannot repeat it.
+      const peer = Object.values(MOBS)
+        .filter(
+          (m) =>
+            !m.dragon && !m.rareOf && m.stars < BOSS_STARS && Math.abs(m.level - level) <= 5,
+        )
+        .sort((a, b) => b.stars - a.stars)[0]!;
+      const g = goldForKill(peer.level, peer.stars, LOOT_TABLES[peer.lootTableId]!.goldMultiplier ?? 1);
+      const kills = buyPrice(item) / ((g.min + g.max) / 2);
+      rows.push(
+        `  ${item.name.padEnd(26)} lv${String(level).padStart(3)}  ` +
+          `${buyPrice(item).toLocaleString().padStart(10)}g = ${kills.toFixed(0).padStart(5)} ${peer.name} kills`,
+      );
+      // Expensive enough to be a project, not so expensive it is decoration.
+      expect(kills, `${item.name} is pocket change`).toBeGreaterThan(150);
+      expect(kills, `${item.name} will never be bought`).toBeLessThan(2000);
+    }
+    console.log('\nLUXURY GOODS\n' + rows.join('\n'));
+  });
+
+  it('stays a step below what a dragon carries', () => {
+    // If money bought the best item in the game, killing the dragon would be
+    // a formality. The offhand is worth a quarter of a main weapon; a dragon's
+    // weapon is worth a third more than the ladder's.
+    for (const itemId of VENDORS[LUXURY_VENDOR_ID]!.stock) {
+      const item = getItem(itemId);
+      const level = item.reqLevel!;
+      const mainHand = curveWeaponDps(level);
+      if (item.damageBonus) {
+        // Flat damage per swing, judged against a two-second swing.
+        const asDps = item.damageBonus / 2;
+        expect(asDps / mainHand, `${item.name} outguns a main hand`).toBeLessThan(0.45);
+      }
+      if (item.armor) {
+        expect(item.armor / curveArmorTotal(level)).toBeLessThan(0.5);
+      }
+      if (item.skillPower) {
+        expect(item.skillPower, `${item.name} rewrites the class`).toBeLessThan(1.25);
+      }
+      // Nothing here is a weapon: it can never replace what a dragon drops.
+      expect(item.slot).not.toBe('weapon');
+    }
+  });
+
+  it('gives one offhand slot three different characters', () => {
+    // The build choice is the point: damage, survivability or casting.
+    const tier = 'Sovereign';
+    const blade = getItem(`lux_${tier.toLowerCase()}_blade`);
+    const shield = getItem(`lux_${tier.toLowerCase()}_shield`);
+    const grimoire = getItem(`lux_${tier.toLowerCase()}_grimoire`);
+    expect(blade.damageBonus).toBeGreaterThan(0);
+    expect(blade.armor ?? 0).toBe(0);
+    expect(shield.armor).toBeGreaterThan(0);
+    expect(shield.damageBonus ?? 0).toBe(0);
+    expect(grimoire.skillPower).toBeGreaterThan(1);
+    expect(grimoire.damageBonus ?? 0).toBe(0);
+    for (const item of [blade, shield, grimoire]) expect(item.slot).toBe('offhand');
+  });
+
+  it('makes a grimoire worth most to whoever casts most', () => {
+    // Measured, not asserted from the numbers: a Mage lives on skills, a
+    // Warrior lives on swings, and the slot should say so.
+    const rows: string[] = [];
+    for (const cls of PLAYABLE_CLASSES) {
+      const level = 100;
+      const known = learnedAt(cls.id, level);
+      const kit = skillsForClass(cls.id, level, known).map((sk) => sk.id);
+      const run = (offhand: string | null): number =>
+        runEncounter(
+          {
+            name: cls.name,
+            level,
+            gear: [...gearSetFor(cls.id, level), ...(offhand ? [offhand] : [])],
+            mobId: 'fort_warden',
+            skills: kit,
+            classId: cls.id,
+          },
+          12,
+        ).medianTtk;
+      const bare = run(null);
+      const withGrimoire = run('lux_sovereign_grimoire');
+      const gain = (bare - withGrimoire) / bare;
+      rows.push(`  ${cls.name.padEnd(8)} ${bare.toFixed(1)}s → ${withGrimoire.toFixed(1)}s  (${(gain * 100).toFixed(0)}% faster)`);
+      expect(withGrimoire, `${cls.id} got nothing from a grimoire`).toBeLessThanOrEqual(bare);
+    }
+    console.log('\nGRIMOIRE (level 100 vs the Fort Warden)\n' + rows.join('\n'));
+  });
+});
+
 describe('the vendor economy', () => {
   it('pays full value for merchant goods and a fraction for gear', () => {
     // Merchant goods exist to be sold, so they fetch their listed value.
@@ -1232,12 +1330,20 @@ describe('the vendor economy', () => {
     }
   });
 
-  it('never stocks anything above uncommon', () => {
-    // Rares and epics are earned by killing things, not bought.
+  it('never stocks anything above uncommon, except the one shop that is the grind', () => {
+    // Rares and epics are earned by killing things, not bought. The luxury
+    // merchant is the deliberate exception: everything there is epic, and the
+    // rule survives because for that shop the PRICE is the grind. Nobody buys
+    // a Sovereign Bulwark instead of playing.
     const rank = { common: 0, uncommon: 1, rare: 2, epic: 3 };
     for (const vendor of Object.values(VENDORS)) {
       for (const itemId of vendor.stock) {
         const item = getItem(itemId);
+        if (vendor.id === LUXURY_VENDOR_ID) {
+          expect(item.quality, `${item.name} is not luxury enough`).toBe('epic');
+          expect(item.reqLevel, `${item.name} has no level gate`).toBeGreaterThan(0);
+          continue;
+        }
         expect(
           rank[item.quality],
           `${vendor.name} stocks ${item.name} (${item.quality})`,

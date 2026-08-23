@@ -1290,7 +1290,10 @@ export class World {
       if (e.dead || e.kind === 'vendor') continue;
       const stats = this.statsOf(e);
       const combat = this.inCombat(e.id);
-      e.health = Math.min(stats.maxHealth, e.health + healthRegenPerSec(stats, combat) * dt);
+      // The flat part comes from amulets and bracelets and does NOT scale with
+      // max health, so it is worth most to the classes with the least of it.
+      const regen = healthRegenPerSec(stats, combat) + stats.regenPerSec;
+      e.health = Math.min(stats.maxHealth, e.health + regen * dt);
       e.energy = Math.min(stats.maxEnergy, e.energy + energyRegenPerSec(stats, combat) * dt);
     }
   }
@@ -1699,8 +1702,11 @@ export class World {
         const result = resolveAttack(this.rng, stats, this.statsOf(target), {
           levelDiff: source.level - target.level,
           attackerLevel: source.level,
-          weaponMultiplier: skill.weaponMultiplier ?? 1,
-          flatPower: skill.flatPower ?? 0,
+          // A grimoire makes what you CAST hit harder, and nothing else. It is
+          // deliberately not a damage buff: it is worth most to the classes
+          // whose damage is mostly skills, which is the point of the slot.
+          weaponMultiplier: (skill.weaponMultiplier ?? 1) * stats.skillPower,
+          flatPower: (skill.flatPower ?? 0) * stats.skillPower,
         });
         if (!result.hit) {
           this.events.push({ t: 'miss', sourceId: source.id, targetId: target.id });
@@ -1732,7 +1738,7 @@ export class World {
           tickMs: skill.tickMs ?? 1000,
           sinceTickMs: 0,
           damageType: skill.damageType ?? 'physical',
-          dotPower: (skill.flatPower ?? 0) + stats.attack * 0.15,
+          dotPower: ((skill.flatPower ?? 0) + stats.attack * 0.15) * stats.skillPower,
         });
         this.markCombat(source.id);
         this.markCombat(target.id);
@@ -1740,7 +1746,7 @@ export class World {
       }
       case 'heal': {
         const target = this.entities.get(targetId ?? source.id) ?? source;
-        const amount = Math.round((skill.flatPower ?? 0) + stats.attack * 0.5);
+        const amount = Math.round(((skill.flatPower ?? 0) + stats.attack * 0.5) * stats.skillPower);
         const before = target.health;
         target.health = Math.min(this.statsOf(target).maxHealth, target.health + amount);
         this.events.push({
@@ -2204,6 +2210,14 @@ export class World {
         t: 'error',
         entityId: player.id,
         message: `${def.name} cannot be used by a ${player.classId ?? 'character'}.`,
+      });
+      return;
+    }
+    if (def.reqLevel && player.level < def.reqLevel) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `${def.name} needs level ${def.reqLevel}.`,
       });
       return;
     }

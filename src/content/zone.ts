@@ -180,6 +180,9 @@ export const FENMARCH: ZoneDef = {
   vendors: [
     // At the standing stones, where you start and where you come back to.
     { vendorId: 'maeve', pos: { x: 0, z: 96 } },
+    // And the one whose wagon a level-1 character walks straight past on the
+    // way to kill hares. The carrot has to be visible from the beginning.
+    { vendorId: 'ceallach', pos: { x: -14, z: 98 } },
     // Off the road east of the outlaw watch, for the second half of the zone.
     { vendorId: 'bryn', pos: { x: 52, z: -30 } },
   ],

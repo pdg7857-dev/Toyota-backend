@@ -1525,16 +1525,25 @@ describe('rare spawns', () => {
   });
 
   it('carries an affix no ladder item has', () => {
-    // Affixes belong to the two things you cannot plan for: a named creature
-    // you camp for, and a dragon that turns up when it feels like it.
-    const unplannable = (id: string): boolean => id.startsWith('sig_') || id.startsWith('wyrm_');
+    // Affixes belong to the things a ladder tier never is: a named creature
+    // you camp for, a dragon that turns up when it feels like it, and the one
+    // shop whose prices are themselves the grind. Everything that DROPS from
+    // an ordinary source is a statline and nothing more.
+    const unplannable = (id: string): boolean =>
+      id.startsWith('sig_') || id.startsWith('wyrm_') || id.startsWith('lux_');
     for (const item of Object.values(ITEMS).filter((i) => !unplannable(i.id))) {
       expect(item.critBonus ?? 0, `${item.name} grew an affix`).toBe(0);
       expect(item.healthBonus ?? 0, `${item.name} grew an affix`).toBe(0);
       expect(item.moveSpeedBonus ?? 0, `${item.name} grew an affix`).toBe(0);
     }
     for (const item of Object.values(ITEMS).filter((i) => unplannable(i.id))) {
-      const affixes = (item.critBonus ?? 0) + (item.healthBonus ?? 0) + (item.moveSpeedBonus ?? 0);
+      const affixes =
+        (item.critBonus ?? 0) +
+        (item.healthBonus ?? 0) +
+        (item.moveSpeedBonus ?? 0) +
+        (item.damageBonus ?? 0) +
+        (item.regenBonus ?? 0) +
+        ((item.skillPower ?? 1) - 1);
       expect(affixes, `${item.name} is just a better statline`).toBeGreaterThan(0);
     }
   });

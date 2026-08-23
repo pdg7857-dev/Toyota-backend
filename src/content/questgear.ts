@@ -1,4 +1,4 @@
-import type { ClassId, EquipSlot, ItemDef } from '../sim/types.js';
+import type { ArmorSlot, ClassId, ItemDef } from '../sim/types.js';
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from './curves.js';
 
 /**
@@ -23,7 +23,7 @@ import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from './curves.js';
  */
 
 export interface ArmourStep {
-  slot: Exclude<EquipSlot, 'weapon'>;
+  slot: ArmorSlot;
   /** Level the step is set at; the piece is built for it. */
   level: number;
   /** Camp the trophy drops from. */
@@ -66,7 +66,7 @@ const QUEST_WEAPON_POWER = 1.08;
 /** Trophies drop at this rate from their camp, which is what makes the count plannable. */
 export const TROPHY_DROP_CHANCE = 0.12;
 
-const ARMOUR_NOUN: Record<Exclude<EquipSlot, 'weapon'>, string> = {
+const ARMOUR_NOUN: Record<ArmorSlot, string> = {
   head: 'Helm',
   chest: 'Hauberk',
   legs: 'Greaves',

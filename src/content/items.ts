@@ -1,5 +1,6 @@
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from './curves.js';
 import { buildDragonItems } from './dragons.js';
+import { buildLuxuryGoods } from './luxury.js';
 import { buildQuestGear } from './questgear.js';
 import { buildSignatureItems } from './rares.js';
 import { skillsTaughtBy, tomeNoun } from './skills.js';
@@ -788,6 +789,9 @@ Object.assign(ITEMS, buildQuestGear());
 
 // And the four things you cannot plan for.
 Object.assign(ITEMS, buildDragonItems());
+
+// The one thing you can only buy.
+Object.assign(ITEMS, buildLuxuryGoods());
 
 export function getItem(id: string): ItemDef {
   const item = ITEMS[id];
