@@ -8,6 +8,7 @@ import { xpToNext } from '../sim/formulas.js';
 import { BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
 import { ZONES } from '../content/zone.js';
 import { DRAGONS } from '../content/dragons.js';
+import { getMount } from '../content/mounts.js';
 import {
   FACTIONS,
   HOLDINGS,
@@ -289,6 +290,27 @@ export class Hud {
         case 'levelUp':
           this.log(`You have reached level ${ev.level}!`, 'log-good');
           break;
+        case 'captured': {
+          this.log(
+            ev.mountId
+              ? `The ${ev.name} lets you get a hand on its mane. It is yours.`
+              : `The ${ev.name} throws you off and comes back angry.`,
+            ev.mountId ? 'log-good' : 'log-warn',
+          );
+          break;
+        }
+        case 'mounted': {
+          const name = ev.mountId ? getMount(ev.mountId).name : null;
+          this.log(
+            ev.unseated
+              ? 'You are thrown out of the saddle.'
+              : name
+                ? `You swing up onto the ${name}.`
+                : 'You dismount.',
+            ev.unseated ? 'log-warn' : 'log-loot',
+          );
+          break;
+        }
         case 'dragon': {
           this.log(ev.text, 'log-dragon');
           // Only the moments that change what the world looks like get a
@@ -672,7 +694,12 @@ export class Hud {
 
       const stars = def?.stars ?? 0;
       const name = plate.querySelector<HTMLElement>('.np-name')!;
-      if (lootable) {
+      const horse = def?.horse;
+      const spent =
+        horse && !entity.dead && entity.health / this.world.statsOf(entity).maxHealth <= 0.25;
+      if (spent && !(player.stable ?? []).includes(horse!)) {
+        name.textContent = `${entity.name} — press H to take it`;
+      } else if (lootable) {
         name.textContent = `${entity.name} — press F to loot`;
       } else {
         name.innerHTML =
@@ -936,6 +963,35 @@ export class Hud {
         `<div class="realm-name">${def.name}` +
         `<span class="${state.phase === 'roosting' ? 'realm-dragon' : 'band-neutral'}">${where}</span></div>`;
       row.title = `${def.title} — ${def.age} years old, ${ZONES[def.zoneId]?.name ?? def.zoneId}.`;
+      body.appendChild(row);
+    }
+
+    const stable = document.createElement('div');
+    stable.className = 'realm-zone';
+    stable.style.marginTop = '10px';
+    stable.textContent = 'Your stable';
+    body.appendChild(stable);
+
+    const owned = player.stable ?? [];
+    if (owned.length === 0) {
+      const none = document.createElement('div');
+      none.className = 'empty';
+      none.textContent = 'No horse. There are herds out there.';
+      body.appendChild(none);
+    }
+    for (const mountId of owned) {
+      const mount = getMount(mountId);
+      const riding = player.mounted === mountId;
+      const row = document.createElement('div');
+      row.className = 'realm-row wyrm clickable';
+      row.innerHTML =
+        `<div class="realm-name">${mount.name}` +
+        `<span class="${riding ? 'band-good' : 'band-neutral'}">${riding ? 'riding' : 'stabled'}</span></div>`;
+      row.title = `${mount.blurb} Click to ${riding ? 'dismount' : 'ride'}.`;
+      row.addEventListener('click', () => {
+        this.emit({ t: 'mount', mountId: riding ? null : mountId });
+        this.renderRealm();
+      });
       body.appendChild(row);
     }
 
@@ -1338,6 +1394,6 @@ const TEMPLATE = `
     <b>WASD</b> move &nbsp; <b>Right-drag</b> look &nbsp; <b>Scroll</b> zoom<br />
     <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–0</b> / <b>⇧1–6</b> skills &nbsp; <b>T</b> auto-attack<br />
     <b>F</b> loot &nbsp; <b>E</b> trade &nbsp; <b>G</b> travel &nbsp; <b>J</b> quests<br />
-    <b>K</b> realm &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
+    <b>H</b> take horse &nbsp; <b>R</b> ride &nbsp; <b>K</b> realm &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
   </div>
 `;

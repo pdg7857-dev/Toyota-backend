@@ -7,6 +7,7 @@ import {
   dragonWeapons,
   type DragonDef,
 } from './dragons.js';
+import { MOUNTS, type MountDef } from './mounts.js';
 import { TROPHY_DROP_CHANCE, trophiesByMob } from './questgear.js';
 import {
   BOUNTIES,
@@ -1279,6 +1280,55 @@ for (const mob of Object.values(MOBS)) {
   const host = MOBS[mob.rareOf]!;
   if (host.factionId) MOBS[mob.id] = { ...mob, factionId: host.factionId };
 }
+
+// --------------------------------------------------------------------------
+// Wild horses.
+//
+// Deliberately soft and worth almost nothing dead: no gear, barely any gold,
+// a fraction of the experience their level implies. Everything about the stat
+// block is trying to say "this is not what you are here for". What you are
+// here for is `capture`.
+// --------------------------------------------------------------------------
+
+function wildHorse(def: MountDef): MobDef {
+  const damage = curveMobDamageRange(def.level);
+  return {
+    id: def.mobId,
+    name: `Wild ${def.name}`,
+    level: def.level,
+    stars: 2,
+    attributes: {
+      strength: Math.round(def.level * 0.8),
+      dexterity: Math.round(def.level * 1.1),
+      focus: Math.round(def.level * 0.3),
+      vitality: Math.round(def.level * 0.9),
+    },
+    baseHealth: Math.round(curveMobHealth(def.level) * 0.85),
+    // It kicks. It is not trying to kill you.
+    damageMin: Math.round(damage.min * 0.5),
+    damageMax: Math.round(damage.max * 0.5),
+    damageType: 'physical',
+    swingMs: 2000,
+    attackRange: 2.4,
+    moveSpeed: def.speed,
+    // Horses do not pick fights. Walk into the herd and they mind their own
+    // business until you start something.
+    aggroRadius: 0,
+    leashRadius: 40,
+    xp: Math.round(baseMobXp(def.level, 2) * 0.25),
+    lootTableId: 'wild_horse',
+    respawnMs: 45000,
+    horse: def.id,
+    view: def.view,
+  };
+}
+
+LOOT_TABLES.wild_horse = { id: 'wild_horse', goldMultiplier: 0.15, entries: [] };
+
+for (const def of MOUNTS) MOBS[def.mobId] = wildHorse(def);
+
+/** Every wild horse, for content that needs to walk them. */
+export const HORSE_MOBS: MobDef[] = MOUNTS.map((m) => MOBS[m.mobId]!);
 
 // --------------------------------------------------------------------------
 // Dragons.

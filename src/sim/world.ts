@@ -58,6 +58,11 @@ import { canEquip, getItem } from '../content/items.js';
 import { getLootTable, getMob } from '../content/mobs.js';
 import { BOUNTY_SPAWN_CHANCE, RARE_SPAWN_CHANCE } from '../content/rares.js';
 import {
+  CAPTURE_RANGE,
+  CAPTURE_THRESHOLD,
+  getMount,
+} from '../content/mounts.js';
+import {
   DRAGONS,
   DRAGON_DORMANT_MIN,
   DRAGON_HUNT_MIN,
@@ -200,6 +205,8 @@ export class World {
       equipment: { weapon: def.startingWeapon },
       skillCooldowns: {},
       learnedSkills: [],
+      stable: [],
+      mounted: null,
       gcdMs: 0,
       cast: null,
       moveDir: { x: 0, z: 0 },
@@ -323,6 +330,103 @@ export class World {
     if (!spawn.holding) return spawn.mobId;
     const holding = getHolding(spawn.holding);
     return holding.garrison[this.controllerOf(spawn.holding)] ?? spawn.mobId;
+  }
+
+  // ---------------------------------------------------------------- mounts
+
+  /**
+   * Take a weakened wild horse.
+   *
+   * The one interaction in the game that punishes finishing a fight. A horse
+   * you kill is worth almost nothing; a horse you stop hitting at the right
+   * moment is a mount. Every failure path says which mistake you made, because
+   * "nothing happened" would read as the command being broken.
+   */
+  private tryCapture(player: Entity, mobId: EntityId): void {
+    if (player.kind !== 'player') return;
+    const mob = this.entities.get(mobId);
+    const def = mob?.defId ? getMob(mob.defId) : undefined;
+    const mount = def?.horse ? getMount(def.horse) : undefined;
+    if (!mob || !mount) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'That is not a horse.' });
+      return;
+    }
+    if (mob.dead) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `You cannot ride a dead ${mount.name}.`,
+      });
+      return;
+    }
+    if (dist(player.pos.x, player.pos.z, mob.pos.x, mob.pos.z) > CAPTURE_RANGE) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'Too far to take hold of it.' });
+      return;
+    }
+    const fraction = mob.health / this.statsOf(mob).maxHealth;
+    if (fraction > CAPTURE_THRESHOLD) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `The ${mount.name} is far too strong to handle.`,
+      });
+      return;
+    }
+    if ((player.stable ?? []).includes(mount.id)) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `You already have a ${mount.name}.`,
+      });
+      return;
+    }
+
+    if (!this.rng.chance(mount.captureChance)) {
+      // A failed attempt costs you the fight: it breaks away and comes back
+      // swinging, which is what stops capture being a free retry button.
+      mob.health = this.statsOf(mob).maxHealth * 0.5;
+      mob.aiState = 'chasing';
+      mob.targetId = player.id;
+      mob.threat = { [player.id]: 1 };
+      this.events.push({ t: 'captured', entityId: player.id, mountId: null, name: mount.name });
+      return;
+    }
+
+    player.stable = [...(player.stable ?? []), mount.id];
+    this.entities.delete(mob.id);
+    this.events.push({ t: 'despawn', entityId: mob.id });
+    this.events.push({ t: 'captured', entityId: player.id, mountId: mount.id, name: mount.name });
+  }
+
+  /** Get on or off. `null` dismounts. */
+  private tryMount(player: Entity, mountId: string | null): void {
+    if (player.kind !== 'player') return;
+    if (mountId === null) {
+      if (!player.mounted) return;
+      player.mounted = null;
+      this.events.push({ t: 'mounted', entityId: player.id, mountId: null, unseated: false });
+      return;
+    }
+    if (!(player.stable ?? []).includes(mountId)) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'You have no such horse.' });
+      return;
+    }
+    player.mounted = mountId;
+    this.events.push({ t: 'mounted', entityId: player.id, mountId, unseated: false });
+  }
+
+  /**
+   * Thrown off by a telegraphed hit.
+   *
+   * The same three-way rule casting uses: the big obvious ones always land,
+   * ordinary swings never do. Being unseated by chip damage would mean nobody
+   * ever rode anything into a fight, which makes the whole mount pointless the
+   * moment combat starts.
+   */
+  private unseat(player: Entity): void {
+    if (!player.mounted) return;
+    player.mounted = null;
+    this.events.push({ t: 'mounted', entityId: player.id, mountId: null, unseated: true });
   }
 
   // --------------------------------------------------------------- dragons
@@ -727,6 +831,16 @@ export class World {
           };
         }
       }
+      // Whatever you are riding rides with you: its speed replaces yours and
+      // its bonus lands on the same accumulator gear uses, so a mount is
+      // simply another source of the same numbers.
+      const mount = e.mounted ? getMount(e.mounted) : undefined;
+      if (mount) {
+        acc.affix.damage += mount.bonus.damageBonus ?? 0;
+        acc.affix.health += mount.bonus.healthBonus ?? 0;
+        acc.affix.regen += mount.bonus.regenBonus ?? 0;
+        acc.armor += mount.bonus.armorBonus ?? 0;
+      }
       stats = deriveStats({
         level: e.level,
         attributes: acc.attributes,
@@ -735,6 +849,7 @@ export class World {
         affix: acc.affix,
         weapon,
       });
+      if (mount) stats.moveSpeed = mount.speed + acc.affix.moveSpeed;
     }
 
     // Buffs are additive on defence and multiplicative on outgoing damage.
@@ -817,6 +932,12 @@ export class World {
         break;
       case 'learnSkill':
         this.tryLearnSkill(e, cmd.itemId);
+        break;
+      case 'capture':
+        this.tryCapture(e, cmd.id);
+        break;
+      case 'mount':
+        this.tryMount(e, cmd.mountId);
         break;
       case 'unequip':
         this.tryUnequip(e, cmd.slot);
@@ -1406,6 +1527,9 @@ export class World {
         this.events.push({ t: 'aggro', mobId: target.id, targetId: sourceId });
       }
     }
+
+    // A telegraphed hit throws a rider. Ordinary swings never do.
+    if (castBreak === 'always' && target.kind === 'player') this.unseat(target);
 
     // What this hit does to an in-progress cast.
     if (

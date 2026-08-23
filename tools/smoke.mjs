@@ -417,6 +417,98 @@ async function main() {
   await wait(400);
   await page.screenshot({ path: join(OUT, '10b-rare-killed.png') });
 
+  // --- a horse ------------------------------------------------------------
+  // Wear one down, take it, ride it. Checks the one rule the mechanic turns
+  // on: you cannot capture a healthy horse, and killing it gets you nothing.
+  const horse = await page.evaluate(async () => {
+    const g = window.__game;
+    g.world.travelTo('fenmarch');
+    await new Promise((r) => setTimeout(r, 400));
+
+    const player = g.world.player;
+    player.level = 30;
+    player.stable = [];
+    player.mounted = null;
+    const wild = [...g.world.entities.values()].find(
+      (e) => e.kind === 'mob' && g.mobOf(e.defId).horse,
+    );
+    if (!wild) return { ok: false, why: 'no herd in the zone' };
+
+    player.pos.x = wild.pos.x + 1.5;
+    player.pos.z = wild.pos.z;
+    // Healthy: it should refuse.
+    g.world.submit(player.id, { t: 'capture', id: wild.id });
+    await new Promise((r) => setTimeout(r, 250));
+    const refusedWhileHealthy = !(player.stable ?? []).includes(g.mobOf(wild.defId).horse);
+
+    // Worn down: keep trying until it gives in.
+    let taken = false;
+    for (let i = 0; i < 40 && !taken; i++) {
+      wild.dead = false;
+      wild.health = g.world.statsOf(wild).maxHealth * 0.1;
+      g.world.submit(player.id, { t: 'capture', id: wild.id });
+      await new Promise((r) => setTimeout(r, 90));
+      taken = (player.stable ?? []).length > 0;
+    }
+
+    const onFoot = g.world.statsOf(player).moveSpeed;
+    g.world.submit(player.id, { t: 'mount', mountId: player.stable[0] });
+    await new Promise((r) => setTimeout(r, 300));
+    return {
+      ok: refusedWhileHealthy && taken && player.mounted === player.stable[0],
+      refusedWhileHealthy,
+      mount: player.mounted,
+      onFoot,
+      ridden: g.world.statsOf(player).moveSpeed,
+    };
+  });
+  await wait(600);
+  await page.screenshot({ path: join(OUT, '14-mounted.png') });
+
+  // --- the luxury merchant -------------------------------------------------
+  const luxury = await page.evaluate(async () => {
+    const g = window.__game;
+    const player = g.world.player;
+    const vendor = [...g.world.entities.values()].find((e) => e.vendorId === 'ceallach');
+    if (!vendor) return { ok: false, why: 'no luxury merchant' };
+
+    const stock = g.vendorStock('ceallach');
+    const cheapest = stock
+      .map((id) => g.itemOf(id))
+      .sort((a, b) => a.value - b.value)[0];
+
+    player.level = 40;
+    player.pos.x = vendor.pos.x + 2;
+    player.pos.z = vendor.pos.z + 2;
+    // Not enough coin: it should refuse.
+    player.gold = 10;
+    g.world.submit(player.id, { t: 'buy', vendorId: vendor.id, itemId: cheapest.id });
+    await new Promise((r) => setTimeout(r, 250));
+    const refusedWhenPoor = !player.inventory.some((st) => st.itemId === cheapest.id);
+
+    player.gold = 99999999;
+    g.world.submit(player.id, { t: 'buy', vendorId: vendor.id, itemId: cheapest.id });
+    await new Promise((r) => setTimeout(r, 250));
+    const bought = player.inventory.some((st) => st.itemId === cheapest.id);
+
+    const before = g.world.statsOf(player);
+    g.world.submit(player.id, { t: 'equip', itemId: cheapest.id });
+    await new Promise((r) => setTimeout(r, 250));
+    const after = g.world.statsOf(player);
+    return {
+      ok: refusedWhenPoor && bought && player.equipment[cheapest.slot] === cheapest.id,
+      item: cheapest.name,
+      slot: cheapest.slot,
+      price: cheapest.value * 4,
+      betterAfter: after.damageMax > before.damageMax || after.defense > before.defense,
+    };
+  });
+  await wait(300);
+  await page.keyboard.press('e');
+  await wait(500);
+  await page.screenshot({ path: join(OUT, '15-luxury.png') });
+  await page.keyboard.press('Escape');
+
   // --- boss scene ---------------------------------------------------------
   // Jump straight to Old Scar via the debug handle so we can actually see a
   // telegraph render. Reaching him legitimately is a 25-level grind.
@@ -630,6 +722,10 @@ async function main() {
     ['rare is named for what it carries', rareLoot.namedForItem === true],
     ['rare renders bigger than its camp', rareCheck.taller === true],
     ['rare nameplate marked', rarePlate > 0],
+    ['refused a healthy horse, took a spent one', horse.ok],
+    ['riding is faster than walking', horse.ridden > horse.onFoot],
+    ['the luxury merchant refused a pauper and served a lord', luxury.ok],
+    ['a luxury piece filled a new slot', ['offhand', 'amulet', 'bracelet'].includes(luxury.slot)],
     ['a dragon took a holding', wyrm.inWorld && wyrm.phase === 'roosting'],
     ['the ground it landed on emptied', wyrm.groundEmptied && wyrm.suppressed],
     ['killing it handed the ground back', wyrmDead.ok],
@@ -649,6 +745,7 @@ async function main() {
   for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
   console.log('\nplayer:', state.hp, '| xp:', state.xp, '| target:', state.target);
   console.log('log tail:', state.log.slice(0, 6));
+  console.log('horse:', JSON.stringify(horse), '| luxury:', JSON.stringify(luxury));
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('armour:', JSON.stringify(armour), '| bounty:', JSON.stringify(bounty));

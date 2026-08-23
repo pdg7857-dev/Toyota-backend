@@ -498,9 +498,13 @@ describe('loot scales with difficulty', () => {
    * about what a CAMP pays out. A named creature you see once an hour is
    * governed by the opposite rules — guaranteed epic, double gold — and
    * mixing the two would either forbid the rare or licence the camp.
+   *
+   * Wild horses are excluded for the mirror reason: they are worth almost
+   * nothing dead ON PURPOSE, because killing one is the mistake. Holding them
+   * to "harder mobs pay more" would price the lesson out of the game.
    */
   const ladder = Object.values(MOBS)
-    .filter((m) => m.stars < BOSS_STARS && !m.rareOf)
+    .filter((m) => m.stars < BOSS_STARS && !m.rareOf && !m.horse)
     .sort((a, b) => a.level - b.level || a.stars - b.stars);
 
   /** Average gold a kill yields. */

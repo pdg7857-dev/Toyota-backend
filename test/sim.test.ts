@@ -20,6 +20,7 @@ import {
   getHolding,
 } from '../src/content/factions.js';
 import { DRAGONS, dragonMobId } from '../src/content/dragons.js';
+import { MOUNTS, getMount } from '../src/content/mounts.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { ITEMS, canEquip, getItem } from '../src/content/items.js';
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
@@ -2218,5 +2219,185 @@ describe('dragons are world entities', () => {
     world.advance(1000);
     expect(world.dragonState(def.id).phase).toBe('dormant');
     expect(world.dragonState(def.id).remainingMs).toBeLessThan(before);
+  });
+});
+
+describe('horses and mounts', () => {
+  function herdZone(mobId: string, distance = 2) {
+    return { ...duelZone(mobId, distance), rareSpawns: false };
+  }
+
+  it('will not pick a fight with you', () => {
+    // A herd is a place you go, not a thing that ambushes you.
+    for (const mount of MOUNTS) {
+      const horse = getMob(mount.mobId);
+      expect(horse.aggroRadius, `${horse.name} hunts people`).toBe(0);
+      expect(horse.horse).toBe(mount.id);
+    }
+    const world = new World({ seed: 820, zone: herdZone('wild_cob'), classId: 'warrior' });
+    levelPlayer(world, { level: 20 });
+    world.advance(5000);
+    expect(theMob(world).aiState).toBe('idle');
+  });
+
+  it('is worth almost nothing dead', () => {
+    // Everything about the stat block should say "this is not what you are
+    // here for". Killing one is the mistake the whole mechanic is about.
+    const horse = getMob('wild_cob');
+    const peer = getMob('moor_stag');
+    expect(horse.xp).toBeLessThan(peer.xp);
+    expect(LOOT_TABLES[horse.lootTableId]!.entries).toHaveLength(0);
+    expect(LOOT_TABLES[horse.lootTableId]!.goldMultiplier).toBeLessThan(0.3);
+  });
+
+  it('refuses a capture until the horse is worn down, and says why', () => {
+    const world = new World({ seed: 821, zone: herdZone('wild_cob'), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 20 });
+    const horse = theMob(world);
+
+    world.submit(player.id, { t: 'capture', id: horse.id });
+    let events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /too strong/i.test(e.message))).toBe(true);
+
+    // Out of reach, even when it is weak.
+    horse.health = world.statsOf(horse).maxHealth * 0.1;
+    player.pos = { x: 40, z: 0 };
+    world.submit(player.id, { t: 'capture', id: horse.id });
+    events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /too far/i.test(e.message))).toBe(true);
+
+    // And a dead one is just a dead horse.
+    player.pos = { x: 0, z: 0 };
+    horse.dead = true;
+    world.submit(player.id, { t: 'capture', id: horse.id });
+    events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /dead/i.test(e.message))).toBe(true);
+    expect(player.stable ?? []).toHaveLength(0);
+  });
+
+  it('takes the horse when it works, and fights back when it does not', () => {
+    let captured = 0;
+    let thrown = 0;
+    for (let seed = 0; seed < 40; seed++) {
+      const world = new World({ seed: seed * 331 + 7, zone: herdZone('wild_cob'), classId: 'warrior' });
+      const player = levelPlayer(world, { level: 20 });
+      const horse = theMob(world);
+      horse.health = world.statsOf(horse).maxHealth * 0.1;
+
+      world.submit(player.id, { t: 'capture', id: horse.id });
+      for (const ev of world.tick()) {
+        if (ev.t !== 'captured') continue;
+        if (ev.mountId) {
+          captured++;
+          expect(player.stable).toContain('moor_cob');
+          // It leaves the world with you.
+          expect(world.entity(horse.id)).toBeUndefined();
+        } else {
+          thrown++;
+          // A failed attempt costs you the fight, so capture is not a free
+          // retry button: it breaks away with half its health and comes back.
+          expect(horse.aiState).not.toBe('idle');
+          expect(horse.targetId).toBe(player.id);
+          expect(horse.health).toBeGreaterThan(world.statsOf(horse).maxHealth * 0.4);
+        }
+      }
+    }
+    console.log(`  moor cob: caught ${captured} of ${captured + thrown}`);
+    expect(captured).toBeGreaterThan(0);
+    expect(thrown).toBeGreaterThan(0);
+  });
+
+  it('makes the good one very hard to keep rather than hard to find', () => {
+    // A herd you can walk to and a horse that shrugs you off eleven times in
+    // twelve is a better story than a spawn timer.
+    const grey = getMount('ashen_grey');
+    expect(grey.count).toBe(1);
+    expect(grey.captureChance).toBeLessThan(0.12);
+    for (const other of MOUNTS.filter((m) => m.id !== 'ashen_grey')) {
+      expect(other.captureChance).toBeGreaterThan(grey.captureChance);
+      expect(other.speed).toBeLessThan(grey.speed);
+    }
+  });
+
+  it('rides faster and carries its own bonus', () => {
+    const world = new World({ seed: 822, zone: emptyZone(), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 60 });
+    const onFoot = world.statsOf(player);
+
+    player.stable = ['wood_destrier'];
+    world.submit(player.id, { t: 'mount', mountId: 'wood_destrier' });
+    world.tick();
+    const ridden = world.statsOf(player);
+
+    const mount = getMount('wood_destrier');
+    expect(ridden.moveSpeed).toBe(mount.speed);
+    expect(ridden.moveSpeed).toBeGreaterThan(onFoot.moveSpeed);
+    expect(ridden.defense).toBeGreaterThan(onFoot.defense);
+    expect(ridden.maxHealth).toBeGreaterThan(onFoot.maxHealth);
+    // Each herd is a different choice, not a speed upgrade with one winner.
+    expect(getMount('hill_courser').bonus.damageBonus).toBeGreaterThan(0);
+    expect(getMount('moor_cob').bonus.regenBonus).toBeGreaterThan(0);
+  });
+
+  it('will not let you ride one you have not caught', () => {
+    const world = new World({ seed: 823, zone: emptyZone(), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 60 });
+    world.submit(player.id, { t: 'mount', mountId: 'ashen_grey' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /no such horse/i.test(e.message))).toBe(true);
+    expect(player.mounted ?? null).toBeNull();
+  });
+
+  it('throws you off a telegraphed hit, but not an ordinary swing', () => {
+    // The same three-way rule casting uses. Being unseated by chip damage
+    // would mean nobody ever rode anything into a fight.
+    const world = new World({ seed: 824, zone: duelZone('old_scar', 2), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 40 });
+    player.stable = ['moor_cob'];
+    player.mounted = 'moor_cob';
+    const boss = theMob(world);
+
+    let unseated = false;
+    for (let i = 0; i < 2000 && !unseated; i++) {
+      player.health = world.statsOf(player).maxHealth;
+      boss.health = world.statsOf(boss).maxHealth;
+      for (const ev of world.tick()) {
+        if (ev.t === 'mounted' && ev.unseated) unseated = true;
+      }
+    }
+    expect(unseated, 'a telegraphed hit left the rider seated').toBe(true);
+    expect(player.mounted).toBeNull();
+  });
+
+  it('stays in the saddle through anything without a telegraph', () => {
+    // The other half of the same rule, measured against a creature that has
+    // no abilities at all: nothing it can do should ever unseat a rider.
+    const world = new World({ seed: 826, zone: duelZone('bog_wolf', 2), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 8 });
+    player.stable = ['moor_cob'];
+    player.mounted = 'moor_cob';
+    const wolf = theMob(world);
+    expect(getMob(wolf.defId!).abilities ?? []).toHaveLength(0);
+
+    let hits = 0;
+    for (let i = 0; i < 1200; i++) {
+      player.health = world.statsOf(player).maxHealth;
+      wolf.health = world.statsOf(wolf).maxHealth;
+      for (const ev of world.tick()) {
+        if (ev.t === 'damage' && ev.targetId === player.id) hits++;
+        expect(ev.t === 'mounted' && ev.unseated).toBe(false);
+      }
+    }
+    expect(hits, 'the wolf never landed anything').toBeGreaterThan(5);
+    expect(player.mounted).toBe('moor_cob');
+  });
+
+  it('keeps the stable across a save', () => {
+    const world = new World({ seed: 825, zone: getZone('fenmarch'), classId: 'warrior' });
+    world.player.stable = ['moor_cob', 'ashen_grey'];
+    world.player.mounted = 'ashen_grey';
+    const restored = World.deserialize(world.serialize(), getZone('fenmarch'));
+    expect(restored.player.stable).toEqual(['moor_cob', 'ashen_grey']);
+    expect(restored.player.mounted).toBe('ashen_grey');
   });
 });

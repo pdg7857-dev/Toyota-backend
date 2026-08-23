@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { AnimStateMachine } from './anim.js';
 import { CLASSES } from '../content/zone.js';
+import { getMount } from '../content/mounts.js';
 import { getMob } from '../content/mobs.js';
 import { getVendor } from '../content/vendors.js';
 import type { Entity, EntityId } from '../sim/types.js';
@@ -41,6 +42,9 @@ export class EntityView {
   private flash = 0;
   /** Overhead "interact with me" marker; vendors only. */
   private marker: THREE.Mesh | null = null;
+  /** The horse under the player, when they are riding one. */
+  private mount: THREE.Group | null = null;
+  private mountId: string | null = null;
 
   constructor(
     readonly id: EntityId,
@@ -124,6 +128,57 @@ export class EntityView {
   onDamaged(): void {
     this.flash = 0.18;
     this.anim.request('hit');
+  }
+
+  /**
+   * Put a horse under the rider, or take it away.
+   *
+   * Built here rather than as its own entity because a mount is not one: the
+   * sim has a string on the player and nothing else. This is the renderer's
+   * whole share of the feature.
+   */
+  setMount(mountId: string | null): void {
+    if (mountId === this.mountId) return;
+    this.mountId = mountId;
+    if (this.mount) {
+      this.body.remove(this.mount);
+      this.mount.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        mesh.geometry?.dispose();
+      });
+      this.mount = null;
+    }
+    if (!mountId) {
+      this.body.position.y = 0;
+      return;
+    }
+    const def = getMount(mountId);
+    const group = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: def.view.color, roughness: 0.85 });
+    const barrel = new THREE.Mesh(new THREE.CapsuleGeometry(def.view.radius * 0.55, 1.5, 4, 10), mat);
+    barrel.rotation.z = Math.PI / 2;
+    barrel.position.y = def.view.height * 0.55;
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.26, 0.9, 6), mat);
+    neck.position.set(0, def.view.height * 0.85, def.view.radius * 0.75);
+    neck.rotation.x = 0.5;
+    group.add(barrel, neck);
+    for (const [x, z] of [
+      [-0.35, 0.5],
+      [0.35, 0.5],
+      [-0.35, -0.5],
+      [0.35, -0.5],
+    ] as Array<[number, number]>) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.08, def.view.height * 0.55, 5), mat);
+      leg.position.set(x, def.view.height * 0.27, z);
+      group.add(leg);
+    }
+    group.traverse((o) => {
+      o.castShadow = true;
+    });
+    this.mount = group;
+    this.body.add(group);
+    // Sit the rider on its back.
+    this.body.position.y = def.view.height * 0.62;
   }
 
   /** `alpha` is the fraction of the way through the current sim tick. */
@@ -329,6 +384,7 @@ export class ViewManager {
           : entity.kind === 'vendor'
             ? getVendor(entity.vendorId!).view.color
             : CLASSES[entity.classId ?? 'warrior'].color;
+      if (entity.kind === 'player') view.setMount(entity.mounted ?? null);
       view.update(alpha, dtMs, entity.id === targetId, baseColor);
       // Corpses stay visible but sink out of the way until they respawn.
       view.group.visible = !entity.dead || entity.kind === 'mob';

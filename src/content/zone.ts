@@ -88,6 +88,17 @@ export interface ZoneDef {
  * layout is identical on every load — spawn positions are content, not
  * simulation, and must not depend on the sim's Rng.
  */
+/**
+ * A herd of wild horses.
+ *
+ * Well off the road on purpose. Horses have no aggro radius, so a herd is a
+ * place you go rather than a thing you walk into — and finding one should feel
+ * like noticing something, not like being ambushed by it.
+ */
+function herd(mobId: string, cx: number, cz: number, count: number): SpawnPoint[] {
+  return camp(mobId, cx, cz, 11, count);
+}
+
 /** Mark a camp's spawn points as the guard posts of a holding. */
 function post(holding: string, spawns: SpawnPoint[]): SpawnPoint[] {
   return spawns.map((sp) => ({ ...sp, holding }));
@@ -172,6 +183,9 @@ export const FENMARCH: ZoneDef = {
     ...post('southern_marsh', camp('outlaw_marauder', -26, -86, 9, 5)),
     ...post('southern_marsh', camp('outlaw_marauder', 26, -88, 9, 5)),
 
+    // --- the horse herd, east and well off the road -------------------------
+    ...herd('wild_cob', 62, 44, 5),
+
     // --- lv25 elite boss: the southern marsh, genuinely alone ---------------
     // No guards and a wide empty approach: Old Scar is meant to be fought with
     // nothing else on the screen.
@@ -245,6 +259,7 @@ export const ARDMOOR: ZoneDef = {
       { mobId: 'highland_bear', z: -58 },
       { mobId: 'clan_berserker', z: -82 },
     ]),
+    ...herd('wild_courser', -66, 20, 5),
     { mobId: 'muireann', pos: { x: 0, z: -116 } },
   ],
   vendors: [{ vendorId: 'sorcha', pos: { x: 0, z: 112 } }],
@@ -275,6 +290,7 @@ export const SUNKEN_REACH: ZoneDef = {
       { mobId: 'great_pike', z: -58 },
       { mobId: 'grey_seal_bull', z: -82 },
     ]),
+    ...herd('wild_destrier', 64, 30, 4),
     { mobId: 'old_cauldron', pos: { x: 0, z: -116 } },
   ],
   vendors: [{ vendorId: 'odhran', pos: { x: 0, z: 112 } }],
@@ -305,6 +321,7 @@ export const CAER_DUBH: ZoneDef = {
       { mobId: 'blackshield_champion', z: -58, holding: 'gatehouse' },
       { mobId: 'fort_warden', z: -82 },
     ]),
+    ...herd('wild_ashen_grey', -70, 28, 1),
     { mobId: 'donnchadh', pos: { x: 0, z: -116 } },
   ],
   vendors: [{ vendorId: 'aoife', pos: { x: 0, z: 112 } }],

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getMob } from '../content/mobs.js';
 import type { Command, EntityId } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 import type { Hud } from './hud.js';
@@ -90,6 +91,12 @@ export class InputController {
         break;
       case 'KeyK':
         this.hud.toggleRealm();
+        break;
+      case 'KeyH':
+        this.captureNearestHorse();
+        break;
+      case 'KeyR':
+        this.toggleRide();
         break;
       case 'KeyC':
         this.hud.toggleCharacter();
@@ -189,6 +196,38 @@ export class InputController {
   private travelIfOnRoad(): void {
     const exit = this.world.exitInReach(this.world.player);
     if (exit) this.emit({ t: 'travel', toZoneId: exit.toZoneId });
+  }
+
+  /**
+   * Grab the nearest worn-down horse.
+   *
+   * Targeting it first would work too, but a player who has just spent a
+   * minute carefully NOT killing something should not then have to click it.
+   */
+  private captureNearestHorse(): void {
+    const player = this.world.player;
+    let best: EntityId | null = null;
+    let bestDist = Infinity;
+    for (const e of this.world.entities.values()) {
+      if (e.kind !== 'mob' || e.dead || !getMob(e.defId!).horse) continue;
+      const d = Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z);
+      if (d < bestDist) {
+        bestDist = d;
+        best = e.id;
+      }
+    }
+    if (best !== null) this.emit({ t: 'capture', id: best });
+  }
+
+  /** Get on the last horse you caught, or off the one you are on. */
+  private toggleRide(): void {
+    const player = this.world.player;
+    if (player.mounted) {
+      this.emit({ t: 'mount', mountId: null });
+      return;
+    }
+    const stable = player.stable ?? [];
+    if (stable.length > 0) this.emit({ t: 'mount', mountId: stable[stable.length - 1]! });
   }
 
   private lootNearest(): void {

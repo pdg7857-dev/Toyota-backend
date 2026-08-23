@@ -423,6 +423,8 @@ export interface MobDef {
    * spawns. Content and tests that mean "a zone's boss" must exclude these.
    */
   dragon?: boolean;
+  /** Mount id this creature can be captured as. Wild horses only. */
+  horse?: string;
   /** Renderer hints only — the sim never reads these. */
   view: { color: number; height: number; radius: number };
 }
@@ -490,6 +492,10 @@ export interface Entity {
   learnedSkills?: string[];
   /** What each faction makes of you. See `content/factions.ts`. */
   standing?: Partial<Record<FactionId, number>>;
+  /** Mounts captured, by id. Yours for good once you have one. */
+  stable?: string[];
+  /** The mount currently being ridden, or null. */
+  mounted?: string | null;
   /** Accepted quests and their per-objective counters. */
   quests?: QuestProgress[];
   /** Ids of quests already turned in; a quest is never repeatable. */
@@ -540,6 +546,10 @@ export type Command =
   | { t: 'loot'; id: EntityId }
   | { t: 'equip'; itemId: string }
   | { t: 'learnSkill'; itemId: string }
+  /** Try to take a weakened wild horse. */
+  | { t: 'capture'; id: EntityId }
+  /** Get on or off a horse you already own. */
+  | { t: 'mount'; mountId: string | null }
   | { t: 'unequip'; slot: EquipSlot }
   | { t: 'spendPoint'; attr: keyof Attributes }
   | { t: 'sell'; vendorId: EntityId; itemId: string; qty: number }
@@ -621,6 +631,10 @@ export type SimEvent =
   | { t: 'sold'; entityId: EntityId; itemId: string; qty: number; gold: number }
   | { t: 'bought'; entityId: EntityId; itemId: string; gold: number }
   | { t: 'skillUnlocked'; entityId: EntityId; skillId: string }
+  /** A capture attempt: `mountId` is null when the horse threw you off. */
+  | { t: 'captured'; entityId: EntityId; mountId: string | null; name: string }
+  /** Got on or off, including being thrown by a heavy hit. */
+  | { t: 'mounted'; entityId: EntityId; mountId: string | null; unseated: boolean }
   /** A dragon woke, moved, settled, left or died. */
   | {
       t: 'dragon';
