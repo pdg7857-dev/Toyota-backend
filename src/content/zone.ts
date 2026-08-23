@@ -79,6 +79,14 @@ export interface ZoneDef {
    * every seeded fight in the balance corpus.
    */
   rareSpawns?: boolean;
+  /**
+   * Whether other adventurers are out in this zone. Defaults to true.
+   *
+   * Off in test arenas, for the same reason as `rareSpawns`: they wander and
+   * talk on the sim's `Rng`, so a zone with a population in it is a zone where
+   * every seeded fight rolls different numbers. A duel is supposed to be a duel.
+   */
+  adventurers?: boolean;
 }
 
 /**

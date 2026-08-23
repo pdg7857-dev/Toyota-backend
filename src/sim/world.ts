@@ -58,6 +58,20 @@ import { canEquip, getItem } from '../content/items.js';
 import { getLootTable, getMob } from '../content/mobs.js';
 import { BOUNTY_SPAWN_CHANCE, RARE_SPAWN_CHANCE } from '../content/rares.js';
 import {
+  ADVENTURERS,
+  ADVENTURERS_PER_ZONE,
+  CAMP_MINUTES,
+  CHATTER_INTERVAL_SEC,
+  CHATTER_MIN_GAP_MS,
+  DEATH_CHATTER,
+  DEATH_INTERVAL_SEC,
+  DRAGON_CHATTER,
+  FRONT_CHATTER,
+  GRATS_CHATTER,
+  GRATS_RANGE,
+  IDLE_CHATTER,
+} from '../content/adventurers.js';
+import {
   CAPTURE_RANGE,
   CAPTURE_THRESHOLD,
   getMount,
@@ -123,7 +137,7 @@ function minutes(n: number): number {
 const COMBAT_TIMEOUT_MS = 6000;
 
 /** Save format version. Bump when the Entity shape changes. */
-const SAVE_VERSION = 7;
+const SAVE_VERSION = 8;
 
 export interface WorldOptions {
   seed: number;
@@ -162,6 +176,8 @@ export class World {
   private events: SimEvent[] = [];
   /** tickCount at which each entity was last in combat. */
   private lastCombatTick = new Map<EntityId, number>();
+  /** World time of the last thing an adventurer said, for the chatter floor. */
+  private lastChatMs = -Infinity;
 
   constructor(opts: WorldOptions) {
     this.zone = opts.zone;
@@ -173,6 +189,7 @@ export class World {
       this.spawnMob(this.garrisonFor(sp), sp.pos, undefined, sp.holding);
     }
     for (const v of this.zone.vendors ?? []) this.spawnVendor(v.vendorId, v.pos);
+    this.spawnAdventurers();
   }
 
   // ------------------------------------------------------------------ setup
@@ -296,6 +313,7 @@ export class World {
         to: challenger,
         byPlayer,
       });
+      if (holding.zoneId === this.zone.id) this.reactTo(FRONT_CHATTER, holding.name);
     }
   }
 
@@ -330,6 +348,227 @@ export class World {
     if (!spawn.holding) return spawn.mobId;
     const holding = getHolding(spawn.holding);
     return holding.garrison[this.controllerOf(spawn.holding)] ?? spawn.mobId;
+  }
+
+  // ----------------------------------------------------- other adventurers
+
+  /**
+   * Populate the zone with other people.
+   *
+   * Deterministic from the seed and the zone id, so a zone has the same names
+   * in it every time you walk in. An MMO where the population is different
+   * strangers every login is a lobby.
+   */
+  private spawnAdventurers(): void {
+    if (this.zone.adventurers === false) return;
+    const camps = this.campCentres();
+    if (camps.length === 0) return;
+    const [lo, hi] = this.zone.levelRange;
+    // One of each class, as far as the roster allows. Striding the list by a
+    // fixed step put three Priests in the Fenmarch, and a camp where everybody
+    // plays the same thing reads as a bug in the population rather than a
+    // coincidence in it.
+    const takenClasses = new Set<string>();
+    const takenNames = new Set<string>();
+    for (let i = 0; i < ADVENTURERS_PER_ZONE; i++) {
+      const start = (this.zoneSeed() + i * 5) % ADVENTURERS.length;
+      const from = (skipClass: boolean) => {
+        for (let step = 0; step < ADVENTURERS.length; step++) {
+          const candidate = ADVENTURERS[(start + step) % ADVENTURERS.length]!;
+          if (takenNames.has(candidate.name)) continue;
+          if (skipClass && takenClasses.has(candidate.classId)) continue;
+          return candidate;
+        }
+        return undefined;
+      };
+      // A fresh class if the roster still has one, otherwise just a new face:
+      // two people with the same name is the one thing worse than two Priests.
+      const who = from(true) ?? from(false) ?? ADVENTURERS[start]!;
+      takenClasses.add(who.classId);
+      takenNames.add(who.name);
+      const camp = camps[(this.zoneSeed() + i * 3) % camps.length]!;
+      const id = this.nextId++;
+      const npc: Entity = {
+        id,
+        kind: 'npc',
+        name: who.name,
+        // Plausible for where they are standing: you never meet a level 4 in
+        // Caer Dubh, which is the fastest way to break the illusion.
+        level: lo + ((this.zoneSeed() + i * 7) % Math.max(1, hi - lo)),
+        pos: { x: camp.x + (i - 1.5) * 4, z: camp.z + (i % 2 === 0 ? 5 : -5) },
+        facing: 0,
+        health: 1,
+        energy: 1,
+        dead: false,
+        respawnInMs: 0,
+        targetId: null,
+        autoAttack: false,
+        swingCooldownMs: 0,
+        effects: [],
+        cast: null,
+        classId: who.classId,
+        npcGoal: { ...camp },
+        npcUntilMs: CAMP_MINUTES * 60000 * (0.5 + i * 0.3),
+      };
+      this.entities.set(id, npc);
+      npc.health = 100;
+    }
+  }
+
+  /** Camp centres in this zone, deduplicated, for somewhere to send them. */
+  private campCentres(): Vec2[] {
+    const out: Vec2[] = [];
+    for (const sp of this.zone.spawns) {
+      const def = getMob(sp.mobId);
+      if (isBoss(def.stars) || def.horse) continue;
+      if (out.some((c) => dist(c.x, c.z, sp.pos.x, sp.pos.z) < 18)) continue;
+      out.push({ ...sp.pos });
+    }
+    return out;
+  }
+
+  /** What is standing closest to a point, for chatter that names things. */
+  private nearestMobName(pos: Vec2): string | null {
+    let best: string | null = null;
+    let bestDist = 30;
+    for (const e of this.entities.values()) {
+      if (e.kind !== 'mob' || e.dead) continue;
+      const d = dist(pos.x, pos.z, e.pos.x, e.pos.z);
+      if (d < bestDist) {
+        bestDist = d;
+        best = e.name;
+      }
+    }
+    return best;
+  }
+
+  /** A stable per-zone number, so the same people are in the same zone. */
+  private zoneSeed(): number {
+    let h = 0;
+    for (const ch of this.zone.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return h;
+  }
+
+  /**
+   * Move them along and let them talk.
+   *
+   * They walk between camps and stand in them. They do not fight the world's
+   * actual mobs — nothing they do touches a mob's health, threat or loot,
+   * because an adventurer that tags the creature you needed is not atmosphere,
+   * it is a competitor, and competing with a script is miserable.
+   */
+  private tickAdventurers(): void {
+    const npcs = [...this.entities.values()].filter((e) => e.kind === 'npc');
+    // Test arenas and any zone without camps have nobody in them; don't walk
+    // the spawn table sixty times a second to discover that.
+    if (npcs.length === 0) return;
+    const camps = this.campCentres();
+    for (const e of npcs) {
+      e.npcUntilMs = (e.npcUntilMs ?? 0) - TICK_MS;
+
+      if ((e.npcUntilMs ?? 0) <= 0 && camps.length > 0) {
+        // Bored of this camp; pick another and walk there.
+        const next = camps[this.rng.int(0, camps.length - 1)]!;
+        e.npcGoal = { x: next.x + this.rng.int(-6, 6), z: next.z + this.rng.int(-6, 6) };
+        e.npcUntilMs = CAMP_MINUTES * 60000 * (0.6 + this.rng.next());
+      }
+
+      const goal = e.npcGoal;
+      if (!goal) continue;
+      const d = dist(e.pos.x, e.pos.z, goal.x, goal.z);
+      if (d > 1.5) {
+        const speed = 5.2 * (TICK_MS / 1000);
+        e.pos.x += ((goal.x - e.pos.x) / d) * speed;
+        e.pos.z += ((goal.z - e.pos.z) / d) * speed;
+        e.facing = Math.atan2(goal.x - e.pos.x, goal.z - e.pos.z);
+        e.npcBusy = false;
+      } else {
+        // Standing in a camp: they are "fighting" it, abstractly.
+        e.npcBusy = true;
+        e.facing += 0.02;
+        // And occasionally losing. Other people failing is a bigger part of a
+        // world feeling inhabited than other people succeeding.
+        if (this.rng.chance(TICK_MS / (DEATH_INTERVAL_SEC * 1000))) {
+          // Said by the one it happened to, not by whoever the roll picked.
+          // Chatter that does not belong to the person saying it is the tell.
+          const near = this.nearestMobName(e.pos);
+          if (near) this.say(e, this.pick(DEATH_CHATTER).replace('%s', near));
+          e.npcUntilMs = 0;
+        }
+      }
+    }
+
+    this.tickChatter(npcs);
+  }
+
+  /**
+   * One line every minute and a half or so, from somebody who is here.
+   *
+   * Quiet on purpose. The fastest way to make a fake population feel fake is
+   * to make it chatty.
+   */
+  private tickChatter(npcs: Entity[]): void {
+    const perTick = TICK_MS / (CHATTER_INTERVAL_SEC * 1000);
+    if (!this.rng.chance(perTick)) return;
+
+    const who = npcs[this.rng.int(0, npcs.length - 1)]!;
+    this.say(who, this.pick(IDLE_CHATTER));
+  }
+
+  /**
+   * One of them says something.
+   *
+   * `ambient` lines — filler and "that boar got me" — go through a shared
+   * floor, so the population's volume is a property of the feature rather than
+   * the sum of however many things can currently talk. `event` lines are
+   * reactions to something that actually happened and always land.
+   */
+  private say(npc: Entity, text: string, kind: 'ambient' | 'event' = 'ambient'): void {
+    const now = this.tickCount * TICK_MS;
+    if (kind === 'ambient' && now - this.lastChatMs < CHATTER_MIN_GAP_MS) return;
+    this.lastChatMs = now;
+    this.events.push({
+      t: 'chat',
+      entityId: npc.id,
+      name: npc.name,
+      classId: npc.classId ?? 'warrior',
+      text,
+    });
+  }
+
+  private pick<T>(list: readonly T[]): T {
+    return list[this.rng.int(0, list.length - 1)]!;
+  }
+
+  /**
+   * Somebody reacts to something that actually happened.
+   *
+   * This is the half that keeps them from being wallpaper: a population that
+   * only ever says filler is scenery, and one that only reacts is a
+   * notification feed. They need both.
+   */
+  private reactTo(template: readonly string[], subject: string): void {
+    const npcs = [...this.entities.values()].filter((e) => e.kind === 'npc');
+    if (npcs.length === 0) return;
+    const who = npcs[this.rng.int(0, npcs.length - 1)]!;
+    this.say(who, this.pick(template).replace('%s', subject), 'event');
+  }
+
+  /**
+   * Somebody standing near you congratulates you on a level.
+   *
+   * Deliberately proximity-gated rather than global. A "grats" from thin air is
+   * a system message with a name attached; a "grats" from the ranger who has
+   * been working the same camp as you for ten minutes is the whole feature in
+   * one line. If nobody is close enough to have seen it, nobody says anything.
+   */
+  private gratsFrom(player: Entity): void {
+    const near = [...this.entities.values()].filter(
+      (e) => e.kind === 'npc' && dist(e.pos.x, e.pos.z, player.pos.x, player.pos.z) <= GRATS_RANGE,
+    );
+    if (near.length === 0) return;
+    const who = near[this.rng.int(0, near.length - 1)]!;
+    this.say(who, this.pick(GRATS_CHATTER).replace('%s', player.name), 'event');
   }
 
   // ---------------------------------------------------------------- mounts
@@ -500,6 +739,7 @@ export class World {
           this.dragonEvent(def, state, def.arrival);
           this.syncDragonEntity(def);
           this.clearGarrison(holdingId);
+          if (def.zoneId === this.zone.id) this.reactTo(DRAGON_CHATTER, def.name);
           break;
         }
         case 'roosting': {
@@ -985,6 +1225,7 @@ export class World {
 
     this.tickTerritory();
     this.tickDragons();
+    this.tickAdventurers();
     this.tickCooldowns();
     this.tickEffects();
     this.tickCasts();
@@ -1327,6 +1568,9 @@ export class World {
 
     for (const e of this.entities.values()) {
       if (e.dead || e.kind === 'vendor') continue;
+      // Adventurers walk themselves, in `tickAdventurers`. Running them through
+      // the combat mover would give them a chase state they can never have.
+      if (e.kind === 'npc') continue;
       const stats = this.statsOf(e);
 
       if (e.kind === 'player') {
@@ -1382,6 +1626,9 @@ export class World {
 
       const target = this.entities.get(e.targetId ?? -1);
       if (!target || target.dead || target.id === e.id) continue;
+      // Non-combatants are not swung at, not just unhurt by it. A swing
+      // animation that can never land is worse than no swing at all.
+      if (target.kind === 'vendor' || target.kind === 'npc') continue;
       const stats = this.statsOf(e);
       if (dist(e.pos.x, e.pos.z, target.pos.x, target.pos.z) > stats.attackRange) continue;
 
@@ -1408,7 +1655,7 @@ export class World {
   private tickRegen(): void {
     const dt = TICK_MS / 1000;
     for (const e of this.entities.values()) {
-      if (e.dead || e.kind === 'vendor') continue;
+      if (e.dead || e.kind === 'vendor' || e.kind === 'npc') continue;
       const stats = this.statsOf(e);
       const combat = this.inCombat(e.id);
       // The flat part comes from amulets and bracelets and does NOT scale with
@@ -1505,6 +1752,10 @@ export class World {
     if (target.dead) return;
     // Traders are scenery with a shop attached, not combatants.
     if (target.kind === 'vendor') return;
+    // Neither are the other adventurers. They are allowed to be *seen* and
+    // nothing else: a population you can kill is a population you will kill,
+    // and then the world is empty again and it was your fault.
+    if (target.kind === 'npc') return;
     target.health -= amount;
     this.events.push({
       t: 'damage',
@@ -1704,6 +1955,7 @@ export class World {
       player.health = stats.maxHealth;
       player.energy = stats.maxEnergy;
       this.events.push({ t: 'levelUp', entityId: player.id, level: player.level });
+      this.gratsFrom(player);
       this.advanceQuests(player, (o) => (o.kind === 'level' && player.level >= o.level ? 1 : 0));
 
       for (const skill of skillsForClass(player.classId!, player.level, player.learnedSkills ?? [])) {
@@ -2184,6 +2436,7 @@ export class World {
     }
     for (const v of zone.vendors) this.spawnVendor(v.vendorId, v.pos);
     for (const dragon of DRAGONS) this.syncDragonEntity(dragon);
+    this.spawnAdventurers();
 
     this.events.push({
       t: 'zoneChanged',

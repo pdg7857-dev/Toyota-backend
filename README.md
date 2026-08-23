@@ -29,6 +29,8 @@ Add `?fresh` to the URL to discard your save and start over.
 | `Shift`+`1`–`6` | Skills (second row — what the zones taught you) |
 | `T` | Toggle auto-attack |
 | `F` | Loot a nearby corpse |
+| `H` | Take a weakened wild horse |
+| `R` | Mount up / dismount |
 | `E` | Trade with a nearby vendor |
 | `G` | Take the road to the next zone |
 | `J` | Quest log |
@@ -63,6 +65,54 @@ It cannot be tamed, farmed or camped. There is no spawn roll and no respawn
 timer; the only thing that produces a dragon is time. It sits at the top of its
 zone's band, it is the hardest fight there, and it carries the best weapon in
 the game.
+
+## Other people
+
+The zone has four other adventurers in it, and they are the only part of this
+game pretending to be an MMO. They walk between camps, fight them, level with
+the band they are in, occasionally lose, and say things — about a hundred
+seconds apart, never more. Stand near one when you level and they will say
+grats.
+
+Three rules keep them from being a lie. They **never touch your loot or your
+kills** — their fights are abstract and never reach a real mob's health, so
+an adventurer is never a competitor for the creature you needed. They are
+always **plausible**: their level tracks the zone, and what they talk about is
+what is actually happening — the front that just flipped, the dragon that just
+landed. And they are **quiet**, which is the one that took a rewrite: chatter
+runs through a single shared floor, so adding something new for them to say
+never makes the population chattier.
+
+You cannot group with them, trade with them or fight them. They exist to be
+seen, which is most of what other people in an MMO ever were.
+
+## Horses
+
+Wild horses run in herds well off the road, and you do not buy or loot one.
+Taking a horse is **a fight you have to lose gently**: beat it below a quarter
+health and then press `H` instead of hitting it again. Kill it and you get
+nothing. Fail the grab and it breaks away, heals, and turns on you.
+
+Each herd is a different animal rather than a bigger number: the Moor Cob is
+quick and steady, the Hill Courser hits harder, the Drowned Wood Destrier takes
+hits. The Ashen Grey runs alone in Caer Dubh and shrugs you off eleven attempts
+in twelve — it is not rare to *find*, it is rare to *keep*. Riding replaces your
+movement speed and carries its bonus into combat, and a telegraphed hit throws
+you out of the saddle.
+
+## Money, eventually
+
+Ceallach of the Long Road keeps a stall at the standing stones and stocks
+nothing you can afford for the first forty levels. He is the only trader in the
+game not capped at uncommon, and the reason that is not a shortcut is that
+**the price is the grind**: a Sovereign piece costs tens of thousands of kills'
+worth of gold.
+
+He sells the three slots nothing else in the game fills — an **offhand** (a
+blade for damage, a bulwark for armour, or a grimoire that makes everything you
+cast hit harder), an **amulet**, and a **bracelet**. Deliberately a step below
+what a dragon carries: if money bought the best item in the game, killing the
+dragon would be a formality.
 
 ## The world
 
@@ -184,8 +234,9 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 - Mob abilities: telegraphed dodgeable AoEs, interruptible heals and summons,
   enrage thresholds, adds that despawn with their summoner and drop no loot
 - Mob AI: aggro radius, threat tables, chase, leash-and-heal, respawn timers
-- 63 creatures across ★1–★6 including 8 bosses, 16 named rare spawns and 8
-  bounty spawns; 327 items; class-aware boss, rare and quest rewards
+- 71 creatures across ★1–★6 including 8 bosses, 4 dragons, 16 named rare
+  spawns, 8 bounty spawns and 4 wild herds; 367 items; class-aware boss, rare
+  and quest rewards
 - Four zones with overlapping level bands and travel between them, each with
   its own terrain, palette, lighting, scatter and skills to learn
 - Five factions contesting eight holdings: territory that changes hands from
@@ -193,6 +244,11 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 - Four dragons that live in world state, sleep, wake, take ground off the
   factions holding it, and cannot be camped for
 - Faction standing that decides who attacks you on sight and what you pay
+- Four other adventurers per zone who walk it, fight it, talk about it and
+  never once touch your kills
+- Four wild herds and mounted travel, captured by knowing when to stop hitting
+- A luxury merchant with the game's only offhand, amulet and bracelet slots,
+  priced at the far end of a hundred levels of income
 - Two quest chains per zone — a story chain that walks you through its bands
   and an armour line that outfits you — with kill, collect and travel
   objectives, chained by prerequisite, and class-matched rewards
@@ -202,7 +258,7 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 ## Development
 
 ```bash
-npm run verify     # typecheck + 190 unit and balance tests
+npm run verify     # typecheck + 213 unit and balance tests
 npm run smoke      # plays the game in real Chromium, writes screenshots/
 ```
 

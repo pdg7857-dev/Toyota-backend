@@ -272,6 +272,9 @@ canvas { display: block; }
 .log-warn { color: #ff9a7a; }
 .log-good { color: #ffd76a; font-weight: bold; }
 .log-danger { color: #ff6a5a; font-weight: bold; }
+/* Somebody else talking. Deliberately the quietest colour in the log — it is
+   the only line in there that is never about you. */
+.log-chat { color: #a9b6c9; font-style: italic; }
 
 /* ------------------------------------------------------ world-space overlays */
 
@@ -647,6 +650,25 @@ canvas { display: block; }
 .vendor-row .price.sell { color: #8fe08a; }
 
 .nameplate.vendor { color: #ffdc8a; font-size: 12px; font-weight: bold; }
+
+/* Another adventurer: cool blue, so a glance across a camp separates the people
+   from the things. Hostile plates are warm, traders are gold, players are blue —
+   the same colour language every tab-target game has trained the player in. */
+.nameplate.adventurer { color: #8fc6ff; font-size: 11px; }
+.nameplate.adventurer .np-lvl { color: #b9c8da; text-transform: capitalize; }
+.nameplate .np-says {
+  display: none;
+  max-width: 210px;
+  margin: 0 auto 3px;
+  padding: 2px 7px;
+  border-radius: 8px;
+  background: rgba(14, 20, 28, 0.82);
+  border: 1px solid rgba(140, 180, 220, 0.35);
+  color: #dbe6f2;
+  font-size: 11px;
+  white-space: normal;
+  text-shadow: none;
+}
 
 /* ----------------------------------------------------- quests, zone, travel */
 

@@ -53,6 +53,9 @@ input / HUD click ──> Command ──> World.submit()
 | `src/content/terrain.ts` | Zone themes: ground shape, palette, light, fog, scatter. |
 | `src/content/factions.ts` | Who holds what, and what they make of you. |
 | `src/content/dragons.ts` | The four things the world moves around by itself. |
+| `src/content/mounts.ts` | The herds, and what riding each one is worth. |
+| `src/content/luxury.ts` | The one shop that is not a safety net. |
+| `src/content/adventurers.ts` | Who else is out there, and what they say. |
 | `src/render/` | three.js, DOM, input. Nothing gameplay-authoritative. |
 | `src/render/scene.ts` | Builds a zone from its theme. Knows *how*, not *which*. |
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
@@ -113,6 +116,11 @@ faked version (NPC "clans" you can join, a simulated auction house) is a menu
 pretending to be a society. What those systems actually produce is a world with
 opinions about you and stakes that outlast a session, and that is what the
 faction layer is: the single-player translation, not a shrunken copy.
+
+The one part of a populated world that *is* worth faking is the ambient
+evidence of it — somebody working the camp you were heading for, somebody
+saying something in chat. That is not a system, it is scenery, and scenery is
+exactly what a single-player game can honestly build. See "Other adventurers".
 
 ## Star ratings
 
@@ -400,6 +408,87 @@ a shop you get pulled off mid-trade is not a shop, and a test enforces it.
 - A test asserts `buyPrice > sellPrice` on every item, so no buy-and-resell loop
   can ever print money.
 
+### The one exception, and why it isn't one
+
+Ceallach (`content/luxury.ts`) stocks epics, which breaks the rule above
+deliberately. It works because **the price is the grind**: a Sovereign piece is
+tens of thousands of kills' worth of gold, so nobody buys one *instead* of
+playing. A test prints what each tier costs in kills at its own level and fails
+if that number leaves the intended band — measured against *ordinary* mobs, not
+bosses, because "9.7 boss kills" was how the first pass looked affordable.
+
+He sells the three slots nothing else fills — `offhand`, `amulet`, `bracelet` —
+which is also why they cannot unbalance the ladder: no drop competes for those
+slots, so the whole shop is additive rather than a shortcut past a tier.
+
+The offhand is the most build choice in the game: a blade (flat damage, so it is
+worth most to whoever swings fastest), a bulwark (armour and health), or a
+grimoire (`skillPower`, multiplying what you *cast*). One slot, three characters.
+
+Priced and powered **a step below what a dragon carries**, on purpose. A dragon
+is the hardest fight in its zone at a moment you did not choose; this is a thing
+you decide to save up for. If money bought the best item in the game, killing the
+dragon would be a formality.
+
+## Horses are the one fight you have to leave something in
+
+Every other creature in the game is a health bar you empty. A horse
+(`content/mounts.ts`) is the one you must not: beat it under
+`CAPTURE_THRESHOLD` and then send `capture` instead of hitting it again. Kill it
+and the loot table is empty and the xp is below its peers' — a test asserts
+both, because the stat block is what has to say "this is not what you are here
+for". Every failure path names the mistake (`too strong`, `too far`, `dead`);
+"nothing happened" reads as a broken command.
+
+Each herd is a different animal rather than a bigger number — speed, damage,
+armour, regen — so a mount is a choice. **The legendary is rare to keep, not
+rare to find**: the Ashen Grey runs alone where anyone can walk to it and
+shrugs off eleven attempts in twelve. A spawn timer would have been the obvious
+alternative and it is a worse story.
+
+A telegraphed hit unseats you; ordinary swings never do. That is the same
+three-way rule `castBreak` uses, for the same reason: if chip damage threw you,
+nobody would ever ride into a fight and the mount would stop existing the moment
+combat started.
+
+## Other adventurers
+
+Four per zone (`content/adventurers.ts`), `kind: 'npc'`. They walk between
+camps, stand in them "fighting", occasionally lose, and talk. That is all they
+do, and it is the entire single-player translation of *other people are here*.
+
+Three rules, each of which a test enforces:
+
+- **They never touch your loot or your kills.** Their fights are abstract and
+  never reach a real mob's health, threat or loot table. An adventurer that tags
+  the creature you needed is not atmosphere, it is a competitor, and competing
+  with a script is miserable.
+- **They cannot be fought.** Not "take no damage" — `applyDamage` refuses them
+  and `tickSwings` will not even swing, because a swing animation that can never
+  land reads as a broken game. A population you *can* kill is one you will kill,
+  and then the world is empty and it was your fault.
+- **They are quiet.** Ambient lines go through one shared floor
+  (`CHATTER_MIN_GAP_MS`) rather than each source having its own rate. The first
+  version did the obvious thing — idle chatter plus death chatter, each on its
+  own timer — and measured at two and a half times the intended volume, because
+  volume was an accident of how many things could talk. Reactions to real events
+  (a front falling, a dragon landing, your level) bypass the floor: they are rare
+  by nature and are the half that makes them read as people rather than wallpaper.
+
+A congratulation on a level is **proximity-gated** (`GRATS_RANGE`), which is the
+whole trick: a "grats" from nobody in particular is a system message wearing a
+name. One from the ranger who has been working the same camp as you is the
+cheapest moment of company in the game.
+
+They are deterministic from `zoneSeed()` — the same names are in the same zone
+every time you walk in, because a world whose population is different strangers
+every login is a lobby — and one per class where the roster allows, because a
+camp where three of the four play Priest reads as a bug in the population.
+
+`ZoneDef.adventurers: false` switches them off, and every test arena sets it,
+for the same reason as `rareSpawns`: they walk and talk on the sim's `Rng`, so a
+populated arena is one where every seeded fight rolls different numbers.
+
 ## Bosses must be decided by play, not stats
 
 A boss whose only mechanic is a bigger stat block has no outcome variance: the
@@ -555,7 +644,7 @@ file changes** — the events that drive animation (`swing`, `castBegin`,
 ## Verifying a change
 
 ```bash
-npm run verify        # typecheck + 190 unit and balance tests
+npm run verify        # typecheck + 213 unit and balance tests
 npm run build && npm run preview &
 npm run smoke         # real browser, plays the game, writes screenshots/
 ```
@@ -598,3 +687,11 @@ Dialogue, crafting, real art, **gameplay-authoritative terrain**, pathfinding
 (mobs walk straight lines) and entity collision. Vendor stock is static too —
 traders never run out and never restock, which wants an inventory model if the
 economy ever grows past four zones.
+
+The adventurers are the thinnest of the world layers and the one with the most
+obvious next step: they fight abstractly, so they never actually pull anything,
+and they have nothing to say about the player beyond a level. Giving them real
+pulls on real camps is the one change that would make them feel like people —
+and it is also the change that would break the rule they exist under, so it
+needs a way for them to fight *without* ever being the reason a spawn you wanted
+is missing.

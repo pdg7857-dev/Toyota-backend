@@ -48,6 +48,9 @@ const NAMEPLATE_RANGE = 13;
  */
 const RARE_SIGHTING_RANGE = 45;
 
+/** How long another adventurer's line stays over their head. */
+const CHAT_BUBBLE_MS = 5200;
+
 /** ★ string for a mob's difficulty rating. ★5 is a boss, ★6 an elite boss. */
 function starText(stars: number): string {
   return '★'.repeat(stars);
@@ -121,6 +124,8 @@ export class Hud {
   /** Hotkey order for this character's class, filled in at construction. */
   private skillOrder: string[] = [];
   private nameplates = new Map<EntityId, HTMLElement>();
+  /** The last thing each adventurer said, for the bubble over their head. */
+  private chatter = new Map<EntityId, { text: string; at: number }>();
   private projected = new THREE.Vector3();
 
   constructor(
@@ -452,6 +457,13 @@ export class Hud {
           if (mob) this.log(`${mob.name} calls in reinforcements!`, 'log-danger');
           break;
         }
+        case 'chat':
+          // Chat, in a game with no chat. It goes in the same log as everything
+          // else on purpose: a separate channel window would be a UI pretending
+          // there is somebody on the other end of it.
+          this.log(`[${ev.name}] ${ev.text}`, 'log-chat');
+          this.chatter.set(ev.entityId, { text: ev.text, at: performance.now() });
+          break;
         case 'error':
           if (ev.entityId === playerId) this.log(ev.message, 'log-warn');
           break;
@@ -580,11 +592,18 @@ export class Hud {
     this.els.targetName.textContent = target.dead ? `${target.name} (dead)` : target.name;
     this.els.targetLevel.innerHTML =
       `Lv ${target.level}` +
+      (target.kind === 'npc' ? ` <span class="np-lvl">${target.classId ?? ''}</span>` : '') +
       (stars ? ` <span class="stars ${starClass(stars)}">${starText(stars)}</span>` : '');
     // A boss frame should be unmistakable before the fight starts.
     this.els.targetFrame.classList.toggle('is-boss', stars >= BOSS_STARS);
+    // Somebody you cannot fight has no health bar to read. Selecting another
+    // adventurer is a "who is that", not a target call.
+    const combatant = target.kind !== 'npc' && target.kind !== 'vendor';
+    this.els.targetHp.parentElement!.style.visibility = combatant ? 'visible' : 'hidden';
     setBar(this.els.targetHp, target.health, stats.maxHealth);
-    this.els.targetHpLabel.textContent = `${Math.ceil(Math.max(0, target.health))} / ${stats.maxHealth}`;
+    this.els.targetHpLabel.textContent = combatant
+      ? `${Math.ceil(Math.max(0, target.health))} / ${stats.maxHealth}`
+      : '';
   }
 
   private updateCastBar(player: Entity): void {
@@ -640,6 +659,10 @@ export class Hud {
       if (entity.id === player.id) continue;
       if (entity.kind === 'vendor') {
         this.updateVendorPlate(camera, entity, player);
+        continue;
+      }
+      if (entity.kind === 'npc') {
+        this.updateAdventurerPlate(camera, entity, player);
         continue;
       }
       let plate = this.nameplates.get(entity.id);
@@ -719,6 +742,7 @@ export class Hud {
       if (!this.world.entity(id)) {
         plate.remove();
         this.nameplates.delete(id);
+        this.chatter.delete(id);
       }
     }
   }
@@ -756,6 +780,58 @@ export class Hud {
     plate.querySelector<HTMLElement>('.np-bar')!.style.display = 'none';
     plate.querySelector<HTMLElement>('.np-name')!.textContent =
       distance <= 5.5 ? `${entity.name} — press E to trade` : entity.name;
+  }
+
+  /**
+   * Another adventurer's plate: name, class, level. No health bar.
+   *
+   * A health bar over somebody you cannot fight is an invitation to try, and
+   * the answer would be "nothing happens" — which reads as a broken game rather
+   * than a deliberate rule. What their plate says instead is what an MMO's says
+   * about a stranger: who they are and what they play.
+   */
+  private updateAdventurerPlate(camera: THREE.Camera, entity: Entity, player: Entity): void {
+    let plate = this.nameplates.get(entity.id);
+    if (!plate) {
+      plate = document.createElement('div');
+      plate.innerHTML =
+        `<div class="np-says"></div><div class="np-name"></div>` +
+        `<div class="np-bar"><div class="np-fill"></div></div>`;
+      this.els.overlays.appendChild(plate);
+      this.nameplates.set(entity.id, plate);
+    }
+    plate.className = 'nameplate adventurer';
+
+    const screen = this.toScreen(
+      camera,
+      entity.pos.x,
+      this.groundAt(entity.pos.x, entity.pos.z) + 2.3,
+      entity.pos.z,
+    );
+    const distance = Math.hypot(entity.pos.x - player.pos.x, entity.pos.z - player.pos.z);
+    // Readable from further off than a mob: the point of them is being seen
+    // across a field, and a plate that only resolves in melee range never is.
+    if (!screen || distance > NAMEPLATE_RANGE * 2.5) {
+      plate.style.display = 'none';
+      return;
+    }
+    plate.style.display = 'block';
+    plate.style.left = `${screen.x}px`;
+    plate.style.top = `${screen.y}px`;
+    plate.style.opacity = `${Math.max(0.4, Math.min(1, 1.5 - distance / (NAMEPLATE_RANGE * 2.5)))}`;
+    plate.querySelector<HTMLElement>('.np-bar')!.style.display = 'none';
+    plate.querySelector<HTMLElement>('.np-name')!.innerHTML =
+      `${entity.name} <span class="np-lvl">${entity.level} ${entity.classId ?? ''}</span>`;
+
+    // The speech bubble, if they said something recently enough.
+    const says = plate.querySelector<HTMLElement>('.np-says')!;
+    const line = this.chatter.get(entity.id);
+    if (line && performance.now() - line.at < CHAT_BUBBLE_MS) {
+      says.textContent = line.text;
+      says.style.display = 'block';
+    } else {
+      says.style.display = 'none';
+    }
   }
 
   // ------------------------------------------------------------------ panels

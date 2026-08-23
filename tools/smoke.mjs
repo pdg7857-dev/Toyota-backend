@@ -509,6 +509,77 @@ async function main() {
   await page.screenshot({ path: join(OUT, '15-luxury.png') });
   await page.keyboard.press('Escape');
 
+  // --- other adventurers ---------------------------------------------------
+  // The population is the one feature whose entire purpose is being seen, so
+  // it is the one a unit test can least vouch for: names over heads, a class
+  // colour, a line in the log and a bubble over whoever said it.
+  const people = await page.evaluate(async () => {
+    const g = window.__game;
+    if (g.world.zone.id !== 'fenmarch') g.world.travelTo('fenmarch');
+    await new Promise((r) => setTimeout(r, 400));
+    const player = g.world.player;
+    const crowd = [...g.world.entities.values()].filter((e) => e.kind === 'npc');
+    if (crowd.length === 0) return { ok: false, why: 'nobody about' };
+
+    // Stand in the middle of them so every plate is on screen at once.
+    const anchorNpc = crowd[0];
+    player.pos.x = anchorNpc.pos.x + 4;
+    player.pos.z = anchorNpc.pos.z + 4;
+    for (const [i, person] of crowd.entries()) {
+      person.pos.x = player.pos.x + (i - 1) * 3;
+      person.pos.z = player.pos.z - 6;
+    }
+
+    // Level beside them: the congratulation is proximity-gated, so this also
+    // proves the gate is wired to real positions and not to nothing.
+    const boar = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+    if (!boar) return { ok: false, why: 'nothing to kill' };
+    boar.pos.x = player.pos.x + 1.5;
+    boar.pos.z = player.pos.z;
+    boar.health = 1;
+    player.xp = g.xpToNext(player.level) - 1;
+    const levelBefore = player.level;
+    g.world.submit(player.id, { t: 'target', id: boar.id });
+    g.world.submit(player.id, { t: 'autoAttack', on: true });
+    await new Promise((r) => setTimeout(r, 2500));
+
+    return {
+      ok: true,
+      count: crowd.length,
+      names: crowd.map((p) => `${p.name} ${p.level} ${p.classId}`),
+      levelled: g.world.player.level > levelBefore,
+      // Their bodies must render, in their class colour, like any player.
+      bodies: crowd.filter((p) => {
+        const view = g.views.get(p.id);
+        return view && view.group.visible;
+      }).length,
+    };
+  });
+  await wait(600);
+  await page.screenshot({ path: join(OUT, '15b-adventurers.png') });
+  const crowdUi = await page.evaluate(() => ({
+    plates: [...document.querySelectorAll('.nameplate.adventurer')].filter(
+      (n) => n.style.display !== 'none',
+    ).length,
+    bubbles: [...document.querySelectorAll('.nameplate .np-says')].filter(
+      (n) => n.style.display !== 'none',
+    ).length,
+    chatLines: [...document.querySelectorAll('#log .log-chat')].map((n) => n.textContent),
+    // Selecting somebody you cannot fight must not offer you a health bar.
+    hpHidden: (() => {
+      const g = window.__game;
+      const person = [...g.world.entities.values()].find((e) => e.kind === 'npc');
+      if (!person) return false;
+      g.world.submit(g.world.player.id, { t: 'target', id: person.id });
+      return true;
+    })(),
+  }));
+  await wait(400);
+  const crowdTarget = await page.evaluate(() => ({
+    name: document.querySelector('#target-name')?.textContent ?? '',
+    barHidden: getComputedStyle(document.querySelector('#target-hp')).visibility === 'hidden',
+  }));
+
   // --- boss scene ---------------------------------------------------------
   // Jump straight to Old Scar via the debug handle so we can actually see a
   // telegraph render. Reaching him legitimately is a 25-level grind.
@@ -726,6 +797,12 @@ async function main() {
     ['riding is faster than walking', horse.ridden > horse.onFoot],
     ['the luxury merchant refused a pauper and served a lord', luxury.ok],
     ['a luxury piece filled a new slot', ['offhand', 'amulet', 'bracelet'].includes(luxury.slot)],
+    ['the zone has other people in it', people.ok && people.count > 0],
+    ['their bodies render', people.bodies === people.count],
+    ['their nameplates render', crowdUi.plates > 0],
+    ['somebody congratulated the level', people.levelled && crowdUi.chatLines.length > 0],
+    ['what they said is over their head', crowdUi.bubbles > 0],
+    ['selecting one offers no health bar', crowdTarget.barHidden && crowdTarget.name.length > 0],
     ['a dragon took a holding', wyrm.inWorld && wyrm.phase === 'roosting'],
     ['the ground it landed on emptied', wyrm.groundEmptied && wyrm.suppressed],
     ['killing it handed the ground back', wyrmDead.ok],
@@ -750,6 +827,7 @@ async function main() {
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('armour:', JSON.stringify(armour), '| bounty:', JSON.stringify(bounty));
   console.log('rare:', JSON.stringify({ ...rareCheck, ...rareLoot }), '| rare plates:', rarePlate);
+  console.log('people:', JSON.stringify(people), '|', JSON.stringify(crowdUi), '|', JSON.stringify(crowdTarget));
   console.log('taught:', JSON.stringify(taught), '| bar:', JSON.stringify(bar));
   console.log('zones:', looks.map((l) => `${l.zone}/${l.theme} sky#${l.sky.toString(16)}`).join('  '));
   if (errors.length) console.log('\nerrors:\n' + errors.join('\n'));

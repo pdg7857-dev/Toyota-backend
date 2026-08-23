@@ -1,5 +1,5 @@
 import { World } from './sim/world.js';
-import { TICK_MS } from './sim/formulas.js';
+import { TICK_MS, xpToNext } from './sim/formulas.js';
 import { CLASSES, FENMARCH } from './content/zone.js';
 import { canEquip, getItem } from './content/items.js';
 import { getMob } from './content/mobs.js';
@@ -159,6 +159,7 @@ async function boot(): Promise<void> {
     questOf: (questId: string) => getQuest(questId),
     holdingOf: (holdingId: string) => getHolding(holdingId),
     dragons: () => DRAGONS,
+    xpToNext: (level: number) => xpToNext(level),
   };
 
   window.addEventListener('beforeunload', () => save(world));

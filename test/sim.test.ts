@@ -21,6 +21,12 @@ import {
 } from '../src/content/factions.js';
 import { DRAGONS, dragonMobId } from '../src/content/dragons.js';
 import { MOUNTS, getMount } from '../src/content/mounts.js';
+import {
+  ADVENTURERS,
+  ADVENTURERS_PER_ZONE,
+  CHATTER_INTERVAL_SEC,
+  GRATS_RANGE,
+} from '../src/content/adventurers.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { ITEMS, canEquip, getItem } from '../src/content/items.js';
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
@@ -2399,5 +2405,204 @@ describe('horses and mounts', () => {
     const restored = World.deserialize(world.serialize(), getZone('fenmarch'));
     expect(restored.player.stable).toEqual(['moor_cob', 'ashen_grey']);
     expect(restored.player.mounted).toBe('ashen_grey');
+  });
+});
+
+describe('the other adventurers', () => {
+  /** Chat lines out of an event stream, in order. */
+  function chatLines(events: SimEvent[]): string[] {
+    return events.filter((e) => e.t === 'chat').map((e) => `[${e.name}] ${e.text}`);
+  }
+
+  function peopleIn(world: World): Entity[] {
+    return [...world.entities.values()].filter((e) => e.kind === 'npc');
+  }
+
+  it('puts the same people in every zone, at levels that make sense there', () => {
+    for (const zone of Object.values(ZONES)) {
+      const world = new World({ seed: 900, zone, classId: 'warrior' });
+      const people = peopleIn(world);
+      expect(people, `nobody is in ${zone.name}`).toHaveLength(ADVENTURERS_PER_ZONE);
+
+      const [lo, hi] = zone.levelRange;
+      for (const person of people) {
+        // The fastest way to break the illusion is a level 4 in Caer Dubh.
+        expect(person.level, `${person.name} is level ${person.level} in ${zone.name}`)
+          .toBeGreaterThanOrEqual(lo);
+        expect(person.level).toBeLessThanOrEqual(hi);
+        expect(ADVENTURERS.some((a) => a.name === person.name)).toBe(true);
+        expect(person.classId).toBeDefined();
+      }
+
+      // No two of the same person, and no two of the same class while the
+      // roster still has one spare: a camp where everybody plays a Priest
+      // reads as a bug in the population rather than a coincidence in it.
+      expect(new Set(people.map((p) => p.name)).size).toBe(people.length);
+      expect(new Set(people.map((p) => p.classId)).size).toBe(people.length);
+
+      // Deterministic: walk into the same zone twice and it is the same people.
+      const again = new World({ seed: 900, zone, classId: 'warrior' });
+      expect(peopleIn(again).map((p) => p.name)).toEqual(people.map((p) => p.name));
+    }
+  });
+
+  it('never touches your mobs', () => {
+    // The rule the whole feature stands on. An adventurer that tags the
+    // creature you needed is not atmosphere, it is a competitor.
+    const world = new World({ seed: 901, zone: getZone('fenmarch'), classId: 'warrior' });
+    const mobs = [...world.entities.values()].filter((e) => e.kind === 'mob');
+    const before = mobs.map((m) => m.health);
+
+    const events = world.advance(4 * 60 * 1000);
+
+    expect(events.some((e) => e.t === 'damage')).toBe(false);
+    expect(events.some((e) => e.t === 'death')).toBe(false);
+    expect(events.some((e) => e.t === 'lootGained')).toBe(false);
+    mobs.forEach((mob, i) => {
+      expect(mob.health).toBe(before[i]);
+      expect(mob.dead).toBe(false);
+    });
+  });
+
+  it('cannot be fought, however hard you try', () => {
+    // Not "takes no damage" — a population you can kill is a population you
+    // will kill, and then the world is empty and it was your fault.
+    const world = new World({ seed: 902, zone: getZone('fenmarch'), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 40 });
+    const victim = peopleIn(world)[0]!;
+    player.pos = { x: victim.pos.x + 1, z: victim.pos.z };
+
+    world.submit(player.id, { t: 'target', id: victim.id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+    const events = world.advance(20000);
+
+    expect(events.some((e) => e.t === 'swing' && e.targetId === victim.id)).toBe(false);
+    expect(events.some((e) => e.t === 'damage' && e.targetId === victim.id)).toBe(false);
+    expect(victim.dead).toBe(false);
+  });
+
+  it('walks the zone rather than standing in it', () => {
+    const world = new World({ seed: 903, zone: getZone('fenmarch'), classId: 'warrior' });
+    const people = peopleIn(world);
+    const start = people.map((p) => ({ ...p.pos }));
+
+    world.advance(60000);
+
+    const moved = people.filter(
+      (p, i) => Math.hypot(p.pos.x - start[i]!.x, p.pos.z - start[i]!.z) > 2,
+    );
+    expect(moved.length, 'nobody moved in a minute').toBeGreaterThan(0);
+    const limit = getZone('fenmarch').halfSize;
+    for (const p of people) {
+      expect(Math.abs(p.pos.x)).toBeLessThanOrEqual(limit);
+      expect(Math.abs(p.pos.z)).toBeLessThanOrEqual(limit);
+    }
+  });
+
+  it('is quiet', () => {
+    // The fastest way to make a fake population feel fake is to make it chatty.
+    const minutes = 30;
+    const world = new World({ seed: 904, zone: getZone('fenmarch'), classId: 'warrior' });
+    const lines = chatLines(world.advance(minutes * 60 * 1000));
+    const perMinute = lines.length / minutes;
+    console.log(`  chatter: ${lines.length} lines in ${minutes} min (${perMinute.toFixed(2)}/min)`);
+    console.log(`    e.g. ${lines.slice(0, 3).join('  |  ')}`);
+
+    // Around one line per interval, per zone — not per person.
+    const expected = 60 / CHATTER_INTERVAL_SEC;
+    expect(perMinute).toBeGreaterThan(expected * 0.4);
+    expect(perMinute).toBeLessThan(expected * 2.2);
+    // Every line is attributed to somebody who is actually here.
+    const names = new Set(peopleIn(world).map((p) => p.name));
+    for (const line of lines) {
+      expect(names.has(line.slice(1, line.indexOf(']')))).toBe(true);
+    }
+  });
+
+  it('congratulates you on a level, if anyone was near enough to see it', () => {
+    /** Level the player off one kill, and report what anybody said about it. */
+    function levelUpWith(witnessAt: number): { lines: string[]; level: number; name: string } {
+      const world = new World({ seed: 906, zone: getZone('fenmarch'), classId: 'warrior' });
+      const player = world.player;
+      const boar = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+      player.pos = { x: boar.pos.x + 1, z: boar.pos.z };
+      // One kill short of the level, so the next swing is the one that counts.
+      player.xp = xpToNext(player.level) - 1;
+      for (const person of peopleIn(world)) {
+        person.pos = { x: player.pos.x + witnessAt, z: player.pos.z };
+      }
+      boar.health = 1;
+      world.submit(player.id, { t: 'target', id: boar.id });
+      world.submit(player.id, { t: 'autoAttack', on: true });
+      const lines = chatLines(world.advance(6000));
+      return { lines, level: player.level, name: player.name };
+    }
+
+    const seen = levelUpWith(2);
+    expect(seen.level, 'the kill did not level the player').toBeGreaterThan(1);
+    expect(seen.lines.some((l) => l.includes(seen.name)), seen.lines.join(' | ')).toBe(true);
+
+    // The proximity gate is the whole trick: a congratulation from somebody
+    // three fields away is a system message wearing a name.
+    const unseen = levelUpWith(GRATS_RANGE * 3);
+    expect(unseen.level).toBeGreaterThan(1);
+    expect(unseen.lines.some((l) => l.includes(unseen.name))).toBe(false);
+  });
+
+  it('talks about the front that just moved', () => {
+    const holding = getHolding('road_watch');
+    const incumbent = holding.initialController;
+    const challenger = Object.keys(holding.garrison).find((f) => f !== incumbent)!;
+    const zone = {
+      ...emptyZone(),
+      id: holding.zoneId,
+      // The one arena that wants a population: the reaction is the thing
+      // under test.
+      adventurers: true,
+      spawns: [{ mobId: holding.garrison[incumbent]!, pos: { x: 2, z: 0 }, holding: holding.id }],
+    };
+    const world = new World({ seed: 907, zone, classId: 'warrior' });
+    const player = levelPlayer(world, { level: 30 });
+    const guard = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+
+    const said: string[] = [];
+    let flipped = false;
+    for (let i = 0; i < 400 && !flipped; i++) {
+      guard.dead = false;
+      guard.health = 1;
+      world.submit(player.id, { t: 'target', id: guard.id });
+      world.submit(player.id, { t: 'autoAttack', on: true });
+      for (const ev of world.advance(1000)) {
+        if (ev.t === 'holdingChanged') flipped = true;
+        if (ev.t === 'chat') said.push(ev.text);
+      }
+    }
+
+    expect(flipped, 'the front never moved').toBe(true);
+    expect(challenger).toBeDefined();
+    expect(said.some((line) => line.includes(holding.name)), said.join(' | ')).toBe(true);
+  });
+
+  it('stays out of the test arenas', () => {
+    // They walk and talk on the sim's Rng, so a populated arena is an arena
+    // where every seeded fight rolls different numbers.
+    for (const zone of [duelZone('mossback_boar'), emptyZone(), vendorZone('maeve')]) {
+      const world = new World({ seed: 908, zone, classId: 'warrior' });
+      expect(peopleIn(world), `${zone.name} is not empty`).toHaveLength(0);
+    }
+  });
+
+  it('is still there after a save', () => {
+    const world = new World({ seed: 909, zone: getZone('fenmarch'), classId: 'warrior' });
+    world.advance(30000);
+    const before = peopleIn(world).map((p) => ({ name: p.name, level: p.level, pos: { ...p.pos } }));
+
+    const restored = World.deserialize(world.serialize(), getZone('fenmarch'));
+    const after = peopleIn(restored).map((p) => ({
+      name: p.name,
+      level: p.level,
+      pos: { ...p.pos },
+    }));
+    expect(after).toEqual(before);
   });
 });

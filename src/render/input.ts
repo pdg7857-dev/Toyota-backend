@@ -137,7 +137,10 @@ export class InputController {
       this.emit({ t: 'target', id });
       // Clicking a corpse in range loots it — one less keypress in the common case.
       if (entity?.dead) this.lootNearest();
-      else this.emit({ t: 'autoAttack', on: true });
+      // Clicking another adventurer selects them and stops there. Swinging at
+      // somebody the sim will never let you hurt is the click that makes the
+      // whole population read as broken scenery.
+      else if (entity?.kind !== 'npc') this.emit({ t: 'autoAttack', on: true });
       return;
     }
   }

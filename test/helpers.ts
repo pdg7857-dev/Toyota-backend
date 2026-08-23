@@ -17,8 +17,11 @@ export function duelZone(mobId: string, distance = 2.5): ZoneDef {
     exits: [],
     levelRange: [1, 100],
     // No rare spawns in an arena: a test that occasionally fights a named
-    // variant instead is a test measuring the wrong creature.
+    // variant instead is a test measuring the wrong creature. Nobody else is
+    // out here either — an adventurer wandering past rolls the same Rng the
+    // fight does.
     rareSpawns: false,
+    adventurers: false,
   };
 }
 
@@ -34,8 +37,11 @@ export function emptyZone(): ZoneDef {
     exits: [],
     levelRange: [1, 100],
     // No rare spawns in an arena: a test that occasionally fights a named
-    // variant instead is a test measuring the wrong creature.
+    // variant instead is a test measuring the wrong creature. Nobody else is
+    // out here either — an adventurer wandering past rolls the same Rng the
+    // fight does.
     rareSpawns: false,
+    adventurers: false,
   };
 }
 
@@ -51,8 +57,11 @@ export function vendorZone(vendorId: string, distance = 2): ZoneDef {
     exits: [],
     levelRange: [1, 100],
     // No rare spawns in an arena: a test that occasionally fights a named
-    // variant instead is a test measuring the wrong creature.
+    // variant instead is a test measuring the wrong creature. Nobody else is
+    // out here either — an adventurer wandering past rolls the same Rng the
+    // fight does.
     rareSpawns: false,
+    adventurers: false,
   };
 }
 

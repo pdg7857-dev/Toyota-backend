@@ -462,7 +462,13 @@ export interface CastState {
 
 export interface Entity {
   id: EntityId;
-  kind: 'player' | 'mob' | 'vendor';
+  /**
+   * `npc` is another adventurer: seen, never interacted with. They are their
+   * own kind rather than a flag on `player` so that nothing which loops over
+   * players, mobs or vendors picks them up by accident — they must never take
+   * a kill, a drop or a quest counter from the actual player.
+   */
+  kind: 'player' | 'mob' | 'vendor' | 'npc';
   name: string;
   level: number;
   pos: Vec2;
@@ -496,6 +502,13 @@ export interface Entity {
   stable?: string[];
   /** The mount currently being ridden, or null. */
   mounted?: string | null;
+
+  // --- other adventurers ---------------------------------------------------
+  /** Where this one is headed, and how long until it gets bored of it. */
+  npcGoal?: Vec2;
+  npcUntilMs?: number;
+  /** Fake health, so their fights read as fights without touching the world. */
+  npcBusy?: boolean;
   /** Accepted quests and their per-objective counters. */
   quests?: QuestProgress[];
   /** Ids of quests already turned in; a quest is never repeatable. */
@@ -631,6 +644,8 @@ export type SimEvent =
   | { t: 'sold'; entityId: EntityId; itemId: string; qty: number; gold: number }
   | { t: 'bought'; entityId: EntityId; itemId: string; gold: number }
   | { t: 'skillUnlocked'; entityId: EntityId; skillId: string }
+  /** Another adventurer said something. Chat, in a game with no chat. */
+  | { t: 'chat'; entityId: EntityId; name: string; classId: ClassId; text: string }
   /** A capture attempt: `mountId` is null when the horse threw you off. */
   | { t: 'captured'; entityId: EntityId; mountId: string | null; name: string }
   /** Got on or off, including being thrown by a heavy hit. */
