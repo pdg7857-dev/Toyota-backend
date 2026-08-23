@@ -547,6 +547,10 @@ export interface Entity {
   gold?: number;
   attributes?: Attributes;
   unspentPoints?: number;
+  /** Skill points banked, one per level, spent on ranking a skill up. */
+  skillPoints?: number;
+  /** Rank per skill id. Absent means rank 0 — the skill as it was taught. */
+  skillRanks?: Record<string, number>;
   inventory?: ItemStack[];
   equipment?: Partial<Record<EquipSlot, string>>;
   skillCooldowns?: Record<string, number>;
@@ -623,6 +627,8 @@ export type Command =
   | { t: 'equip'; itemId: string }
   /** Drink a potion or an elixir out of the bags. */
   | { t: 'use'; itemId: string }
+  /** Spend a skill point to rank a skill up. */
+  | { t: 'rankSkill'; skillId: string }
   | { t: 'learnSkill'; itemId: string }
   /** Try to take a weakened wild horse. */
   | { t: 'capture'; id: EntityId }
@@ -699,6 +705,8 @@ export type SimEvent =
   | { t: 'leash'; mobId: EntityId }
   | { t: 'xpGained'; entityId: EntityId; amount: number }
   | { t: 'levelUp'; entityId: EntityId; level: number }
+  /** A skill went up a rank. */
+  | { t: 'skillRanked'; entityId: EntityId; skillId: string; rank: number }
   /** A potion or elixir went down. */
   | { t: 'consumed'; entityId: EntityId; itemId: string; healed: number }
   | { t: 'lootGained'; entityId: EntityId; items: ItemStack[]; gold: number }

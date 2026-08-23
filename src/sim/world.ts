@@ -24,9 +24,16 @@ import {
   emptyAttributes,
   energyRegenPerSec,
   healthRegenPerSec,
+  MAX_SKILL_RANK,
   POINTS_PER_LEVEL,
+  SKILL_CRIT_MULTIPLIER,
+  SKILL_POINTS_PER_LEVEL,
+  skillCritChance,
+  skillRankPower,
   MAX_LEVEL,
   PRIMARY_ATTRIBUTE,
+  MAX_EQUIPMENT_DROP_CHANCE,
+  STAR_LOOT_MULTIPLIER,
   goldForKill,
   castBreakChance,
   resolveAttack,
@@ -1224,6 +1231,9 @@ export class World {
       case 'use':
         this.tryUse(e, cmd.itemId);
         break;
+      case 'rankSkill':
+        this.tryRankSkill(e, cmd.skillId);
+        break;
       case 'capture':
         this.tryCapture(e, cmd.id);
         break;
@@ -2045,6 +2055,11 @@ export class World {
     return (this.control[holding.id] ?? 0) * sign;
   }
 
+  /** Roll a corpse's contents. Exposed for the loot tests, which count drops. */
+  rollLootFor(mob: Entity, killer: Entity | undefined): void {
+    this.rollLoot(mob, killer);
+  }
+
   private rollLoot(mob: Entity, killer: Entity | undefined): void {
     // Adds drop nothing — otherwise a summoning boss is an infinite loot faucet.
     if (mob.summonedBy !== undefined) {
@@ -2076,8 +2091,22 @@ export class World {
       }
     }
 
+    // Harder creatures are likelier to be carrying something as well as
+    // likelier to be carrying something good — capped, so gear stays rare.
+    const gearBoost = STAR_LOOT_MULTIPLIER[def.stars];
+    let gearChance = 0;
     for (const entry of table.entries) {
-      if (!this.rng.chance(entry.chance)) continue;
+      const item = getItem(entry.itemId);
+      const isGear = !!item.slot && item.slot !== 'none' && !item.merchantGood;
+      let chance = entry.chance;
+      if (isGear && gearBoost > 1) {
+        // Scale, then clamp the *total* so the boost can never carry a table
+        // past the ceiling the whole loot design rests on.
+        const headroom = Math.max(0, MAX_EQUIPMENT_DROP_CHANCE - gearChance);
+        chance = Math.min(entry.chance * gearBoost, entry.chance + headroom);
+      }
+      if (isGear) gearChance += chance;
+      if (!this.rng.chance(chance)) continue;
       loot.push({ itemId: entry.itemId, qty: this.rng.int(entry.min, entry.max) });
     }
 
@@ -2103,6 +2132,7 @@ export class World {
       player.xp = (player.xp ?? 0) - xpToNext(player.level);
       player.level += 1;
       player.unspentPoints = (player.unspentPoints ?? 0) + POINTS_PER_LEVEL;
+      player.skillPoints = (player.skillPoints ?? 0) + SKILL_POINTS_PER_LEVEL;
       const stats = this.statsOf(player);
       player.health = stats.maxHealth;
       player.energy = stats.maxEnergy;
@@ -2218,6 +2248,13 @@ export class World {
 
   private applySkillEffect(source: Entity, skill: SkillDef, targetId: EntityId | null): void {
     const stats = this.statsOf(source);
+    // What this character has invested in this particular skill. Rank 0 is the
+    // skill exactly as it was taught; every point above that is a level the
+    // player spent here instead of somewhere else.
+    const rank = source.skillRanks?.[skill.id] ?? 0;
+    const power = stats.skillPower * skillRankPower(rank);
+    /** Did this cast land double? Skills crit the same way swings do. */
+    const rolls = (): boolean => this.rng.chance(skillCritChance(stats.critChance, rank));
 
     switch (skill.kind) {
       case 'damage': {
@@ -2233,8 +2270,10 @@ export class World {
           // A grimoire makes what you CAST hit harder, and nothing else. It is
           // deliberately not a damage buff: it is worth most to the classes
           // whose damage is mostly skills, which is the point of the slot.
-          weaponMultiplier: (skill.weaponMultiplier ?? 1) * stats.skillPower,
-          flatPower: (skill.flatPower ?? 0) * stats.skillPower,
+          weaponMultiplier: (skill.weaponMultiplier ?? 1) * power,
+          flatPower: (skill.flatPower ?? 0) * power,
+          critChance: skillCritChance(stats.critChance, rank),
+          critMultiplier: SKILL_CRIT_MULTIPLIER,
         });
         if (!result.hit) {
           this.events.push({ t: 'miss', sourceId: source.id, targetId: target.id });
@@ -2266,7 +2305,7 @@ export class World {
           tickMs: skill.tickMs ?? 1000,
           sinceTickMs: 0,
           damageType: skill.damageType ?? 'physical',
-          dotPower: ((skill.flatPower ?? 0) + stats.attack * 0.15) * stats.skillPower,
+          dotPower: ((skill.flatPower ?? 0) + stats.attack * 0.15) * power,
         });
         this.markCombat(source.id);
         this.markCombat(target.id);
@@ -2274,7 +2313,12 @@ export class World {
       }
       case 'heal': {
         const target = this.entities.get(targetId ?? source.id) ?? source;
-        const amount = Math.round(((skill.flatPower ?? 0) + stats.attack * 0.5) * stats.skillPower);
+        // A heal can crit too, and it is the best moment in the game when it
+        // does: the one that lands double is the one that saves the fight.
+        const crit = rolls();
+        const amount = Math.round(
+          ((skill.flatPower ?? 0) + stats.attack * 0.5) * power * (crit ? SKILL_CRIT_MULTIPLIER : 1),
+        );
         const before = target.health;
         target.health = Math.min(this.statsOf(target).maxHealth, target.health + amount);
         this.events.push({
@@ -2817,6 +2861,46 @@ export class World {
     }
 
     this.events.push({ t: 'consumed', entityId: player.id, itemId, healed });
+  }
+
+  /**
+   * Spend a skill point to rank a skill up.
+   *
+   * One point per level for a hundred levels, and ten ranks per skill, so the
+   * whole game buys ten maxed skills out of sixteen — the character you end up
+   * with is the one you chose to spend them on. Every refusal says which of the
+   * three reasons it was; "nothing happened" is the worst answer a spend button
+   * can give.
+   */
+  private tryRankSkill(player: Entity, skillId: string): void {
+    if (player.kind !== 'player') return;
+    const skill = getSkill(skillId);
+    const known = skillsForClass(player.classId!, player.level, player.learnedSkills ?? []);
+    if (!known.some((s) => s.id === skillId)) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `You have not learned ${skill.name}.`,
+      });
+      return;
+    }
+    const rank = player.skillRanks?.[skillId] ?? 0;
+    if (rank >= MAX_SKILL_RANK) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `${skill.name} is already mastered.`,
+      });
+      return;
+    }
+    if ((player.skillPoints ?? 0) <= 0) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'No skill points to spend.' });
+      return;
+    }
+    player.skillPoints = (player.skillPoints ?? 0) - 1;
+    player.skillRanks = player.skillRanks ?? {};
+    player.skillRanks[skillId] = rank + 1;
+    this.events.push({ t: 'skillRanked', entityId: player.id, skillId, rank: rank + 1 });
   }
 
   private tryEquip(player: Entity, itemId: string): void {

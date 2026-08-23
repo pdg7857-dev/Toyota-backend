@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { World } from '../src/sim/world.js';
 import {
+  MAX_EQUIPMENT_DROP_CHANCE,
   MAX_LEVEL,
+  MAX_SKILL_RANK,
+  POINTS_PER_LEVEL,
+  SKILL_CRIT_MULTIPLIER,
+  SKILL_POINTS_PER_LEVEL,
+  STAR_LOOT_MULTIPLIER,
+  skillRankPower,
+  xpForKill,
   TICK_MS,
   castBreakChance,
   deriveMobStats,
@@ -522,7 +530,8 @@ describe('progression', () => {
     for (let i = 0; i < 3000 && player.level < 2; i++) events.push(...world.tick());
 
     expect(player.level).toBe(2);
-    expect(player.unspentPoints).toBe(3);
+    expect(player.unspentPoints).toBe(POINTS_PER_LEVEL);
+    expect(player.skillPoints).toBe(SKILL_POINTS_PER_LEVEL);
     expect(events.some((e) => e.t === 'skillUnlocked' && e.skillId === 'rend')).toBe(true);
   });
 
@@ -2889,5 +2898,221 @@ describe('the world moves while you are gone', () => {
     for (const def of DRAGONS) {
       expect(restored.dragonState(def.id)).toEqual(world.dragonState(def.id));
     }
+  });
+});
+
+describe('skill points and ability ranks', () => {
+  function warrior(level = 10) {
+    const world = new World({ seed: 400, zone: emptyZone(), classId: 'warrior' });
+    // No ranks: these are tests about spending points, so the character starts
+    // having spent none.
+    const player = levelPlayer(world, { level, ranks: {} });
+    return { world, player };
+  }
+
+  it('pays out five attribute points and one skill point a level', () => {
+    // Two currencies, and the scarcity of the second is the design: attribute
+    // points are the dial you turn every level without thinking, and a skill
+    // point is one of the hundred you will ever get.
+    const world = new World({ seed: 401, zone: duelZone('moor_hare'), classId: 'warrior' });
+    const player = world.player;
+    player.xp = xpToNext(1) - 1;
+    world.submit(player.id, { t: 'target', id: theMob(world).id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+    for (let i = 0; i < 6000 && player.level < 2; i++) world.tick();
+
+    expect(player.level).toBe(2);
+    expect(player.unspentPoints).toBe(POINTS_PER_LEVEL);
+    expect(player.skillPoints).toBe(SKILL_POINTS_PER_LEVEL);
+    expect(POINTS_PER_LEVEL).toBe(5);
+    expect(SKILL_POINTS_PER_LEVEL).toBe(1);
+  });
+
+  it('spends a point to rank a skill up, and says why when it cannot', () => {
+    const { world, player } = warrior();
+    player.skillPoints = 2;
+
+    world.submit(player.id, { t: 'rankSkill', skillId: 'strike' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'skillRanked' && e.skillId === 'strike' && e.rank === 1)).toBe(
+      true,
+    );
+    expect(player.skillRanks?.strike).toBe(1);
+    expect(player.skillPoints).toBe(1);
+
+    // A skill this character has never learned.
+    world.submit(player.id, { t: 'rankSkill', skillId: 'smite' });
+    expect(world.tick().some((e) => e.t === 'error' && /have not learned/i.test(e.message))).toBe(
+      true,
+    );
+
+    // And no points left.
+    player.skillPoints = 0;
+    world.submit(player.id, { t: 'rankSkill', skillId: 'strike' });
+    expect(world.tick().some((e) => e.t === 'error' && /No skill points/i.test(e.message))).toBe(
+      true,
+    );
+    expect(player.skillRanks?.strike).toBe(1);
+  });
+
+  it('stops at the cap and says so', () => {
+    const { world, player } = warrior();
+    player.skillPoints = 40;
+    for (let i = 0; i < MAX_SKILL_RANK; i++) {
+      world.submit(player.id, { t: 'rankSkill', skillId: 'strike' });
+      world.tick();
+    }
+    expect(player.skillRanks?.strike).toBe(MAX_SKILL_RANK);
+    world.submit(player.id, { t: 'rankSkill', skillId: 'strike' });
+    expect(world.tick().some((e) => e.t === 'error' && /already mastered/i.test(e.message))).toBe(
+      true,
+    );
+    // The cap is a real ceiling on the multiplier, not just on the counter.
+    expect(skillRankPower(MAX_SKILL_RANK + 5)).toBe(skillRankPower(MAX_SKILL_RANK));
+  });
+
+  it('makes a ranked skill measurably stronger', () => {
+    // The whole point of spending the scarcest currency in the game.
+    const hit = (rank: number): number => {
+      let total = 0;
+      const trials = 60;
+      for (let seed = 0; seed < trials; seed++) {
+        const world = new World({ seed: seed * 31 + 3, zone: duelZone('bog_wolf', 2), classId: 'warrior' });
+        const player = levelPlayer(world, { level: 20, gear: ['iron_longsword'], ranks: {} });
+        if (rank > 0) player.skillRanks = { strike: rank };
+        const mob = theMob(world);
+        world.submit(player.id, { t: 'target', id: mob.id });
+        world.submit(player.id, { t: 'useSkill', skillId: 'strike' });
+        for (const ev of world.advance(400)) {
+          if (ev.t === 'damage' && ev.targetId === mob.id && ev.abilityId === 'strike') {
+            total += ev.amount;
+          }
+        }
+      }
+      return total / trials;
+    };
+
+    const plain = hit(0);
+    const mastered = hit(MAX_SKILL_RANK);
+    console.log(`  Strike: rank 0 hits for ${plain.toFixed(0)}, rank 10 for ${mastered.toFixed(0)}`);
+    // Ten ranks is worth roughly a gear tier on one skill: enough to be a real
+    // choice, not enough to make the other fifteen decoration.
+    expect(mastered).toBeGreaterThan(plain * 1.3);
+    expect(mastered).toBeLessThan(plain * 2.4);
+  });
+
+  it('lets a skill land double, and more often when it is mastered', () => {
+    // A skill crit is 2x, the same shape as a weapon crit and a bigger number,
+    // because it is the moment a cast you chose pays off.
+    const critRate = (rank: number): number => {
+      let crits = 0;
+      let hits = 0;
+      for (let seed = 0; seed < 220; seed++) {
+        const world = new World({ seed: seed * 17 + 5, zone: duelZone('bog_wolf', 2), classId: 'warrior' });
+        const player = levelPlayer(world, { level: 30, gear: ['iron_longsword'], ranks: {} });
+        if (rank > 0) player.skillRanks = { strike: rank };
+        const mob = theMob(world);
+        world.submit(player.id, { t: 'target', id: mob.id });
+        world.submit(player.id, { t: 'useSkill', skillId: 'strike' });
+        for (const ev of world.advance(400)) {
+          if (ev.t === 'damage' && ev.abilityId === 'strike') {
+            hits++;
+            if (ev.crit) crits++;
+          }
+        }
+      }
+      return hits === 0 ? 0 : crits / hits;
+    };
+
+    const plain = critRate(0);
+    const mastered = critRate(MAX_SKILL_RANK);
+    console.log(
+      `  Strike crits: rank 0 ${(plain * 100).toFixed(0)}%, rank 10 ${(mastered * 100).toFixed(0)}%`,
+    );
+    expect(plain, 'skills never crit').toBeGreaterThan(0);
+    expect(mastered, 'ranking a skill does not make it crit more').toBeGreaterThan(plain + 0.05);
+    // Still uncommon at the cap. A skill that crits half the time is not
+    // exciting, it is just a bigger number with extra steps.
+    expect(mastered, 'a mastered skill crits routinely').toBeLessThan(0.5);
+    expect(SKILL_CRIT_MULTIPLIER).toBe(2);
+  });
+
+  it('carries ranks and points across a save', () => {
+    const { world, player } = warrior();
+    player.skillPoints = 3;
+    world.submit(player.id, { t: 'rankSkill', skillId: 'strike' });
+    world.tick();
+    const restored = World.deserialize(world.serialize(), emptyZone());
+    expect(restored.player.skillRanks?.strike).toBe(1);
+    expect(restored.player.skillPoints).toBe(2);
+  });
+});
+
+describe('the reward gradient', () => {
+  it('pays more for fighting up and less and less for fighting down', () => {
+    // The push. Every level below you is worth nearly a third less than the
+    // one above it, all the way down, so a camp you have outgrown stops being
+    // worth clearing before it stops being easy.
+    const rows: string[] = [];
+    let last = Infinity;
+    for (const gap of [4, 3, 2, 1, 0, -1, -2, -3, -4, -5, -6, -8, -12]) {
+      const value = xpForKill(1000, 50 + gap, 50) / 1000;
+      rows.push(`  ${String(gap).padStart(3)} levels: ${(value * 100).toFixed(0)}%`);
+      expect(value, `a gap of ${gap} pays more than the level above it`).toBeLessThanOrEqual(last);
+      last = value;
+    }
+    console.log('\nXP BY LEVEL GAP\n' + rows.join('\n'));
+
+    // Fighting up is worth it, and fighting down decays without a cliff in it.
+    expect(xpForKill(1000, 53, 50)).toBeGreaterThan(1000);
+    expect(xpForKill(1000, 47, 50) / 1000).toBeLessThan(0.45);
+    expect(xpForKill(1000, 44, 50) / 1000).toBeLessThan(0.16);
+    // No step: each rung is a similar fraction of the one above it.
+    for (let gap = -1; gap > -8; gap--) {
+      const here = xpForKill(1000, 50 + gap, 50);
+      const above = xpForKill(1000, 50 + gap + 1, 50);
+      expect(here / above, `a cliff at a gap of ${gap}`).toBeGreaterThan(0.55);
+    }
+  });
+
+  it('makes a harder creature likelier to be carrying something', () => {
+    // "Better things, not more things" was half right: a ★4 that takes four
+    // times as long and kills a quarter of the players who pull it should not
+    // pay out as rarely as the ★1 beside it.
+    for (const stars of [2, 3, 4] as const) {
+      expect(STAR_LOOT_MULTIPLIER[stars]).toBeGreaterThan(STAR_LOOT_MULTIPLIER[(stars - 1) as 1]);
+    }
+    // And bosses are left alone: they hand out guaranteed class weapons.
+    expect(STAR_LOOT_MULTIPLIER[5]).toBe(1);
+    expect(STAR_LOOT_MULTIPLIER[6]).toBe(1);
+
+    // Measured, not asserted from the table: kill a lot of each and count.
+    const gearRate = (mobId: string): number => {
+      const world = new World({ seed: 909, zone: duelZone(mobId, 2), classId: 'warrior' });
+      const mob = theMob(world);
+      const def = getMob(mob.defId!);
+      let carried = 0;
+      const trials = 3000;
+      for (let i = 0; i < trials; i++) {
+        world.rollLootFor(mob, world.player);
+        if (
+          (mob.corpseLoot ?? []).some((s) => {
+            const item = getItem(s.itemId);
+            return !!item.slot && item.slot !== 'none' && !item.merchantGood;
+          })
+        ) {
+          carried++;
+        }
+      }
+      void def;
+      return carried / trials;
+    };
+
+    const soft = gearRate('moor_hare');
+    const hard = gearRate('marsh_bear');
+    console.log(`  gear drops: Moor Hare ★1 ${(soft * 100).toFixed(1)}%, Marsh Bear ★4 ${(hard * 100).toFixed(1)}%`);
+    expect(hard, 'a ★4 is no likelier to be carrying gear than a ★1').toBeGreaterThan(soft);
+    // And still rare. The ceiling the whole loot design rests on.
+    expect(hard).toBeLessThanOrEqual(MAX_EQUIPMENT_DROP_CHANCE + 0.02);
   });
 });

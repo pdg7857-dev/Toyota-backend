@@ -52,7 +52,13 @@ async function boot(): Promise<void> {
   const emit = (cmd: Command): void => {
     world.submit(world.playerId, cmd);
   };
-  const hud = new Hud(container, world, emit, (x, z) => rig.heightAt(x, z));
+  const hud = new Hud(
+    container,
+    world,
+    emit,
+    (x, z) => rig.heightAt(x, z),
+    () => rig.yaw,
+  );
   const input = new InputController(rig.renderer.domElement, world, rig, hud, emit);
 
   views.sync();

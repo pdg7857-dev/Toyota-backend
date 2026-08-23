@@ -1110,6 +1110,18 @@ export function getMob(id: string): MobDef {
 /** How much tougher a rare is than the camp mob it replaces, effective. */
 const RARE_TOUGHNESS = 1.55;
 
+/**
+ * Toughness for a rare whose host is already ★4.
+ *
+ * A rare normally gains a star, and the multiple is expressed against the
+ * host's effective numbers and divided back out through the star modifiers so
+ * every rare lands on the same multiple whatever its host. But ★4 has nowhere
+ * to climb — ★5 means boss — so those rares take the whole multiple on top of
+ * the hardest ordinary stat block in the game, and measured as the two that
+ * cloth classes simply cannot beat. Same idea, one notch down.
+ */
+const RARE_TOUGHNESS_TOPPED = 1.24;
+
 /** And how much harder it hits. Kept well under the health bump: a rare should
  * take a while, not delete a player who found one at the right level. */
 // Re-cut once the ordinary creature it hides among became able to kill you.
@@ -1143,7 +1155,9 @@ function rareMob(spec: RareSpec): MobDef {
     name: rareMobName(spec, host.name),
     level,
     stars,
-    baseHealth: Math.round(host.baseHealth * RARE_TOUGHNESS * starHealth),
+    baseHealth: Math.round(
+      host.baseHealth * (stars === host.stars ? RARE_TOUGHNESS_TOPPED : RARE_TOUGHNESS) * starHealth,
+    ),
     damageMin: Math.round(host.damageMin * RARE_MENACE * starDamage),
     damageMax: Math.round(host.damageMax * RARE_MENACE * starDamage),
     xp: baseMobXp(level, stars),
@@ -1456,4 +1470,21 @@ export function getLootTable(id: string): LootTable {
   const table = LOOT_TABLES[id];
   if (!table) throw new Error(`Unknown loot table: ${id}`);
   return table;
+}
+
+/**
+ * A creature that drops a given item, for pointing a player at one.
+ *
+ * The quest tracker needs to answer "where do I get eight wolf pelts", and the
+ * only honest source for that is the loot tables themselves — a hand-written
+ * map of item to creature is a second copy of the truth, and it goes stale the
+ * first time a loot table changes.
+ */
+export function mobDropping(itemId: string): string | undefined {
+  for (const mob of Object.values(MOBS)) {
+    if (mob.rareOf || mob.dragon || mob.horse) continue;
+    const table = LOOT_TABLES[mob.lootTableId];
+    if (table?.entries.some((e) => e.itemId === itemId)) return mob.id;
+  }
+  return undefined;
 }

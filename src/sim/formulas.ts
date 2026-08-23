@@ -27,8 +27,56 @@ export const TICKS_PER_SECOND = 1000 / TICK_MS;
  */
 export const GCD_MS = 1500;
 
-/** Attribute points granted per level up. */
-export const POINTS_PER_LEVEL = 3;
+/** Attribute points granted per level up, spent on Strength/Dexterity/Focus/Vitality. */
+export const POINTS_PER_LEVEL = 5;
+
+/**
+ * Skill points granted per level up.
+ *
+ * A second, much scarcer currency, and the scarcity is the design. Attribute
+ * points are the dial you turn every level without thinking; you get a hundred
+ * of them and they all go the same place. A skill point is one per level for
+ * the whole game, so ranking a skill to the cap costs a tenth of everything you
+ * will ever earn — which makes "which of my sixteen skills is my best one" a
+ * question with an answer you have to live with.
+ */
+export const SKILL_POINTS_PER_LEVEL = 1;
+
+/** How far a single skill can be ranked up. */
+export const MAX_SKILL_RANK = 10;
+
+/**
+ * What each rank adds to a skill's damage or healing.
+ *
+ * Ten ranks is +65% on the number, and about double once the crit rate below
+ * is folded in — measured, and printed by `sim.test.ts`. That is worth roughly
+ * a gear tier and a half on one skill: enough that specialising is a real
+ * choice, not enough that a maxed skill makes the other fifteen decoration.
+ */
+export const SKILL_RANK_POWER = 0.065;
+
+/**
+ * What each rank adds to a skill's chance of landing double.
+ *
+ * A skill can crit for twice its damage or healing, the same way a swing can.
+ * At rank 0 that is your ordinary crit chance; at rank 10 it is that plus a
+ * fifth — noticeably more often, still never routine. A rank you can feel
+ * without being able to rely on is the one that stays exciting.
+ */
+export const SKILL_RANK_CRIT = 0.02;
+
+/** Damage or healing multiplier for a skill at a given rank. */
+export function skillRankPower(rank: number): number {
+  return 1 + Math.min(MAX_SKILL_RANK, Math.max(0, rank)) * SKILL_RANK_POWER;
+}
+
+/** Crit chance for a skill, from the character's own chance and the skill's rank. */
+export function skillCritChance(base: number, rank: number): number {
+  return Math.min(0.75, base + Math.min(MAX_SKILL_RANK, Math.max(0, rank)) * SKILL_RANK_CRIT);
+}
+
+/** What a skill crit multiplies by. Same as a weapon crit: it lands double. */
+export const SKILL_CRIT_MULTIPLIER = 2;
 
 /**
  * Level cap for the current content release.
@@ -97,8 +145,12 @@ export const STAR_MODIFIERS: Record<StarRating, { health: number; damage: number
   // this one well", it is "do not pull this one". What separates the ratings
   // now is mostly how long the thing stays up while it does it.
   4: { health: 2.3, damage: 1.3, defense: 1.42 },
-  5: { health: 9.0, damage: 1.85, defense: 1.6 },
-  6: { health: 15.0, damage: 2.15, defense: 1.75 },
+  // Bosses are exempt from the ordinary-creature dials, which means they are
+  // the one thing in the game that does NOT move when the world is re-tuned —
+  // so when attribute points per level went from three to five, every boss
+  // quietly became a formality. Both numbers carry that third back.
+  5: { health: 12.5, damage: 2.5, defense: 1.6 },
+  6: { health: 21.0, damage: 2.85, defense: 1.75 },
 };
 
 /**
@@ -109,6 +161,14 @@ export const STAR_MODIFIERS: Record<StarRating, { health: number; damage: number
  * twenty percent of your health. That is not a fight, it is a toll: nothing in
  * the world could kill a player who was paying attention, so no gear decision,
  * no cooldown and no consumable mattered.
+ *
+ * Re-cut twice as the player got stronger, and both times because a
+ * measurement said so rather than because anyone reasoned about it. Attribute
+ * points per level went from three to five; then the harness started spending
+ * skill points the way a player actually does, which is worth another half a
+ * gear tier on every skill they cast. Each time, the whole world quietly went
+ * back to being scenery, and each time the printed lethality table said so on
+ * the next run.
  *
  * This is the dial that fixes it. A ★1 at your level is now a real fight you
  * can lose to a bad streak; a ★4 will kill you unless you use everything you
@@ -128,7 +188,7 @@ export const STAR_MODIFIERS: Record<StarRating, { health: number; damage: number
  * below ★4's, which quietly broke the one thing the star ladder promises — that
  * more stars is strictly worse news.
  */
-export const MOB_DAMAGE_SCALE = 2.9;
+export const MOB_DAMAGE_SCALE = 4.4;
 
 /**
  * How much longer an ordinary creature lives than the Fenmarch fit gave it.
@@ -139,7 +199,7 @@ export const MOB_DAMAGE_SCALE = 2.9;
  * needs the thing to still be standing. Bosses are exempt — they already have
  * a ★5/★6 health multiplier doing this job.
  */
-export const MOB_HEALTH_SCALE = 2.0;
+export const MOB_HEALTH_SCALE = 2.6;
 
 /**
  * The level by which an ordinary creature is as dangerous as it is going to get.
@@ -236,6 +296,30 @@ export function goldForKill(
  */
 export const MAX_EQUIPMENT_DROP_CHANCE = 0.3;
 
+/**
+ * How much likelier a harder creature is to be carrying something.
+ *
+ * The original rule was "harder mobs drop better things, not more things" —
+ * quality climbed with difficulty and the odds did not. That is a clean rule
+ * and it was half right: it means a ★4 that takes four times as long and kills
+ * a quarter of the players who pull it pays out no more often than the ★1 next
+ * to it, which reads as the game not noticing what you just did.
+ *
+ * So the odds climb too, and `MAX_EQUIPMENT_DROP_CHANCE` still caps the total —
+ * a ★4 is roughly twice as likely to be carrying gear as a ★1, and still far
+ * more likely to be carrying nothing at all.
+ */
+export const STAR_LOOT_MULTIPLIER: Record<StarRating, number> = {
+  1: 1.0,
+  2: 1.3,
+  3: 1.6,
+  4: 2.0,
+  // Bosses and elites hand out guaranteed class weapons and tomes; scaling
+  // their table on top of that would just be noise.
+  5: 1.0,
+  6: 1.0,
+};
+
 /** XP multiplier per star. Bosses are worth a real dent in the bar. */
 export const STAR_XP_MULTIPLIER: Record<StarRating, number> = {
   1: 1.0,
@@ -258,11 +342,21 @@ export function baseMobXp(level: number, stars: StarRating): number {
 export function xpForKill(mobXp: number, mobLevel: number, playerLevel: number): number {
   const diff = mobLevel - playerLevel;
   let mult: number;
-  if (diff >= 3) mult = 1.4;
-  else if (diff >= 0) mult = 1 + diff * 0.13;
-  else if (diff >= -4) mult = 1 + diff * 0.18;
-  else mult = 0.05;
-  return Math.max(1, Math.round(mobXp * Math.max(0.05, mult)));
+  if (diff >= 0) {
+    // Fighting up pays, and keeps paying. Capped, or the optimal play is to
+    // find the highest thing you can barely beat and never move again.
+    mult = Math.min(1.6, 1 + diff * 0.13);
+  } else {
+    // And fighting down decays smoothly toward nothing.
+    //
+    // This used to be a two-piece line with a cliff in it: -4 was worth 28% and
+    // -5 was worth 5%, so a camp went from "still worth clearing" to "worthless"
+    // between one creature and the next one two metres away. A geometric decay
+    // says the same thing — go and find something your own size — without the
+    // step, and it keeps falling forever instead of bottoming out.
+    mult = Math.pow(0.72, -diff);
+  }
+  return Math.max(1, Math.round(mobXp * Math.max(0.02, mult)));
 }
 
 export function emptyAttributes(): Attributes {
@@ -549,6 +643,10 @@ export interface AttackOptions {
   flatPower: number;
   /** Set for abilities that always connect once their radius check passed. */
   alwaysHits?: boolean;
+  /** Overrides the attacker's own crit chance — a ranked-up skill crits more. */
+  critChance?: number;
+  /** Overrides the crit multiplier. Skills land double. */
+  critMultiplier?: number;
 }
 
 /** Resolve one attack: hit roll, damage roll, crit, level scaling, mitigation. */
@@ -566,8 +664,11 @@ export function resolveAttack(
   let raw = (roll + powerBonus) * opts.weaponMultiplier + opts.flatPower;
   raw *= levelDamageModifier(opts.levelDiff);
 
-  const crit = rng.chance(attacker.critChance);
-  if (crit) raw *= CRIT_MULTIPLIER;
+  // A skill passes its own chance and multiplier in: ranking a skill up makes
+  // that skill crit more often, which is a property of the skill and not of the
+  // character swinging.
+  const crit = rng.chance(opts.critChance ?? attacker.critChance);
+  if (crit) raw *= opts.critMultiplier ?? CRIT_MULTIPLIER;
 
   const amount = Math.max(1, Math.round(raw * mitigation(defender.defense, opts.attackerLevel)));
   return { hit: true, crit, amount };

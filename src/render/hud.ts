@@ -1,10 +1,16 @@
 import * as THREE from 'three';
 import { getSkill, skillBarFor } from '../content/skills.js';
 import { QUALITY_COLORS, canEquip, getItem } from '../content/items.js';
-import { getMob } from '../content/mobs.js';
+import { getMob, mobDropping } from '../content/mobs.js';
 import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
 import { getQuest } from '../content/quests.js';
-import { xpToNext } from '../sim/formulas.js';
+import {
+  MAX_LEVEL,
+  MAX_SKILL_RANK,
+  SKILL_RANK_CRIT,
+  SKILL_RANK_POWER,
+  xpToNext,
+} from '../sim/formulas.js';
 import { BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
 import { ZONES } from '../content/zone.js';
 import { DRAGONS } from '../content/dragons.js';
@@ -17,7 +23,15 @@ import {
   standingBand,
   type StandingBand,
 } from '../content/factions.js';
-import type { Attributes, AwayReport, Command, Entity, EntityId, SimEvent } from '../sim/types.js';
+import type {
+  Attributes,
+  AwayReport,
+  Command,
+  Entity,
+  EntityId,
+  QuestObjective,
+  SimEvent,
+} from '../sim/types.js';
 import type { World } from '../sim/world.js';
 
 const MAX_LOG_LINES = 9;
@@ -91,6 +105,13 @@ export class Hud {
     castLabel: HTMLElement;
     xpFill: HTMLElement;
     xpLabel: HTMLElement;
+    xpLevel: HTMLElement;
+    tracker: HTMLElement;
+    trackerHead: HTMLElement;
+    trackerBody: HTMLElement;
+    trackerWhere: HTMLElement;
+    trackerArrow: HTMLElement;
+    trackerDist: HTMLElement;
     log: HTMLElement;
     skillBar: HTMLElement;
     characterWindow: HTMLElement;
@@ -141,6 +162,12 @@ export class Hud {
      * entity entirely unless they start from the ground it is standing on.
      */
     private readonly groundAt: (x: number, z: number) => number = () => 0,
+    /**
+     * Which way the camera is looking. The quest arrow is drawn on the screen,
+     * so it has to point in screen space — an arrow that points north is a
+     * compass, and a compass is a second thing to learn.
+     */
+    private readonly yawOf: () => number = () => 0,
   ) {
     this.root = document.createElement('div');
     this.root.id = 'hud';
@@ -182,6 +209,13 @@ export class Hud {
       castLabel: this.q('#cast-bar .bar-label'),
       xpFill: this.q('#xp-bar .bar-fill'),
       xpLabel: this.q('#xp-bar .bar-label'),
+      xpLevel: this.q('#xp-level'),
+      tracker: this.q('#tracker'),
+      trackerHead: this.q('#tracker-head'),
+      trackerBody: this.q('#tracker-body'),
+      trackerWhere: this.q('#tracker-where'),
+      trackerArrow: this.q('#tracker-arrow'),
+      trackerDist: this.q('#tracker-dist'),
       log: this.q('#log'),
       skillBar: this.q('#skill-bar'),
       characterWindow: this.q('#character-window'),
@@ -570,6 +604,7 @@ export class Hud {
     this.updateXpBar(player);
     this.updateSkillBar(player);
     this.updateNameplates(camera);
+    this.updateTracker(player);
 
     this.els.deathOverlay.style.display = player.dead ? 'flex' : 'none';
 
@@ -587,6 +622,138 @@ export class Hud {
     if (this.els.characterWindow.style.display === 'block') this.renderCharacter();
     if (this.els.inventoryWindow.style.display === 'block') this.renderInventory();
     if (this.els.realmWindow.style.display === 'block') this.renderRealm();
+  }
+
+  /**
+   * What to do next, and which way it is.
+   *
+   * The story chain always walked you to the bosses band by band — but only if
+   * you opened the quest log, read it, and then worked out for yourself where
+   * "the wet ground south of the stones" was on a map three kilometres across.
+   * A route nobody can see is not a route.
+   *
+   * So: the current objective, its count, and an arrow. The arrow is the whole
+   * feature. It points at the nearest place that objective can actually be
+   * advanced — the camp that holds the creature, the trader who wants the
+   * trophies, the road out of the zone — and it turns with the camera, so
+   * "which way" is answered by looking rather than by reading.
+   */
+  private updateTracker(player: Entity): void {
+    const found = this.trackedObjective(player);
+    if (!found) {
+      this.els.tracker.style.display = 'none';
+      return;
+    }
+    this.els.tracker.style.display = 'block';
+    this.els.trackerHead.textContent = found.title;
+    this.els.trackerBody.innerHTML = found.line;
+
+    const where = found.where;
+    if (!where) {
+      this.els.trackerWhere.style.display = 'none';
+      return;
+    }
+    this.els.trackerWhere.style.display = 'flex';
+    const dx = where.x - player.pos.x;
+    const dz = where.z - player.pos.z;
+    const distance = Math.hypot(dx, dz);
+    // Bearing relative to where the camera is looking, so the arrow points the
+    // way the screen does rather than the way the world does.
+    const bearing = Math.atan2(dx, dz) - this.cameraYaw();
+    this.els.trackerArrow.style.transform = `rotate(${-bearing}rad)`;
+    this.els.trackerDist.textContent =
+      distance < 12 ? `${where.label} — you are here` : `${where.label} — ${Math.round(distance)}m`;
+  }
+
+  /** Which way the camera is facing, for the tracker arrow. */
+  private cameraYaw(): number {
+    return this.yawOf();
+  }
+
+  /**
+   * The objective the tracker should be showing.
+   *
+   * Story chain first, then the armour line, then whatever else is in hand —
+   * the story chain is the one that leads to the bosses, so it is the one that
+   * gets the arrow. With nothing accepted at all it points at the trader, which
+   * is the answer to the only question a player with no quests has.
+   */
+  private trackedObjective(
+    player: Entity,
+  ): { title: string; line: string; where: { x: number; z: number; label: string } | null } | null {
+    const active = (player.quests ?? [])
+      .map((p) => ({ p, q: getQuest(p.questId) }))
+      .filter(({ q }) => q.zoneId === this.world.zone.id)
+      .sort((a, b) => Number(b.q.chain.endsWith('_story')) - Number(a.q.chain.endsWith('_story')));
+
+    for (const { p, q } of active) {
+      if (this.world.isQuestComplete(player, q.id)) {
+        const vendor = this.vendorSpot(q.giverVendorId);
+        return {
+          title: q.name,
+          line: '<span class="tracker-ready">Ready to hand in</span>',
+          where: vendor,
+        };
+      }
+      for (const [i, objective] of q.objectives.entries()) {
+        const needed =
+          objective.kind === 'kill' || objective.kind === 'collect' ? objective.count : 1;
+        const count = Math.min(needed, p.counts[i] ?? 0);
+        if (count >= needed) continue;
+        return {
+          title: q.name,
+          line: `${objective.text} <span class="quest-count">${count}/${needed}</span>`,
+          where: this.objectiveSpot(objective),
+        };
+      }
+    }
+
+    // Nothing in hand: the next step is whoever hands work out.
+    const trader = this.world.zone.vendors.find((v) => v.vendorId !== 'ceallach');
+    if (!trader) return null;
+    return {
+      title: 'No work in hand',
+      line: 'Traders keep a chain of work that runs to the bosses.',
+      where: this.vendorSpot(trader.vendorId),
+    };
+  }
+
+  private vendorSpot(vendorId: string): { x: number; z: number; label: string } | null {
+    const placed = this.world.zone.vendors.find((v) => v.vendorId === vendorId);
+    if (!placed) return null;
+    return { x: placed.pos.x, z: placed.pos.z, label: getVendor(vendorId).name };
+  }
+
+  /** The nearest place in this zone where an objective can be advanced. */
+  private objectiveSpot(
+    objective: QuestObjective,
+  ): { x: number; z: number; label: string } | null {
+    if (objective.kind === 'level') return null;
+    if (objective.kind === 'reach') {
+      const exit = this.world.zone.exits.find((e) => e.toZoneId === objective.zoneId);
+      return exit ? { x: exit.pos.x, z: exit.pos.z, label: exit.label } : null;
+    }
+    const mobId =
+      objective.kind === 'kill' ? objective.mobId : mobDropping(objective.itemId);
+    if (!mobId) return null;
+    return this.nearestSpawn(mobId);
+  }
+
+  /** Closest spawn point of a creature, by the zone layout rather than by what is alive. */
+  private nearestSpawn(mobId: string): { x: number; z: number; label: string } | null {
+    const player = this.world.player;
+    let best: { x: number; z: number } | null = null;
+    let bestDist = Infinity;
+    for (const spawn of this.world.zone.spawns) {
+      if (spawn.mobId !== mobId) continue;
+      const d = Math.hypot(spawn.pos.x - player.pos.x, spawn.pos.z - player.pos.z);
+      if (d < bestDist) {
+        bestDist = d;
+        best = spawn.pos;
+      }
+    }
+    if (!best) return null;
+    return { x: best.x, z: best.z, label: getMob(mobId).name };
   }
 
   private updateTargetFrame(): void {
@@ -629,8 +796,25 @@ export class Hud {
   private updateXpBar(player: Entity): void {
     const need = xpToNext(player.level);
     const have = player.xp ?? 0;
+    const left = Math.max(0, need - have);
     this.els.xpFill.style.width = `${Math.min(100, (have / need) * 100)}%`;
-    this.els.xpLabel.textContent = `${have} / ${need} XP`;
+    this.els.xpLabel.textContent =
+      player.level >= MAX_LEVEL
+        ? 'Level 100'
+        : `${have.toLocaleString()} / ${need.toLocaleString()} — ${left.toLocaleString()} to go`;
+
+    const points = player.unspentPoints ?? 0;
+    const skillPoints = player.skillPoints ?? 0;
+    const waiting: string[] = [];
+    if (points > 0) waiting.push(`${points} attribute`);
+    if (skillPoints > 0) waiting.push(`${skillPoints} skill`);
+    this.els.xpLevel.innerHTML =
+      `Level ${player.level}` +
+      (waiting.length
+        ? ` <span class="unspent">· ${waiting.join(' and ')} ${
+            points + skillPoints === 1 ? 'point' : 'points'
+          } to spend (C)</span>`
+        : '');
   }
 
   private updateSkillBar(player: Entity): void {
@@ -1295,7 +1479,7 @@ export class Hud {
 
     const info = document.createElement('div');
     info.className = 'stat-row';
-    info.innerHTML = `<span>Unspent points</span><span class="v">${points}</span>`;
+    info.innerHTML = `<span>Attribute points</span><span class="v">${points}</span>`;
     body.appendChild(info);
 
     attrRow('Strength', 'strength');
@@ -1320,6 +1504,63 @@ export class Hud {
       const row = document.createElement('div');
       row.className = 'stat-row';
       row.innerHTML = `<span>${label}</span><span class="v">${value}</span>`;
+      body.appendChild(row);
+    }
+
+    this.renderSkillRanks(player, body);
+  }
+
+  /**
+   * The skills you know, and what you have invested in each.
+   *
+   * One point a level for a hundred levels against ten ranks apiece means the
+   * whole game buys ten skills out of sixteen — so this panel is where a
+   * character stops being "a Warrior" and becomes *your* Warrior. It shows what
+   * each rank is worth in the numbers rather than as a bar, because "+13%
+   * damage, crits 4% more often" is a decision and a filled bar is not.
+   */
+  private renderSkillRanks(player: Entity, body: HTMLElement): void {
+    const points = player.skillPoints ?? 0;
+    // Everything the class has, so an unranked skill you have not learned yet
+    // still shows what is coming; only what you actually know can take a point.
+    const learned = new Set(player.learnedSkills ?? []);
+    const known = skillBarFor(player.classId ?? 'warrior').filter(
+      (s) => s.reqLevel <= player.level && (!s.taughtBy || learned.has(s.id)),
+    );
+
+    const head = document.createElement('div');
+    head.className = 'skills-head';
+    head.innerHTML =
+      `<span>Skills</span><span class="${points > 0 ? 'v' : 'muted'}">` +
+      `${points} skill point${points === 1 ? '' : 's'}</span>`;
+    body.appendChild(head);
+
+    for (const skill of known) {
+      const rank = player.skillRanks?.[skill.id] ?? 0;
+      const row = document.createElement('div');
+      row.className = 'stat-row skill-rank';
+      const maxed = rank >= MAX_SKILL_RANK;
+      row.innerHTML =
+        `<span>${skill.name}</span>` +
+        `<span class="${rank > 0 ? 'v' : 'muted'}">` +
+        (maxed
+          ? 'mastered'
+          : rank > 0
+            ? `rank ${rank} · +${Math.round(rank * SKILL_RANK_POWER * 100)}% · ` +
+              `+${(rank * SKILL_RANK_CRIT * 100).toFixed(0)}% crit`
+            : 'rank 0') +
+        '</span>';
+      if (points > 0 && !maxed) {
+        const btn = document.createElement('span');
+        btn.className = 'spend clickable';
+        btn.textContent = '+';
+        btn.title = `Spend a point on ${skill.name}`;
+        btn.addEventListener('click', () => {
+          this.emit({ t: 'rankSkill', skillId: skill.id });
+          this.renderCharacter();
+        });
+        row.appendChild(btn);
+      }
       body.appendChild(row);
     }
   }
@@ -1500,6 +1741,13 @@ const TEMPLATE = `
   <div id="skill-bar"></div>
 
   <div id="xp-bar" class="bar panel"><div class="bar-fill"></div><div class="bar-label"></div></div>
+  <div id="xp-level"></div>
+
+  <div id="tracker">
+    <div id="tracker-head"></div>
+    <div id="tracker-body"></div>
+    <div id="tracker-where"><span id="tracker-arrow">➤</span><span id="tracker-dist"></span></div>
+  </div>
 
   <div id="log"></div>
 
@@ -1556,7 +1804,7 @@ const TEMPLATE = `
   </div>
 
   <div id="help">
-    <b>WASD</b> move &nbsp; <b>Right-drag</b> look &nbsp; <b>Scroll</b> zoom<br />
+    <b>WASD</b> move &nbsp; <b>Drag</b> or <b>←→</b> look &nbsp; <b>Scroll</b> zoom<br />
     <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–0</b> / <b>⇧1–6</b> skills &nbsp; <b>T</b> auto-attack<br />
     <b>F</b> loot &nbsp; <b>E</b> trade &nbsp; <b>G</b> travel &nbsp; <b>J</b> quests<br />
     <b>H</b> take horse &nbsp; <b>R</b> ride &nbsp; <b>K</b> realm &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target

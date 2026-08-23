@@ -1,9 +1,15 @@
 import { World } from '../src/sim/world.js';
-import { PRIMARY_ATTRIBUTE, POINTS_PER_LEVEL, TICK_MS } from '../src/sim/formulas.js';
+import {
+  MAX_SKILL_RANK,
+  PRIMARY_ATTRIBUTE,
+  POINTS_PER_LEVEL,
+  SKILL_POINTS_PER_LEVEL,
+  TICK_MS,
+} from '../src/sim/formulas.js';
 import type { Attributes, ClassId, Entity, SimEvent } from '../src/sim/types.js';
 import { CLASSES, type ZoneDef } from '../src/content/zone.js';
 import { getMob } from '../src/content/mobs.js';
-import { SKILLS, getSkill } from '../src/content/skills.js';
+import { SKILLS, getSkill, skillsForClass } from '../src/content/skills.js';
 
 /** A bare arena with one mob a couple of metres away — no scenery, no neighbours. */
 export function duelZone(mobId: string, distance = 2.5): ZoneDef {
@@ -111,6 +117,8 @@ export function buildFor(classId: ClassId, level: number): Attributes {
 }
 
 export interface LevelOptions {
+  /** Skill ranks to give them. Defaults to what a player would have spent. */
+  ranks?: Record<string, number>;
   level: number;
   /** Item ids to equip before the fight. */
   gear?: string[];
@@ -136,11 +144,50 @@ export function learnedAt(classId: ClassId, level: number): string[] {
 }
 
 /** Fast-forward a freshly built player to `level` with the given gear. */
+/**
+ * How a player would have spent their skill points by a given level.
+ *
+ * One point a level, spread evenly over what they know. This matters as much as
+ * `buildFor` does: without it the whole suite measures a character who reached
+ * level 90 and never once ranked a skill up, and every balance number in the
+ * game would be quietly tuned against somebody who does not exist.
+ *
+ * In order, filling each skill before moving to the next, which is both what
+ * players actually do with a spammable and the only spending pattern that does
+ * not punish knowing more. Spreading evenly looked more even-handed and was
+ * quietly wrong: it divided the same hundred points over a longer list, so a
+ * character who had gone and found the zone's tomes ended up with *lower* ranks
+ * on everything than one who had not — and the suite duly reported that the
+ * taught kit made no difference.
+ */
+export function ranksAt(
+  classId: ClassId,
+  level: number,
+  learned?: string[],
+): Record<string, number> {
+  // Ranks follow what this character actually knows. Spreading them over the
+  // full taught list regardless was a harness bug with a very specific tell:
+  // the "is the taught kit worth going to get" comparison gave the character
+  // who had NOT found the tomes ranks in the skills they had not learned.
+  const known = skillsForClass(classId, level, learned ?? learnedAt(classId, level));
+  if (known.length === 0) return {};
+  let points = Math.max(0, level - 1) * SKILL_POINTS_PER_LEVEL;
+  const ranks: Record<string, number> = {};
+  for (const skill of known) {
+    const spend = Math.min(points, MAX_SKILL_RANK);
+    if (spend <= 0) break;
+    ranks[skill.id] = spend;
+    points -= spend;
+  }
+  return ranks;
+}
+
 export function levelPlayer(world: World, opts: LevelOptions): Entity {
   const player = world.player;
   player.level = opts.level;
   const classId = player.classId ?? 'warrior';
   player.learnedSkills = opts.learned ?? learnedAt(classId, opts.level);
+  player.skillRanks = opts.ranks ?? ranksAt(classId, opts.level, player.learnedSkills);
   const base = CLASSES[classId].baseAttributes;
   const build = buildFor(classId, opts.level);
   player.attributes = {
