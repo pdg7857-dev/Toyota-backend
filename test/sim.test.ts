@@ -19,6 +19,7 @@ import {
   STANDING_LIMIT,
   getHolding,
 } from '../src/content/factions.js';
+import { DRAGONS, dragonMobId } from '../src/content/dragons.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { ITEMS, canEquip, getItem } from '../src/content/items.js';
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
@@ -1524,13 +1525,15 @@ describe('rare spawns', () => {
   });
 
   it('carries an affix no ladder item has', () => {
-    const ladder = Object.values(ITEMS).filter((i) => !i.id.startsWith('sig_'));
-    for (const item of ladder) {
-      expect(item.critBonus ?? 0).toBe(0);
-      expect(item.healthBonus ?? 0).toBe(0);
-      expect(item.moveSpeedBonus ?? 0).toBe(0);
+    // Affixes belong to the two things you cannot plan for: a named creature
+    // you camp for, and a dragon that turns up when it feels like it.
+    const unplannable = (id: string): boolean => id.startsWith('sig_') || id.startsWith('wyrm_');
+    for (const item of Object.values(ITEMS).filter((i) => !unplannable(i.id))) {
+      expect(item.critBonus ?? 0, `${item.name} grew an affix`).toBe(0);
+      expect(item.healthBonus ?? 0, `${item.name} grew an affix`).toBe(0);
+      expect(item.moveSpeedBonus ?? 0, `${item.name} grew an affix`).toBe(0);
     }
-    for (const item of Object.values(ITEMS).filter((i) => i.id.startsWith('sig_'))) {
+    for (const item of Object.values(ITEMS).filter((i) => unplannable(i.id))) {
       const affixes = (item.critBonus ?? 0) + (item.healthBonus ?? 0) + (item.moveSpeedBonus ?? 0);
       expect(affixes, `${item.name} is just a better statline`).toBeGreaterThan(0);
     }
@@ -2032,5 +2035,179 @@ describe('territory and standing', () => {
     expect(restored.controllerOf(holding.id)).toBe(challenger);
     expect(restored.controlOf(holding.id)).toBe(0);
     expect(restored.player.standing?.outlaws).toBe(-400);
+  });
+});
+
+describe('dragons are world entities', () => {
+  /** Wind a world forward far enough to catch a dragon doing something. */
+  function until(
+    world: World,
+    predicate: () => boolean,
+    limitMinutes = 200,
+  ): SimEvent[] {
+    const seen: SimEvent[] = [];
+    const ticks = (limitMinutes * 60000) / TICK_MS;
+    for (let i = 0; i < ticks && !predicate(); i++) seen.push(...world.tick());
+    return seen;
+  }
+
+  it('is in no zone\'s spawn list', () => {
+    // A boss stands where the layout puts it. A dragon is somewhere the world
+    // decided, which is the entire difference between the two.
+    for (const zone of Object.values(ZONES)) {
+      for (const spawn of zone.spawns) {
+        expect(getMob(spawn.mobId).dragon ?? false).toBe(false);
+      }
+    }
+    expect(DRAGONS.length).toBe(4);
+    for (const def of DRAGONS) {
+      const mob = getMob(dragonMobId(def));
+      expect(mob.dragon).toBe(true);
+      // AT the top of its zone's band, not above it. Level gap drives both
+      // accuracy and mitigation, so headroom turned every dragon into a
+      // cliff — and there is no "come back stronger" past the level cap.
+      expect(def.level).toBe(getZone(def.zoneId).levelRange[1]);
+      // Harder than the boss that ends its zone, and anchored to it.
+      const elite = getMob(def.eliteId);
+      expect(elite.stars).toBe(6);
+      expect(elite.dragon ?? false).toBe(false);
+      expect(mob.baseHealth).toBeGreaterThan(elite.baseHealth);
+      expect(def.territory.length).toBeGreaterThan(1);
+      for (const holdingId of def.territory) expect(getHolding(holdingId).zoneId).toBe(def.zoneId);
+      // Telegraphed, like every other big fight in the game.
+      expect(mob.abilities?.some((a) => a.kind === 'heavySlam')).toBe(true);
+    }
+  });
+
+  it('sleeps, wakes, works its territory and goes back to the dark', () => {
+    const world = new World({ seed: 800, zone: getZone('fenmarch'), classId: 'warrior' });
+    const def = DRAGONS.find((d) => d.zoneId === 'fenmarch')!;
+    const phases: string[] = [];
+    const seen = new Set<string>();
+
+    expect(world.dragonState(def.id).phase).toBe('dormant');
+    for (let i = 0; i < (200 * 60000) / TICK_MS; i++) {
+      for (const ev of world.tick()) {
+        if (ev.t === 'dragon' && ev.dragonId === def.id) {
+          phases.push(ev.phase);
+          if (ev.holdingId) seen.add(ev.holdingId);
+        }
+      }
+      if (phases.filter((p) => p === 'dormant').length > 0 && seen.size === def.territory.length) break;
+    }
+
+    // It woke, sat on every holding it claims, and went home.
+    expect(phases[0]).toBe('hunting');
+    expect(phases).toContain('roosting');
+    expect(phases[phases.length - 1]).toBe('dormant');
+    expect([...seen].sort()).toEqual([...def.territory].sort());
+  });
+
+  it('drives the garrison off the ground it sits on, and stops the war there', () => {
+    const world = new World({ seed: 801, zone: getZone('fenmarch'), classId: 'warrior' });
+    const def = DRAGONS.find((d) => d.zoneId === 'fenmarch')!;
+
+    until(world, () => world.dragonState(def.id).phase === 'roosting');
+    const state = world.dragonState(def.id);
+    expect(state.phase).toBe('roosting');
+    const holdingId = state.holdingId!;
+
+    // Nobody is standing a post under a dragon.
+    const posts = [...world.entities.values()].filter((e) => e.holding === holdingId);
+    expect(posts.length, 'the garrison stayed put under a dragon').toBe(0);
+    expect(world.isSuppressed(holdingId)).toBe(true);
+
+    // And the front is frozen while it is there: no drift either way.
+    const before = world.controlOf(holdingId);
+    world.advance(60000);
+    expect(world.controlOf(holdingId)).toBe(before);
+
+    // The dragon itself is here, and it is the real thing.
+    const dragon = [...world.entities.values()].find((e) => e.dragonId === def.id);
+    expect(dragon, 'the dragon never entered the world').toBeDefined();
+    expect(getMob(dragon!.defId!).dragon).toBe(true);
+  });
+
+  it('hands the ground back when somebody finally kills it', () => {
+    const world = new World({ seed: 802, zone: getZone('fenmarch'), classId: 'warrior' });
+    const def = DRAGONS.find((d) => d.zoneId === 'fenmarch')!;
+    until(world, () => world.dragonState(def.id).phase === 'roosting');
+    const holdingId = world.dragonState(def.id).holdingId!;
+
+    const player = levelPlayer(world, { level: 40 });
+    const dragon = [...world.entities.values()].find((e) => e.dragonId === def.id)!;
+    dragon.health = 1;
+    player.pos = { x: dragon.pos.x + 1, z: dragon.pos.z };
+    world.submit(player.id, { t: 'target', id: dragon.id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+    const events = world.advance(6000);
+
+    expect(dragon.dead).toBe(true);
+    expect(events.some((e) => e.t === 'dragon' && e.phase === 'slain')).toBe(true);
+    expect(world.dragonState(def.id).phase).toBe('slain');
+    // The ground goes back to the people who were fighting over it.
+    expect(world.isSuppressed(holdingId)).toBe(false);
+    // And it carried something for whoever landed the kill.
+    const carried = dragon.corpseLoot!.map((s) => getItem(s.itemId));
+    expect(carried.some((i) => i.slot === 'weapon' && i.classes?.includes('warrior'))).toBe(true);
+  });
+
+  it('carries on while you are somewhere else', () => {
+    // The point of a routine over a spawn timer: the world does not pause
+    // because the player left the zone.
+    const world = new World({ seed: 803, zone: getZone('fenmarch'), classId: 'warrior' });
+    const far = DRAGONS.find((d) => d.zoneId === 'caer_dubh')!;
+    const before = world.dragonState(far.id).remainingMs;
+    world.advance(60000);
+    expect(world.dragonState(far.id).remainingMs).toBeLessThan(before);
+    // But it is not standing in the Fenmarch.
+    expect([...world.entities.values()].some((e) => e.dragonId === far.id)).toBe(false);
+  });
+
+  it('is waiting for you when you walk into its zone mid-visit', () => {
+    const world = new World({ seed: 804, zone: getZone('ardmoor'), classId: 'warrior' });
+    const def = DRAGONS.find((d) => d.zoneId === 'ardmoor')!;
+    until(world, () => world.dragonState(def.id).phase === 'roosting');
+    const holdingId = world.dragonState(def.id).holdingId!;
+
+    world.player.level = 60;
+    world.travelTo('fenmarch');
+    expect([...world.entities.values()].some((e) => e.dragonId === def.id)).toBe(false);
+    world.travelTo('ardmoor');
+
+    expect([...world.entities.values()].some((e) => e.dragonId === def.id)).toBe(true);
+    // And the ground it is on is still empty.
+    expect([...world.entities.values()].filter((e) => e.holding === holdingId)).toHaveLength(0);
+  });
+
+  it('remembers where it was across a save', () => {
+    const world = new World({ seed: 805, zone: getZone('fenmarch'), classId: 'warrior' });
+    const def = DRAGONS[0]!;
+    until(world, () => world.dragonState(def.id).phase === 'roosting');
+
+    const restored = World.deserialize(world.serialize(), getZone('fenmarch'));
+    expect(restored.dragonState(def.id).phase).toBe('roosting');
+    expect(restored.dragonState(def.id).holdingId).toBe(world.dragonState(def.id).holdingId);
+  });
+
+  it('cannot be camped: nothing you do makes one turn up', () => {
+    // No spawn roll, no host camp, no respawn timer on the corpse. The only
+    // thing that produces a dragon is time.
+    for (const def of DRAGONS) {
+      const mob = getMob(dragonMobId(def));
+      expect(mob.respawnMs).toBe(0);
+      expect(mob.rareOf).toBeUndefined();
+      expect(mob.rareVariant).toBeUndefined();
+    }
+    const world = new World({ seed: 806, zone: getZone('fenmarch'), classId: 'warrior' });
+    const def = DRAGONS.find((d) => d.zoneId === 'fenmarch')!;
+    // Kill things for a solid stretch: it changes nothing about the dragon.
+    const before = world.dragonState(def.id).remainingMs;
+    for (const e of [...world.entities.values()]) {
+      if (e.kind === 'mob') e.dead = true;
+    }
+    world.advance(1000);
+    expect(world.dragonState(def.id).phase).toBe('dormant');
+    expect(world.dragonState(def.id).remainingMs).toBeLessThan(before);
   });
 });

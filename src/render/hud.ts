@@ -7,10 +7,12 @@ import { getQuest } from '../content/quests.js';
 import { xpToNext } from '../sim/formulas.js';
 import { BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
 import { ZONES } from '../content/zone.js';
+import { DRAGONS } from '../content/dragons.js';
 import {
   FACTIONS,
   HOLDINGS,
   getFaction,
+  getHolding,
   standingBand,
   type StandingBand,
 } from '../content/factions.js';
@@ -287,6 +289,16 @@ export class Hud {
         case 'levelUp':
           this.log(`You have reached level ${ev.level}!`, 'log-good');
           break;
+        case 'dragon': {
+          this.log(ev.text, 'log-dragon');
+          // Only the moments that change what the world looks like get a
+          // banner. "It is moving" is a log line; "it is here" is an event.
+          if (ev.phase === 'roosting' || ev.phase === 'slain') {
+            this.showZoneBanner(ev.name, 'dragon');
+          }
+          if (this.els.realmWindow.style.display === 'block') this.renderRealm();
+          break;
+        }
         case 'holdingChanged': {
           const to = getFaction(ev.to).name;
           this.log(
@@ -864,6 +876,20 @@ export class Hud {
       body.appendChild(head);
 
       for (const holding of holdings) {
+        const wyrm = this.world.dragonOver(holding.id);
+        if (wyrm) {
+          // A front with a dragon on it is not a front. Say so instead of
+          // drawing a contest that is not happening.
+          const row = document.createElement('div');
+          row.className = 'realm-row';
+          row.innerHTML =
+            `<div class="realm-name">${holding.name}` +
+            `<span class="realm-dragon">${wyrm.name}</span></div>` +
+            `<div class="realm-bar"><div class="realm-wyrm"></div></div>`;
+          row.title = `${wyrm.title}, ${wyrm.age} years old. Nobody is holding this.`;
+          body.appendChild(row);
+          continue;
+        }
         const held = this.world.controllerOf(holding.id);
         const faction = getFaction(held);
         // -1..1 mapped onto the bar, with the incumbent's colour filling from
@@ -886,6 +912,31 @@ export class Hud {
           `${this.world.controllerOf(holding.id) === holding.claimants[1] ? 'holding' : 'holding'} at ${pct}%`;
         body.appendChild(row);
       }
+    }
+
+    const wyrms = document.createElement('div');
+    wyrms.className = 'realm-zone';
+    wyrms.style.marginTop = '10px';
+    wyrms.textContent = 'The old things';
+    body.appendChild(wyrms);
+
+    for (const def of DRAGONS) {
+      const state = this.world.dragonState(def.id);
+      const row = document.createElement('div');
+      row.className = 'realm-row wyrm';
+      const where =
+        state.phase === 'roosting' && state.holdingId
+          ? getHolding(state.holdingId).name
+          : state.phase === 'hunting'
+            ? 'on the wing'
+            : state.phase === 'slain'
+              ? 'dead'
+              : 'sleeping';
+      row.innerHTML =
+        `<div class="realm-name">${def.name}` +
+        `<span class="${state.phase === 'roosting' ? 'realm-dragon' : 'band-neutral'}">${where}</span></div>`;
+      row.title = `${def.title} — ${def.age} years old, ${ZONES[def.zoneId]?.name ?? def.zoneId}.`;
+      body.appendChild(row);
     }
 
     const sep = document.createElement('div');

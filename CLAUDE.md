@@ -1,7 +1,7 @@
 # Emerald Isle — working notes
 
 A single-player 3D tab-target RPG. Celtic-flavoured, grounded (wildlife and
-outlaws, no mythical creatures), original IP. Built so that the combat
+outlaws) with exactly one exception — see "Dragons" — original IP. Built so that the combat
 simulation could later run on a server if the project goes multiplayer.
 
 This repository is the game and nothing else. Read this before changing anything.
@@ -52,6 +52,7 @@ input / HUD click ──> Command ──> World.submit()
 | `src/content/` | Pure data: items, skills, mobs, loot tables, the zones, classes. |
 | `src/content/terrain.ts` | Zone themes: ground shape, palette, light, fog, scatter. |
 | `src/content/factions.ts` | Who holds what, and what they make of you. |
+| `src/content/dragons.ts` | The four things the world moves around by itself. |
 | `src/render/` | three.js, DOM, input. Nothing gameplay-authoritative. |
 | `src/render/scene.ts` | Builds a zone from its theme. Knows *how*, not *which*. |
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
@@ -459,6 +460,52 @@ tests caught their absence:
   close enough that meleeing a boss pulls it in. Deliberate guard camps opt out
   with `guardOf` on the spawn.
 
+## Dragons
+
+The world is deliberately grounded: wildlife and people, nothing that should
+not exist. **Dragons are the single exception, and that is the whole design.**
+Put griffons and trolls and wyrms in the same hills and a dragon is the biggest
+monster on a list. Leave it as the only impossible thing in Dal Riata and it is
+an event.
+
+A dragon is **not a boss with a spawn point**. Bosses stand where the zone
+layout puts them and wait for you. A dragon (`content/dragons.ts`):
+
+- lives in world state, not in `ZoneDef.spawns`
+- sleeps in a lair for ~26 minutes, wakes, and works its territory
+- sits on each holding it claims for ~7 minutes, then moves on
+- **drives the garrison off the ground it lands on** and stops that front dead
+  — a third power the factions cannot negotiate with
+- cannot be tamed, farmed or camped: no spawn roll, no host camp, no respawn
+  timer. The only thing that produces a dragon is time.
+
+The routine ticks wherever the player is, so a dragon three zones away is a
+phase and a banner rather than an entity; walk into its zone mid-visit and it
+is already there, on ground that is already empty.
+
+One per zone, sitting at the **top of its zone's band** rather than above it.
+Level gap drives both accuracy and mitigation, so three levels of headroom made
+every dragon a cliff — unwinnable at the cap, trivial four levels later — and
+it cannot work at all for Caer Dubh, where the cap is the level cap. A dragon
+carries its difficulty in `toughness` and `menace` instead, as multiples of its
+own zone's ★6 elite boss, hand-fitted per dragon against the printed table:
+
+| | Win at the zone cap | Fight length |
+|---|---|---|
+| Saorla (25) | 75–100% | ~60–85s |
+| Crannach (40) | 67–100% | ~40–58s |
+| Oanach (70) | 67–100% | ~29–41s |
+| Vharok (100) | 58–100% | ~19–31s |
+
+They are ★6 rather than a new ★7: adding one would mean re-fitting
+`STAR_MODIFIERS` and every rule keyed to "★5 is a boss, ★6 is an elite boss"
+for four creatures. `MobDef.dragon` is what content and tests use to mean "not
+a zone's boss".
+
+Their weapons are the best in the game (`WYRM_POWER`, above the rare spawns'
+signature gear) because they are the only items you cannot get by camping,
+buying, questing or planning for.
+
 ## Each zone looks like somewhere else
 
 `content/terrain.ts` holds a `ZoneTheme` per zone — sky, fog, ground palette,
@@ -508,7 +555,7 @@ file changes** — the events that drive animation (`swing`, `castBegin`,
 ## Verifying a change
 
 ```bash
-npm run verify        # typecheck + 179 unit and balance tests
+npm run verify        # typecheck + 190 unit and balance tests
 npm run build && npm run preview &
 npm run smoke         # real browser, plays the game, writes screenshots/
 ```
@@ -533,6 +580,13 @@ replaces — because `spawnMob` was unwrapping `rareOf` on the way in and handin
 back the host. Every assertion still passed. Two identical columns are what gave
 it away, which is why these tests print their tables.
 
+The same trap caught the dragons, harder. Every class read a flat 0% win rate,
+and three rounds of "tuning" made no difference — because a dragon in a test
+arena has no `dragonId`, the respawn guard keyed off the entity rather than the
+definition, and `respawnMs: 0` meant *respawn immediately*: it healed to full on
+the tick it died. A number that does not move when you change the inputs is not
+a balance problem, it is a bug.
+
 Always run `smoke` for renderer or HUD changes. Unit tests cannot see a panel
 overlapping another panel, nameplate clutter, or a tree planted through a boss —
 `smoke` caught all three. It drives to the boss fight through the `window.__game`
@@ -541,8 +595,6 @@ debug handle exposed in `main.ts`.
 ## Deliberately not built yet
 
 Dialogue, crafting, real art, **gameplay-authoritative terrain**, pathfinding
-(mobs walk straight lines) and entity collision. Dragons as *world entities* —
-a creature with territory and a routine rather than a spawn point — is the
-obvious next thing the faction layer makes possible. Vendor stock is static too —
+(mobs walk straight lines) and entity collision. Vendor stock is static too —
 traders never run out and never restock, which wants an inventory model if the
 economy ever grows past four zones.

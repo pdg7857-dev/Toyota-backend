@@ -37,6 +37,7 @@ import {
 import { isBoss } from './types.js';
 import type {
   ActiveEffect,
+  DragonState,
   FactionId,
   ActorCommand,
   Attributes,
@@ -56,6 +57,16 @@ import type {
 import { canEquip, getItem } from '../content/items.js';
 import { getLootTable, getMob } from '../content/mobs.js';
 import { BOUNTY_SPAWN_CHANCE, RARE_SPAWN_CHANCE } from '../content/rares.js';
+import {
+  DRAGONS,
+  DRAGON_DORMANT_MIN,
+  DRAGON_HUNT_MIN,
+  DRAGON_ROOST_MIN,
+  DRAGON_SLAIN_MIN,
+  dragonMobId,
+  getDragon,
+  type DragonDef,
+} from '../content/dragons.js';
 import {
   CONTROL_LIMIT,
   FLIP_THRESHOLD,
@@ -98,11 +109,16 @@ function neededFor(objective: QuestObjective): number {
   return 1;
 }
 
+/** Minutes of world time, in ticks-friendly milliseconds. */
+function minutes(n: number): number {
+  return n * 60000;
+}
+
 /** Time since last damage dealt/taken that still counts as "in combat". */
 const COMBAT_TIMEOUT_MS = 6000;
 
 /** Save format version. Bump when the Entity shape changes. */
-const SAVE_VERSION = 6;
+const SAVE_VERSION = 7;
 
 export interface WorldOptions {
   seed: number;
@@ -130,6 +146,11 @@ export class World {
   control: Record<string, number> = {};
   /** Which faction currently holds each holding. Derived, but cached so a flip is an event. */
   controller: Record<string, FactionId> = {};
+  /**
+   * Where each dragon is in its life. Runs whatever zone the player is in:
+   * the world does not pause because you left.
+   */
+  dragons: Record<string, DragonState> = {};
 
   private nextId = 1;
   private queue: ActorCommand[] = [];
@@ -141,8 +162,11 @@ export class World {
     this.zone = opts.zone;
     this.rng = new Rng(opts.seed);
     this.resetTerritory();
+    this.resetDragons();
     this.spawnPlayer(opts.classId, opts.playerName ?? 'Wanderer');
-    for (const sp of this.zone.spawns) this.spawnMob(this.garrisonFor(sp), sp.pos, undefined, sp.holding);
+    for (const sp of this.zone.spawns) {
+      this.spawnMob(this.garrisonFor(sp), sp.pos, undefined, sp.holding);
+    }
     for (const v of this.zone.vendors ?? []) this.spawnVendor(v.vendorId, v.pos);
   }
 
@@ -278,6 +302,10 @@ export class World {
   private tickTerritory(): void {
     for (const holding of HOLDINGS) {
       if (holding.drift === 0) continue;
+      // A front with a dragon on it is not a front. Nobody is contesting
+      // anything while that is sitting there, and the war resumes when it
+      // leaves or somebody kills it.
+      if (this.isSuppressed(holding.id)) continue;
       const toward = holding.drift > 0 ? holding.claimants[1] : holding.claimants[0];
       const perTick = (Math.abs(holding.drift) * TICK_MS) / 60000;
       this.applyPressure(holding.id, toward, perTick, false);
@@ -295,6 +323,159 @@ export class World {
     if (!spawn.holding) return spawn.mobId;
     const holding = getHolding(spawn.holding);
     return holding.garrison[this.controllerOf(spawn.holding)] ?? spawn.mobId;
+  }
+
+  // --------------------------------------------------------------- dragons
+
+  /**
+   * Every dragon asleep, staggered so they do not all wake at once.
+   *
+   * The stagger is derived from the roster order rather than rolled: a fresh
+   * world should always feel the same shape, and a seed that happened to wake
+   * three dragons in the first minute would read as the feature being broken.
+   */
+  private resetDragons(): void {
+    this.dragons = {};
+    DRAGONS.forEach((def, i) => {
+      this.dragons[def.id] = {
+        phase: 'dormant',
+        // Spread the first wakings across one full dormancy.
+        remainingMs: minutes(DRAGON_DORMANT_MIN * (0.35 + (i / DRAGONS.length) * 0.9)),
+        stop: 0,
+        holdingId: null,
+      };
+    });
+  }
+
+  dragonState(dragonId: string): DragonState {
+    const state = this.dragons[dragonId];
+    if (!state) throw new Error(`Unknown dragon: ${dragonId}`);
+    return state;
+  }
+
+  /** The dragon sitting on this holding, if one is. */
+  dragonOver(holdingId: string): DragonDef | undefined {
+    for (const def of DRAGONS) {
+      const state = this.dragons[def.id];
+      if (state?.phase === 'roosting' && state.holdingId === holdingId) return def;
+    }
+    return undefined;
+  }
+
+  /**
+   * Advance every dragon's routine, wherever the player happens to be.
+   *
+   * dormant -> hunting -> roosting -> hunting -> ... -> dormant, and `slain`
+   * when someone finally manages it. The phases are minutes long because the
+   * whole point is that a dragon is not something you queue for.
+   */
+  private tickDragons(): void {
+    for (const def of DRAGONS) {
+      const state = this.dragons[def.id];
+      if (!state) continue;
+      state.remainingMs -= TICK_MS;
+      if (state.remainingMs > 0) continue;
+
+      switch (state.phase) {
+        case 'dormant':
+        case 'slain': {
+          // Clear the carcass, if the player left one lying on a holding.
+          this.despawnDragon(def);
+          state.phase = 'hunting';
+          state.stop = 0;
+          state.holdingId = null;
+          state.remainingMs = minutes(DRAGON_HUNT_MIN);
+          this.dragonEvent(def, state, def.waking);
+          break;
+        }
+        case 'hunting': {
+          const holdingId = def.territory[state.stop % def.territory.length]!;
+          state.phase = 'roosting';
+          state.holdingId = holdingId;
+          state.remainingMs = minutes(DRAGON_ROOST_MIN);
+          this.dragonEvent(def, state, def.arrival);
+          this.syncDragonEntity(def);
+          this.clearGarrison(holdingId);
+          break;
+        }
+        case 'roosting': {
+          state.stop += 1;
+          state.holdingId = null;
+          this.despawnDragon(def);
+          if (state.stop >= def.territory.length) {
+            state.phase = 'dormant';
+            state.remainingMs = minutes(DRAGON_DORMANT_MIN);
+            this.dragonEvent(def, state, `${def.name} goes back to the dark.`);
+          } else {
+            state.phase = 'hunting';
+            state.remainingMs = minutes(DRAGON_HUNT_MIN);
+            this.dragonEvent(def, state, `${def.name} is moving.`);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  private dragonEvent(def: DragonDef, state: DragonState, text: string): void {
+    this.events.push({
+      t: 'dragon',
+      dragonId: def.id,
+      name: def.name,
+      phase: state.phase,
+      zoneId: def.zoneId,
+      holdingId: state.holdingId,
+      text,
+    });
+  }
+
+  /**
+   * Put the dragon in the world if the player is standing in its zone.
+   *
+   * Only one zone is loaded at a time, so a dragon roosting three zones away
+   * is a phase and a banner rather than an entity — and walking into its zone
+   * while it is out is how you find it.
+   */
+  private syncDragonEntity(def: DragonDef): void {
+    if (def.zoneId !== this.zone.id) return;
+    const state = this.dragonState(def.id);
+    if (state.phase !== 'roosting' || !state.holdingId) return;
+    if (this.dragonEntity(def)) return;
+    const holding = getHolding(state.holdingId);
+    const mob = this.spawnMob(dragonMobId(def), holding.pos);
+    mob.dragonId = def.id;
+  }
+
+  private dragonEntity(def: DragonDef): Entity | undefined {
+    for (const e of this.entities.values()) if (e.dragonId === def.id) return e;
+    return undefined;
+  }
+
+  private despawnDragon(def: DragonDef): void {
+    const entity = this.dragonEntity(def);
+    if (!entity) return;
+    this.entities.delete(entity.id);
+    this.events.push({ t: 'despawn', entityId: entity.id });
+  }
+
+  /**
+   * Drive the garrison off a holding.
+   *
+   * They do not die — they leave. Killing a hundred guards with a scripted
+   * event would hand the player a hundred kills' worth of nothing, and the
+   * fiction is better anyway: a dragon lands and people run.
+   */
+  private clearGarrison(holdingId: string): void {
+    for (const e of [...this.entities.values()]) {
+      if (e.kind !== 'mob' || e.holding !== holdingId) continue;
+      this.entities.delete(e.id);
+      this.events.push({ t: 'despawn', entityId: e.id });
+    }
+  }
+
+  /** True while a dragon is sitting on this holding. */
+  isSuppressed(holdingId: string): boolean {
+    return this.dragonOver(holdingId) !== undefined;
   }
 
   // -------------------------------------------------------------- standing
@@ -682,6 +863,7 @@ export class World {
     for (const { actorId, cmd } of pending) this.applyCommand(actorId, cmd);
 
     this.tickTerritory();
+    this.tickDragons();
     this.tickCooldowns();
     this.tickEffects();
     this.tickCasts();
@@ -1116,6 +1298,12 @@ export class World {
   private tickRespawns(): void {
     for (const e of this.entities.values()) {
       if (!e.dead || e.kind !== 'mob') continue;
+      // A dragon is never on a respawn timer, however it got into the world.
+      // Keyed off the DEFINITION rather than `e.dragonId`, which is only set
+      // on the world's own dragons: a dragon in a test arena was resurrecting
+      // at full health on the tick it died, so every fight against one
+      // measured as unwinnable and three rounds of "tuning" chased a ghost.
+      if (getMob(e.defId!).dragon) continue;
       // Adds never respawn — they belong to a fight that is already over.
       if (e.summonedBy !== undefined) {
         this.entities.delete(e.id);
@@ -1124,6 +1312,11 @@ export class World {
       }
       e.respawnInMs -= TICK_MS;
       if (e.respawnInMs > 0) continue;
+      // Nobody is standing a post under a dragon.
+      if (e.holding && this.isSuppressed(e.holding)) {
+        e.respawnInMs = 5000;
+        continue;
+      }
       // Every respawn is a fresh roll on this spawn point — which is both how
       // a rare turns up and how the camp goes back to normal after one dies.
       // Resolve to the ordinary mob first: the point belongs to the camp, not
@@ -1266,6 +1459,19 @@ export class World {
     victim.targetId = null;
     victim.autoAttack = victim.kind === 'mob';
     this.events.push({ t: 'death', entityId: victim.id, killerId });
+
+    if (victim.kind === 'mob' && victim.dragonId) {
+      // A dragon does not leave a corpse on a respawn timer. It is dealt with,
+      // the ground it was sitting on goes back to the people fighting over it,
+      // and something else wakes up a long while later.
+      const dragon = getDragon(victim.dragonId);
+      const state = this.dragonState(dragon.id);
+      state.phase = 'slain';
+      state.holdingId = null;
+      state.stop = 0;
+      state.remainingMs = minutes(DRAGON_SLAIN_MIN);
+      this.dragonEvent(dragon, state, `${dragon.name} is dead. Somebody will write that down.`);
+    }
 
     if (victim.kind === 'mob') {
       const def = getMob(victim.defId!);
@@ -1840,8 +2046,14 @@ export class World {
     player.cast = null;
     player.effects = [];
 
-    for (const sp of zone.spawns) this.spawnMob(this.garrisonFor(sp), sp.pos, undefined, sp.holding);
+    for (const sp of zone.spawns) {
+      // Nothing garrisons a holding a dragon is sitting on, so arriving in a
+      // zone mid-visit shows you the empty ground rather than a full camp.
+      if (sp.holding && this.isSuppressed(sp.holding)) continue;
+      this.spawnMob(this.garrisonFor(sp), sp.pos, undefined, sp.holding);
+    }
     for (const v of zone.vendors) this.spawnVendor(v.vendorId, v.pos);
+    for (const dragon of DRAGONS) this.syncDragonEntity(dragon);
 
     this.events.push({
       t: 'zoneChanged',
@@ -2037,6 +2249,7 @@ export class World {
       // the map resets to "the outlaws own everything" every time you load.
       control: this.control,
       controller: this.controller,
+      dragons: this.dragons,
       entities: [...this.entities.values()],
     });
   }
@@ -2051,6 +2264,7 @@ export class World {
       zoneId?: string;
       control?: Record<string, number>;
       controller?: Record<string, FactionId>;
+      dragons?: Record<string, DragonState>;
       entities: Entity[];
     };
     if (data.version !== SAVE_VERSION) {
@@ -2070,6 +2284,7 @@ export class World {
     world.playerId = data.playerId;
     if (data.control) world.control = { ...world.control, ...data.control };
     if (data.controller) world.controller = { ...world.controller, ...data.controller };
+    if (data.dragons) world.dragons = { ...world.dragons, ...data.dragons };
     for (const e of data.entities) {
       // JSON turns numeric threat keys into strings; normalize them back.
       if (e.threat) {

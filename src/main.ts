@@ -5,6 +5,7 @@ import { canEquip, getItem } from './content/items.js';
 import { getMob } from './content/mobs.js';
 import { getQuest } from './content/quests.js';
 import { getHolding } from './content/factions.js';
+import { DRAGONS } from './content/dragons.js';
 import { getVendor } from './content/vendors.js';
 import { SceneRig } from './render/scene.js';
 import { ViewManager } from './render/views.js';
@@ -157,6 +158,7 @@ async function boot(): Promise<void> {
     mobOf: (mobId: string) => getMob(mobId),
     questOf: (questId: string) => getQuest(questId),
     holdingOf: (holdingId: string) => getHolding(holdingId),
+    dragons: () => DRAGONS,
   };
 
   window.addEventListener('beforeunload', () => save(world));

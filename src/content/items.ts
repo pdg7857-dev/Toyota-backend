@@ -1,4 +1,5 @@
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from './curves.js';
+import { buildDragonItems } from './dragons.js';
 import { buildQuestGear } from './questgear.js';
 import { buildSignatureItems } from './rares.js';
 import { skillsTaughtBy, tomeNoun } from './skills.js';
@@ -784,6 +785,9 @@ Object.assign(ITEMS, buildSignatureItems());
 
 // Trophies, armour sets and capstone weapons from the zones' armour lines.
 Object.assign(ITEMS, buildQuestGear());
+
+// And the four things you cannot plan for.
+Object.assign(ITEMS, buildDragonItems());
 
 export function getItem(id: string): ItemDef {
   const item = ITEMS[id];

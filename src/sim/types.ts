@@ -300,6 +300,23 @@ export interface QuestDef {
   };
 }
 
+/**
+ * Where a dragon is in its life, as authoritative sim state.
+ *
+ * The entity only exists while the player is in its zone AND it is out of its
+ * lair — but the phase runs whatever zone you are in, which is what makes
+ * coming back to a zone feel like coming back to somewhere that carried on.
+ */
+export interface DragonState {
+  phase: 'dormant' | 'hunting' | 'roosting' | 'slain';
+  /** Milliseconds left in the current phase. */
+  remainingMs: number;
+  /** Index into the dragon's territory: where it is, or is heading. */
+  stop: number;
+  /** Holding it is currently sitting on, if roosting. */
+  holdingId: string | null;
+}
+
 /** Live progress for one accepted quest: one counter per objective. */
 export interface QuestProgress {
   questId: string;
@@ -367,6 +384,11 @@ export interface MobDef {
    * with flags on it.
    */
   factionId?: FactionId;
+  /**
+   * Marks a dragon: a creature the world moves around rather than one a zone
+   * spawns. Content and tests that mean "a zone's boss" must exclude these.
+   */
+  dragon?: boolean;
   /** Renderer hints only — the sim never reads these. */
   view: { color: number; height: number; radius: number };
 }
@@ -451,6 +473,8 @@ export interface Entity {
   spawnPos?: Vec2;
   /** Guard post this mob stands at, if any — see `SpawnPoint.holding`. */
   holding?: string;
+  /** Set on the entity a dragon is currently being represented by. */
+  dragonId?: string;
   aiState?: 'idle' | 'chasing' | 'attacking' | 'returning' | 'dead';
   threat?: Record<EntityId, number>;
   abilityCooldowns?: Record<string, number>;
@@ -563,6 +587,16 @@ export type SimEvent =
   | { t: 'sold'; entityId: EntityId; itemId: string; qty: number; gold: number }
   | { t: 'bought'; entityId: EntityId; itemId: string; gold: number }
   | { t: 'skillUnlocked'; entityId: EntityId; skillId: string }
+  /** A dragon woke, moved, settled, left or died. */
+  | {
+      t: 'dragon';
+      dragonId: string;
+      name: string;
+      phase: 'dormant' | 'hunting' | 'roosting' | 'slain';
+      zoneId: string;
+      holdingId: string | null;
+      text: string;
+    }
   /** A holding changed hands. The one event the whole territory layer exists for. */
   | {
       t: 'holdingChanged';

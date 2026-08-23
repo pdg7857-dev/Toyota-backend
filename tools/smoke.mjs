@@ -518,6 +518,72 @@ async function main() {
   }));
   await page.keyboard.press('k');
 
+  // --- a dragon -----------------------------------------------------------
+  // Wind one onto a holding and check the three things that make it a world
+  // entity rather than a boss: the ground it lands on empties, it is standing
+  // there in the world, and killing it hands the ground back.
+  const wyrm = await page.evaluate(async () => {
+    const g = window.__game;
+    g.world.travelTo('fenmarch');
+    await new Promise((r) => setTimeout(r, 400));
+
+    const def = g.dragons().find((d) => d.zoneId === 'fenmarch');
+    // Skip the dormancy rather than idling for half an hour in a browser.
+    g.world.dragons[def.id].remainingMs = 1;
+    for (let i = 0; i < 200 && g.world.dragonState(def.id).phase !== 'roosting'; i++) {
+      await new Promise((r) => setTimeout(r, 40));
+      // Only shorten the phases BEFORE the roost. Shortening the roost too
+      // ends the visit on the next tick, and the dragon leaves before anyone
+      // can look at it.
+      const now = g.world.dragonState(def.id);
+      if (now.phase !== 'roosting' && now.remainingMs > 5000) {
+        g.world.dragons[def.id].remainingMs = 1;
+      }
+    }
+
+    const state = g.world.dragonState(def.id);
+    const holdingId = state.holdingId;
+    const entity = [...g.world.entities.values()].find((e) => e.dragonId === def.id);
+    const garrison = [...g.world.entities.values()].filter((e) => e.holding === holdingId);
+    const player = g.world.player;
+    player.level = 40;
+    if (entity) {
+      player.pos.x = entity.pos.x + 2;
+      player.pos.z = entity.pos.z;
+      g.world.submit(player.id, { t: 'target', id: entity.id });
+    }
+    return {
+      phase: state.phase,
+      holding: holdingId,
+      inWorld: !!entity,
+      groundEmptied: garrison.length === 0,
+      suppressed: g.world.isSuppressed(holdingId),
+      name: entity ? entity.name : null,
+    };
+  });
+  await wait(700);
+  await page.screenshot({ path: join(OUT, '13-dragon.png') });
+  await page.keyboard.press('k');
+  await wait(400);
+  await page.screenshot({ path: join(OUT, '13b-dragon-realm.png') });
+  await page.keyboard.press('k');
+
+  const wyrmDead = await page.evaluate(async () => {
+    const g = window.__game;
+    const def = g.dragons().find((d) => d.zoneId === 'fenmarch');
+    const entity = [...g.world.entities.values()].find((e) => e.dragonId === def.id);
+    if (!entity) return { ok: false, why: 'never turned up' };
+    const holdingId = g.world.dragonState(def.id).holdingId;
+    entity.health = 1;
+    g.world.submit(g.world.player.id, { t: 'autoAttack', on: true });
+    await new Promise((r) => setTimeout(r, 1800));
+    const loot = (entity.corpseLoot ?? []).map((st) => g.itemOf(st.itemId));
+    return {
+      ok: entity.dead && g.world.dragonState(def.id).phase === 'slain' && !g.world.isSuppressed(holdingId),
+      carried: loot.map((i) => i.name),
+    };
+  });
+
   // Pull gameplay state straight out of the running page for assertions.
   const state = await page.evaluate(() => {
     const log = [...document.querySelectorAll('#log .log-line')].map((n) => n.textContent);
@@ -564,6 +630,10 @@ async function main() {
     ['rare is named for what it carries', rareLoot.namedForItem === true],
     ['rare renders bigger than its camp', rareCheck.taller === true],
     ['rare nameplate marked', rarePlate > 0],
+    ['a dragon took a holding', wyrm.inWorld && wyrm.phase === 'roosting'],
+    ['the ground it landed on emptied', wyrm.groundEmptied && wyrm.suppressed],
+    ['killing it handed the ground back', wyrmDead.ok],
+    ['it carried something', (wyrmDead.carried ?? []).length > 0],
     ['a front changed hands', realm.ok],
     ['the new holder garrisons the ground', realm.garrisonAfter !== realm.garrisonBefore],
     ['realm panel opens', realmPanel.open],
@@ -579,6 +649,7 @@ async function main() {
   for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
   console.log('\nplayer:', state.hp, '| xp:', state.xp, '| target:', state.target);
   console.log('log tail:', state.log.slice(0, 6));
+  console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('armour:', JSON.stringify(armour), '| bounty:', JSON.stringify(bounty));
   console.log('rare:', JSON.stringify({ ...rareCheck, ...rareLoot }), '| rare plates:', rarePlate);

@@ -1,5 +1,12 @@
 import { STAR_MODIFIERS, baseMobXp, curveMobDamageRange, curveMobHealth } from '../sim/formulas.js';
 import { zoneTomes } from './skills.js';
+import {
+  DRAGONS,
+  dragonLootTableId,
+  dragonMobId,
+  dragonWeapons,
+  type DragonDef,
+} from './dragons.js';
 import { TROPHY_DROP_CHANCE, trophiesByMob } from './questgear.js';
 import {
   BOUNTIES,
@@ -1272,6 +1279,87 @@ for (const mob of Object.values(MOBS)) {
   const host = MOBS[mob.rareOf]!;
   if (host.factionId) MOBS[mob.id] = { ...mob, factionId: host.factionId };
 }
+
+// --------------------------------------------------------------------------
+// Dragons.
+//
+// Built here so combat, loot and the renderer treat them like any other
+// creature — but nothing puts them in a zone's spawn list. `World` owns where
+// they are and what they are doing; see `tickDragons`.
+//
+// ★6 with a multiplier rather than a seventh star: adding ★7 would mean
+// re-fitting STAR_MODIFIERS and every rule keyed to "★5 is a boss, ★6 is an
+// elite boss" for the sake of four creatures.
+// --------------------------------------------------------------------------
+
+function dragonMob(def: DragonDef): MobDef {
+  const elite = MOBS[def.eliteId];
+  if (!elite) throw new Error(`${def.name} is anchored to an unknown boss: ${def.eliteId}`);
+  return {
+    id: dragonMobId(def),
+    name: def.title,
+    level: def.level,
+    stars: 6,
+    attributes: {
+      strength: Math.round(def.level * 1.2),
+      dexterity: Math.round(def.level * 0.7),
+      focus: Math.round(def.level * 0.8),
+      vitality: Math.round(def.level * 1.1),
+    },
+    baseHealth: Math.round(elite.baseHealth * def.toughness),
+    damageMin: Math.round(elite.damageMin * def.menace),
+    damageMax: Math.round(elite.damageMax * def.menace),
+    damageType: 'fire',
+    swingMs: 2400,
+    attackRange: 4.5,
+    moveSpeed: 4.2,
+    aggroRadius: 16,
+    // It does not go home. There is nowhere to leash it to — it is already
+    // exactly where it means to be.
+    leashRadius: 90,
+    xp: baseMobXp(def.level, 6),
+    lootTableId: dragonLootTableId(def),
+    respawnMs: 0,
+    abilities: [
+      {
+        id: `${def.id}_breath`,
+        name: 'Breath',
+        kind: 'heavySlam',
+        cooldownMs: 16000,
+        castMs: 2400,
+        radius: 9,
+        damageMultiplier: 3.8,
+        interruptible: false,
+        telegraphText: `${def.name} draws breath!`,
+      },
+      {
+        id: `${def.id}_rage`,
+        name: 'Old Fury',
+        kind: 'enrage',
+        cooldownMs: 0,
+        castMs: 0,
+        healthThreshold: 0.35,
+        enrageDamageMultiplier: 1.5,
+        telegraphText: `${def.name} stops playing with you.`,
+      },
+    ],
+    dragon: true,
+    view: def.view,
+  };
+}
+
+for (const def of DRAGONS) {
+  MOBS[dragonMobId(def)] = dragonMob(def);
+  LOOT_TABLES[dragonLootTableId(def)] = {
+    id: dragonLootTableId(def),
+    goldMultiplier: 4,
+    classWeapons: dragonWeapons(def),
+    entries: [],
+  };
+}
+
+/** Every dragon's combat definition. */
+export const DRAGON_MOBS: MobDef[] = DRAGONS.map((d) => MOBS[dragonMobId(d)]!);
 
 // Both lists are built AFTER the allegiances above: the loop replaces each
 // entry in MOBS with a new object, so a list captured earlier would hold the

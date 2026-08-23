@@ -844,3 +844,23 @@ canvas { display: block; }
 }
 
 .log-realm { color: #d8c07a; font-weight: 600; }
+
+/* A dragon on a front, and the roster of where each one is. */
+.realm-dragon { color: #ff9a6a; font-weight: 600; font-size: 11px; }
+.realm-wyrm {
+  height: 100%;
+  width: 100%;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(255, 154, 106, 0.75) 0 6px,
+    rgba(255, 154, 106, 0.25) 6px 12px
+  );
+}
+
+#zone-banner.dragon {
+  color: #ff9a6a;
+  font-size: 34px;
+  letter-spacing: 6px;
+}
+
+.log-dragon { color: #ff9a6a; font-weight: 600; }

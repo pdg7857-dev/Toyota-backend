@@ -1,6 +1,7 @@
 # Emerald Isle
 
 A single-player 3D tab-target RPG — Celtic-flavoured, grounded, original IP.
+With four exceptions, which have wings.
 Levels 1 to 100 across four zones, deliberately grind-heavy, with eight bosses
 whose fights are decided by how you play rather than by your stat sheet.
 
@@ -49,6 +50,19 @@ different map. Press `K` for the realm panel.
 Factions remember what you did. The consequence that matters most: a faction
 that has come to terms with you **stops attacking you**, and one you have
 wronged notices you from half again as far off.
+
+## The old things
+
+Four dragons, one per zone, and they are not bosses. A dragon lives in world
+state rather than in a zone's spawn list: it sleeps in a lair for half an hour,
+wakes, and works its territory — and the ground it lands on **empties**, because
+whoever was garrisoning it runs. That front stops dead until the dragon moves on
+or somebody kills it.
+
+It cannot be tamed, farmed or camped. There is no spawn roll and no respawn
+timer; the only thing that produces a dragon is time. It sits at the top of its
+zone's band, it is the hardest fight there, and it carries the best weapon in
+the game.
 
 ## The world
 
@@ -176,6 +190,8 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
   its own terrain, palette, lighting, scatter and skills to learn
 - Five factions contesting eight holdings: territory that changes hands from
   what you kill, drifts on its own, and garrisons itself with whoever holds it
+- Four dragons that live in world state, sleep, wake, take ground off the
+  factions holding it, and cannot be camped for
 - Faction standing that decides who attacks you on sight and what you pay
 - Two quest chains per zone — a story chain that walks you through its bands
   and an armour line that outfits you — with kill, collect and travel
@@ -186,7 +202,7 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 ## Development
 
 ```bash
-npm run verify     # typecheck + 179 unit and balance tests
+npm run verify     # typecheck + 190 unit and balance tests
 npm run smoke      # plays the game in real Chromium, writes screenshots/
 ```
 

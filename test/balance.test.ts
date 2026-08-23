@@ -24,6 +24,15 @@ import {
   TROPHY_DROP_CHANCE,
   questArmourId,
 } from '../src/content/questgear.js';
+import {
+  DRAGONS,
+  DRAGON_DORMANT_MIN,
+  DRAGON_HUNT_MIN,
+  DRAGON_ROOST_MIN,
+  dragonMobId,
+  dragonWeaponId,
+} from '../src/content/dragons.js';
+import { curveWeaponDps } from '../src/content/curves.js';
 import { FENMARCH, PLAYABLE_CLASSES, ZONES } from '../src/content/zone.js';
 import { QUESTS } from '../src/content/quests.js';
 import {
@@ -588,7 +597,9 @@ describe('loot scales with difficulty', () => {
   });
 
   it('pays far better for a boss than for anything ordinary nearby', () => {
-    const bosses = Object.values(MOBS).filter((m) => m.stars >= BOSS_STARS);
+    // Zone bosses only. A dragon is ★6 as well, but it is not something a zone
+    // spawns and it is not what this rule is about.
+    const bosses = Object.values(MOBS).filter((m) => m.stars >= BOSS_STARS && !m.dragon);
     expect(bosses.length).toBe(8);
     for (const boss of bosses) {
       // Compare against what you would otherwise be killing at that level.
@@ -1120,6 +1131,83 @@ describe('the war is a grind, not a switch', () => {
         expect(mob.level, `${mob.name} is below ${holding.zoneId}`).toBeGreaterThanOrEqual(lo - 4);
         expect(mob.level, `${mob.name} is above ${holding.zoneId}`).toBeLessThanOrEqual(hi);
         expect(mob.stars, `${mob.name} is a boss on a guard post`).toBeLessThan(BOSS_STARS);
+      }
+    }
+  });
+});
+
+describe('dragons are the hardest thing in the game', () => {
+  it('beats the elite boss of its own zone, and is still winnable', () => {
+    const rows: string[] = [];
+    for (const def of DRAGONS) {
+      const zone = ZONES[def.zoneId]!;
+      const level = zone.levelRange[1];
+      // A capped character in that zone, kitted out: the only person who has
+      // any business trying this.
+      for (const cls of PLAYABLE_CLASSES) {
+        const fight = (mobId: string): Summary =>
+          runEncounter(
+            {
+              name: cls.name,
+              level,
+              gear: gearSetFor(cls.id, level),
+              mobId,
+              skills: skillsForClass(cls.id, level, learnedAt(cls.id, level)).map((sk) => sk.id),
+              classId: cls.id,
+              dodge: true,
+            },
+            12,
+          );
+        const dragon = fight(dragonMobId(def));
+        if (cls.id === 'warrior') {
+          rows.push(
+            `  ${def.title.padEnd(30)} lv${String(def.level).padStart(3)}  ` +
+              `win ${(dragon.winRate * 100).toFixed(0).padStart(3)}%  ` +
+              `ttk ${dragon.medianTtk.toFixed(1).padStart(5)}s  ` +
+              `hp left ${(dragon.medianHealthLeft * 100).toFixed(0).padStart(3)}%`,
+          );
+        }
+        // Hard, but not a wall: a capped player who plays well gets there.
+        expect(dragon.winRate, `${cls.id} cannot touch ${def.name}`).toBeGreaterThan(0.4);
+        expect(dragon.timeouts, `${cls.id} cannot finish ${def.name}`).toBe(0);
+      }
+
+      // And strictly beyond the elite boss that ends its zone.
+      const elite = Object.values(MOBS).find(
+        (m) => m.stars === 6 && !m.dragon && m.level === zone.levelRange[1],
+      );
+      if (elite) {
+        expect(
+          deriveMobStats(MOBS[dragonMobId(def)]!).maxHealth,
+          `${def.name} is softer than ${elite.name}`,
+        ).toBeGreaterThan(deriveMobStats(elite).maxHealth);
+      }
+    }
+    console.log('\nDRAGONS (Warrior at the zone cap; all five asserted)\n' + rows.join('\n'));
+  });
+
+  it('turns up rarely enough to be an event', () => {
+    // One full circuit: dormant, then a stop on each holding it claims.
+    const circuit =
+      DRAGON_DORMANT_MIN + DRAGONS[0]!.territory.length * (DRAGON_HUNT_MIN + DRAGON_ROOST_MIN);
+    expect(circuit, 'a dragon is a rotation, not an event').toBeGreaterThan(30);
+    expect(circuit, 'nobody will ever see one').toBeLessThan(120);
+    // And the window you can actually fight it in is a fraction of that.
+    const window = DRAGONS[0]!.territory.length * DRAGON_ROOST_MIN;
+    expect(window / circuit).toBeLessThan(0.5);
+  });
+
+  it('carries the best weapon in the game, and only it does', () => {
+    for (const def of DRAGONS) {
+      for (const cls of PLAYABLE_CLASSES) {
+        const weapon = getItem(dragonWeaponId(def, cls.id));
+        const dps = (((weapon.damageMin! + weapon.damageMax!) / 2) * 1000) / weapon.swingMs!;
+        const ratio = dps / curveWeaponDps(def.level);
+        // Above a rare spawn's signature (1.22), which is the next best thing.
+        expect(ratio, `${weapon.name} is not worth a dragon`).toBeGreaterThan(1.25);
+        expect(ratio, `${weapon.name} breaks the game`).toBeLessThan(1.45);
+        expect(weapon.quality).toBe('epic');
+        expect(canEquip(weapon, cls.id)).toBe(true);
       }
     }
   });
