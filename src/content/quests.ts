@@ -1,4 +1,11 @@
 import { xpToNext } from '../sim/formulas.js';
+import {
+  ARMOUR_LINES,
+  questArmourId,
+  questWeapons,
+  trophyId,
+  type ArmourLine,
+} from './questgear.js';
 import type { QuestDef } from '../sim/types.js';
 
 /**
@@ -31,6 +38,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'fen_01',
     name: 'Thin the Moor',
     zoneId: 'fenmarch',
+    chain: 'fenmarch_story',
     giverVendorId: 'maeve',
     minLevel: 1,
     summary: 'Maeve wants the hares off the moor before they strip it bare.',
@@ -45,6 +53,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'fen_02',
     name: 'Tusk and Hide',
     zoneId: 'fenmarch',
+    chain: 'fenmarch_story',
     giverVendorId: 'maeve',
     minLevel: 3,
     requires: 'fen_01',
@@ -61,6 +70,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'fen_03',
     name: 'Wet Ground',
     zoneId: 'fenmarch',
+    chain: 'fenmarch_story',
     giverVendorId: 'maeve',
     minLevel: 6,
     requires: 'fen_02',
@@ -76,6 +86,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'fen_04',
     name: 'The Wolves of the Bog',
     zoneId: 'fenmarch',
+    chain: 'fenmarch_story',
     giverVendorId: 'maeve',
     minLevel: 9,
     requires: 'fen_03',
@@ -92,6 +103,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'fen_05',
     name: 'The Road Watch',
     zoneId: 'fenmarch',
+    chain: 'fenmarch_story',
     giverVendorId: 'maeve',
     minLevel: 13,
     requires: 'fen_04',
@@ -108,6 +120,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'fen_06',
     name: 'The Cattle-Thief',
     zoneId: 'fenmarch',
+    chain: 'fenmarch_story',
     giverVendorId: 'maeve',
     minLevel: 18,
     requires: 'fen_05',
@@ -130,6 +143,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'fen_07',
     name: 'Old Scar',
     zoneId: 'fenmarch',
+    chain: 'fenmarch_story',
     giverVendorId: 'maeve',
     minLevel: 22,
     requires: 'fen_06',
@@ -145,6 +159,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'fen_08',
     name: 'The Hill Road',
     zoneId: 'fenmarch',
+    chain: 'fenmarch_story',
     giverVendorId: 'maeve',
     minLevel: 20,
     requires: 'fen_07',
@@ -160,6 +175,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'ard_01',
     name: 'Goats and Grudges',
     zoneId: 'ardmoor',
+    chain: 'ardmoor_story',
     giverVendorId: 'sorcha',
     minLevel: 20,
     summary: 'The crag goats are eating Sorcha out of a living. Thin them.',
@@ -174,6 +190,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'ard_02',
     name: 'Hill Wolves',
     zoneId: 'ardmoor',
+    chain: 'ardmoor_story',
     giverVendorId: 'sorcha',
     minLevel: 23,
     requires: 'ard_01',
@@ -189,6 +206,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'ard_03',
     name: 'Cattle Raiders',
     zoneId: 'ardmoor',
+    chain: 'ardmoor_story',
     giverVendorId: 'sorcha',
     minLevel: 26,
     requires: 'ard_02',
@@ -205,6 +223,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'ard_04',
     name: 'The Cattle-Lord',
     zoneId: 'ardmoor',
+    chain: 'ardmoor_story',
     giverVendorId: 'sorcha',
     minLevel: 30,
     requires: 'ard_03',
@@ -227,6 +246,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'ard_05',
     name: 'Nine Scars',
     zoneId: 'ardmoor',
+    chain: 'ardmoor_story',
     giverVendorId: 'sorcha',
     minLevel: 38,
     requires: 'ard_04',
@@ -250,6 +270,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'ard_06',
     name: 'The Drowned Causeway',
     zoneId: 'ardmoor',
+    chain: 'ardmoor_story',
     giverVendorId: 'sorcha',
     minLevel: 40,
     requires: 'ard_05',
@@ -265,6 +286,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'rch_01',
     name: 'Eels in the Shallows',
     zoneId: 'reach',
+    chain: 'reach_story',
     giverVendorId: 'odhran',
     minLevel: 40,
     summary: 'The eels have made the shallows impassable. Clear them.',
@@ -279,6 +301,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'rch_02',
     name: 'Wreckers\' Work',
     zoneId: 'reach',
+    chain: 'reach_story',
     giverVendorId: 'odhran',
     minLevel: 46,
     requires: 'rch_01',
@@ -295,6 +318,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'rch_03',
     name: 'The Enforcers',
     zoneId: 'reach',
+    chain: 'reach_story',
     giverVendorId: 'odhran',
     minLevel: 52,
     requires: 'rch_02',
@@ -310,6 +334,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'rch_04',
     name: 'Fiachra the Wrecker',
     zoneId: 'reach',
+    chain: 'reach_story',
     giverVendorId: 'odhran',
     minLevel: 55,
     requires: 'rch_03',
@@ -332,6 +357,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'rch_05',
     name: 'Old Cauldron',
     zoneId: 'reach',
+    chain: 'reach_story',
     giverVendorId: 'odhran',
     minLevel: 68,
     requires: 'rch_04',
@@ -355,6 +381,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'rch_06',
     name: 'The Black Road',
     zoneId: 'reach',
+    chain: 'reach_story',
     giverVendorId: 'odhran',
     minLevel: 70,
     requires: 'rch_05',
@@ -370,6 +397,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'cdb_01',
     name: 'The Outer Kennels',
     zoneId: 'caer_dubh',
+    chain: 'caer_dubh_story',
     giverVendorId: 'aoife',
     minLevel: 70,
     summary: 'The fort mastiffs range far past the walls. Cut them down.',
@@ -384,6 +412,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'cdb_02',
     name: 'The Levy',
     zoneId: 'caer_dubh',
+    chain: 'caer_dubh_story',
     giverVendorId: 'aoife',
     minLevel: 76,
     requires: 'cdb_01',
@@ -399,6 +428,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'cdb_03',
     name: 'Blackshields',
     zoneId: 'caer_dubh',
+    chain: 'caer_dubh_story',
     giverVendorId: 'aoife',
     minLevel: 80,
     requires: 'cdb_02',
@@ -415,6 +445,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'cdb_04',
     name: 'Ruadhán the Blackshield',
     zoneId: 'caer_dubh',
+    chain: 'caer_dubh_story',
     giverVendorId: 'aoife',
     minLevel: 85,
     requires: 'cdb_03',
@@ -437,6 +468,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'cdb_05',
     name: 'The Warden and the Champion',
     zoneId: 'caer_dubh',
+    chain: 'caer_dubh_story',
     giverVendorId: 'aoife',
     minLevel: 93,
     requires: 'cdb_04',
@@ -453,6 +485,7 @@ export const QUESTS: Record<string, QuestDef> = {
     id: 'cdb_06',
     name: 'Lord of Caer Dubh',
     zoneId: 'caer_dubh',
+    chain: 'caer_dubh_story',
     giverVendorId: 'aoife',
     minLevel: 98,
     requires: 'cdb_05',
@@ -495,3 +528,81 @@ export function questsAvailableFrom(
       (!q.requires || done.includes(q.requires)),
   );
 }
+
+
+// --------------------------------------------------------------------------
+// The armour lines.
+//
+// A second chain per zone, generated from `content/questgear.ts`. Where the
+// story chain pays in experience and points you at the next band, this one
+// pays in GEAR and asks you to stand still and farm for it.
+//
+// Its rewards are deliberately xp-light. The levelling curve is tuned against
+// the story chain plus the grind; a second chain paying story-sized experience
+// would quietly shorten every band by a third. What you get here is a piece of
+// armour you could not otherwise plan for.
+// --------------------------------------------------------------------------
+
+/** Quest ids for one armour line, in order. */
+function armourQuestId(line: ArmourLine, index: number): string {
+  return `${line.zoneId}_kit_${String(index + 1).padStart(2, '0')}`;
+}
+
+function buildArmourLines(): Record<string, QuestDef> {
+  const out: Record<string, QuestDef> = {};
+
+  for (const line of ARMOUR_LINES) {
+    line.steps.forEach((step, i) => {
+      const id = armourQuestId(line, i);
+      out[id] = {
+        id,
+        name: step.name,
+        zoneId: line.zoneId,
+        chain: `${line.zoneId}_kit`,
+        giverVendorId: line.giverVendorId,
+        minLevel: step.level,
+        ...(i > 0 ? { requires: armourQuestId(line, i - 1) } : {}),
+        summary: step.summary,
+        objectives: [
+          {
+            kind: 'collect',
+            itemId: trophyId(step),
+            count: step.count,
+            text: `Collect ${step.trophy}`,
+          },
+        ],
+        rewards: {
+          ...reward(step.level, 0.15, 0.3),
+          items: [questArmourId(line, step)],
+        },
+      };
+    });
+
+    // The capstone: a handful of every trophy the line taught you to farm,
+    // for a weapon that matches the set.
+    const id = armourQuestId(line, line.steps.length);
+    out[id] = {
+      id,
+      name: line.capstone.name,
+      zoneId: line.zoneId,
+      chain: `${line.zoneId}_kit`,
+      giverVendorId: line.giverVendorId,
+      minLevel: line.capstone.level,
+      requires: armourQuestId(line, line.steps.length - 1),
+      summary: line.capstone.summary,
+      objectives: line.steps.map((step) => ({
+        kind: 'collect' as const,
+        itemId: trophyId(step),
+        count: line.capstone.each,
+        text: `Collect ${step.trophy}`,
+      })),
+      rewards: {
+        ...reward(line.capstone.level, 0.25, 0.3),
+        classItems: questWeapons(line),
+      },
+    };
+  }
+  return out;
+}
+
+Object.assign(QUESTS, buildArmourLines());

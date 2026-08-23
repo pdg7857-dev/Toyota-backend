@@ -53,7 +53,7 @@ import type {
 } from './types.js';
 import { canEquip, getItem } from '../content/items.js';
 import { getLootTable, getMob } from '../content/mobs.js';
-import { RARE_SPAWN_CHANCE } from '../content/rares.js';
+import { BOUNTY_SPAWN_CHANCE, RARE_SPAWN_CHANCE } from '../content/rares.js';
 import { getSkill, skillsForClass } from '../content/skills.js';
 import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
 import { CLASSES, ZONES, getZone, type ZoneDef } from '../content/zone.js';
@@ -166,7 +166,11 @@ export class World {
   private spawnChoice(baseId: string, summoned: boolean): string {
     const base = getMob(baseId);
     if (summoned || !base.rareVariant || this.zone.rareSpawns === false) return baseId;
-    return this.rng.chance(RARE_SPAWN_CHANCE) ? base.rareVariant : baseId;
+    // A bounty turns up more often than a signature item: one is spent the
+    // moment you collect it, the other is yours for the rest of the game.
+    const variant = getMob(base.rareVariant);
+    const chance = variant.bounty ? BOUNTY_SPAWN_CHANCE : RARE_SPAWN_CHANCE;
+    return this.rng.chance(chance) ? base.rareVariant : baseId;
   }
 
   private spawnMob(requestedId: string, pos: Vec2, summonedBy?: EntityId): Entity {
@@ -1410,6 +1414,14 @@ export class World {
     if (!this.isQuestComplete(player, questId)) {
       this.events.push({ t: 'error', entityId: player.id, message: 'That work is not finished.' });
       return;
+    }
+
+    // Hand the goods over. Collection objectives read the bags rather than
+    // counting pickups, so without this a single stack could satisfy the same
+    // requirement twice — and the armour lines ask for the same trophies again
+    // at their capstone, which would then cost nothing.
+    for (const objective of quest.objectives) {
+      if (objective.kind === 'collect') this.removeItem(player, objective.itemId, objective.count);
     }
 
     player.quests = (player.quests ?? []).filter((q) => q.questId !== questId);

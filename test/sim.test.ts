@@ -4,6 +4,7 @@ import {
   MAX_LEVEL,
   TICK_MS,
   castBreakChance,
+  deriveMobStats,
   expectedDefense,
   goldForKill,
   xpToNext,
@@ -12,10 +13,17 @@ import { FENMARCH, PLAYABLE_CLASSES, ZONES, getZone } from '../src/content/zone.
 import { HeightField, getTheme, type Clearing } from '../src/content/terrain.js';
 import { countEvents, duelZone, emptyZone, levelPlayer, simulateFight, vendorZone } from './helpers.js';
 import { VENDORS, buyPrice, sellPrice } from '../src/content/vendors.js';
-import { getQuest } from '../src/content/quests.js';
+import { QUESTS, getQuest } from '../src/content/quests.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { ITEMS, canEquip, getItem } from '../src/content/items.js';
-import { curveWeaponDps } from '../src/content/curves.js';
+import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
+import {
+  ARMOUR_LINES,
+  TROPHY_DROP_CHANCE,
+  questArmourId,
+  questWeaponId,
+  trophyId,
+} from '../src/content/questgear.js';
 import {
   RARES,
   RARE_LEVEL_BONUS,
@@ -23,7 +31,7 @@ import {
   rareMobId,
   signatureWeaponId,
 } from '../src/content/rares.js';
-import { LOOT_TABLES, MOBS, getMob } from '../src/content/mobs.js';
+import { BOUNTY_MOBS, LOOT_TABLES, MOBS, getMob } from '../src/content/mobs.js';
 import { BOSS_STARS, isBoss } from '../src/sim/types.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
 
@@ -1020,9 +1028,11 @@ describe('quests', () => {
       hare.health = 1;
       world.submit(player.id, { t: 'target', id: hare.id });
       world.submit(player.id, { t: 'autoAttack', on: true });
-      const near = { ...hare.pos };
-      player.pos = { x: near.x + 1, z: near.z };
-      events.push(...world.advance(3000));
+      player.pos = { x: hare.pos.x + 1, z: hare.pos.z };
+      // Swing until it actually dies rather than for a fixed few seconds. A
+      // level-1 character misses, and a fixed window made this test pass or
+      // fail on where the seed happened to leave the hit rolls.
+      for (let i = 0; i < 400 && !hare.dead; i++) events.push(...world.tick());
     }
 
     expect(events.some((e) => e.t === 'questProgress' && e.questId === 'fen_01')).toBe(true);
@@ -1606,6 +1616,217 @@ describe('rare spawns', () => {
         const ladderDps = curveWeaponDps(level);
         expect(dps / ladderDps, `${signature.name} is no better than the ladder`).toBeGreaterThan(1.1);
         expect(dps / ladderDps, `${signature.name} outclasses the game`).toBeLessThan(1.4);
+      }
+    }
+  });
+});
+
+describe('bounty spawns', () => {
+  it('is the same fight as its camp, with a purse', () => {
+    for (const bounty of BOUNTY_MOBS) {
+      const host = getMob(bounty.rareOf!);
+      expect(bounty.level).toBe(host.level);
+      expect(bounty.stars).toBe(host.stars);
+      // Softer, not harder: a jackpot you cannot cash is worse than none.
+      expect(deriveMobStats(bounty).maxHealth).toBeLessThan(deriveMobStats(host).maxHealth);
+      expect(bounty.damageMax).toBe(host.damageMax);
+      expect(bounty.name).toBe(`${bounty.name.split(' ')[0]} the ${host.name}`);
+      expect(bounty.sighting!.length).toBeGreaterThan(10);
+    }
+  });
+
+  it('pays one kind of windfall each, and pays it big', () => {
+    for (const bounty of BOUNTY_MOBS) {
+      const host = getMob(bounty.rareOf!);
+      const goldOf = (mob: typeof host): number => {
+        const g = goldForKill(mob.level, mob.stars, LOOT_TABLES[mob.lootTableId]!.goldMultiplier ?? 1);
+        return (g.min + g.max) / 2;
+      };
+      const goldRatio = goldOf(bounty) / goldOf(host);
+      const xpRatio = bounty.xp / host.xp;
+
+      if (bounty.bounty === 'gold') {
+        expect(goldRatio, `${bounty.name} is not much of a purse`).toBeGreaterThan(10);
+        expect(xpRatio, `${bounty.name} pays xp as well as gold`).toBe(1);
+      } else {
+        expect(xpRatio, `${bounty.name} is not much of an elder`).toBeGreaterThan(10);
+        expect(goldRatio, `${bounty.name} pays gold as well as xp`).toBeCloseTo(1, 1);
+      }
+      // Neither is worth a level, or the grind stops being the game.
+      expect(Math.max(goldRatio, xpRatio)).toBeLessThan(30);
+    }
+  });
+
+  it('anchors its worth to the camp it hides in', () => {
+    // This is what stops a level-90 player farming a level-3 boar camp for
+    // gold: fifteen times a Mossback Boar is still Mossback Boar money.
+    const early = BOUNTY_MOBS.find((b) => b.bounty === 'gold' && getMob(b.rareOf!).level < 10)!;
+    const late = BOUNTY_MOBS.filter((b) => b.bounty === 'gold').sort((a, b) => b.level - a.level)[0]!;
+    const worth = (mob: typeof early): number => {
+      const g = goldForKill(mob.level, mob.stars, LOOT_TABLES[mob.lootTableId]!.goldMultiplier ?? 1);
+      return (g.min + g.max) / 2;
+    };
+    expect(worth(late)).toBeGreaterThan(worth(early) * 10);
+  });
+
+  it('never shares a camp with an item rare', () => {
+    // One variant per host: the spawn roll picks between "ordinary" and "the
+    // variant", so a host carrying two would silently drop one of them.
+    const hosts = Object.values(MOBS).filter((m) => m.rareVariant);
+    const seen = new Map<string, string>();
+    for (const host of hosts) {
+      expect(seen.has(host.id), `${host.id} hosts two variants`).toBe(false);
+      seen.set(host.id, host.rareVariant!);
+    }
+    // And every variant points back at exactly one host.
+    for (const [hostId, variantId] of seen) {
+      expect(getMob(variantId).rareOf).toBe(hostId);
+    }
+  });
+
+  it('actually hands over the windfall when killed', () => {
+    const spec = BOUNTY_MOBS.find((b) => b.bounty === 'gold')!;
+    const world = new World({
+      seed: 950,
+      zone: { ...duelZone(spec.rareOf!, 2), rareSpawns: false },
+      classId: 'warrior',
+    });
+    const player = levelPlayer(world, { level: 20 });
+    const mob = theMob(world);
+    const host = getMob(mob.defId!);
+
+    // Kill the camp mob, note the purse, then do it again as the bounty.
+    const take = (): number => {
+      mob.dead = false;
+      mob.corpseLoot = [];
+      mob.corpseGold = 0;
+      mob.health = 1;
+      world.submit(player.id, { t: 'target', id: mob.id });
+      world.submit(player.id, { t: 'autoAttack', on: true });
+      world.advance(6000);
+      expect(mob.dead).toBe(true);
+      return mob.corpseGold ?? 0;
+    };
+    const ordinary = take();
+    mob.defId = spec.id;
+    mob.name = spec.name;
+    const windfall = take();
+    expect(windfall).toBeGreaterThan(ordinary * 8);
+    expect(getMob(mob.defId).rareOf).toBe(host.id);
+  });
+});
+
+describe('the armour lines', () => {
+  it('outfits every zone, one slot at a time', () => {
+    for (const line of ARMOUR_LINES) {
+      const chain = Object.values(QUESTS)
+        .filter((q) => q.chain === `${line.zoneId}_kit`)
+        .sort((a, b) => a.id.localeCompare(b.id));
+      expect(chain.length, `${line.zoneId} has no armour line`).toBe(5);
+
+      // Four steps, one per slot — the set covers a character.
+      const slots = line.steps.map((s) => s.slot);
+      expect(new Set(slots).size).toBe(4);
+      // Rising through the zone's band, never out of it.
+      const [lo, hi] = getZone(line.zoneId).levelRange;
+      let last = 0;
+      for (const step of line.steps) {
+        expect(step.level).toBeGreaterThan(last);
+        expect(step.level).toBeGreaterThanOrEqual(lo);
+        expect(step.level).toBeLessThanOrEqual(hi);
+        last = step.level;
+      }
+      expect(line.capstone.level).toBeGreaterThanOrEqual(last);
+    }
+  });
+
+  it('drops every trophy where the quest says it does', () => {
+    for (const line of ARMOUR_LINES) {
+      for (const step of line.steps) {
+        const table = LOOT_TABLES[getMob(step.mobId).lootTableId]!;
+        const entry = table.entries.find((e) => e.itemId === trophyId(step));
+        expect(entry, `${step.trophy} does not drop from ${step.mobId}`).toBeDefined();
+        expect(entry!.chance).toBe(TROPHY_DROP_CHANCE);
+        // And nowhere else: a known rate on a known camp is the whole point.
+        const sources = Object.values(LOOT_TABLES).filter((t) =>
+          t.entries.some((e) => e.itemId === trophyId(step)),
+        );
+        // The camp itself, plus whatever named variant shares its spawn point.
+        expect(sources.length).toBeLessThanOrEqual(2);
+      }
+    }
+  });
+
+  it('pays out the piece it promised, and a weapon at the end', () => {
+    for (const line of ARMOUR_LINES) {
+      line.steps.forEach((step, i) => {
+        const quest = getQuest(`${line.zoneId}_kit_0${i + 1}`);
+        const [reward] = quest.rewards.items!;
+        expect(getItem(reward!).slot, `${quest.name} pays the wrong slot`).toBe(step.slot);
+        expect(quest.objectives).toHaveLength(1);
+        expect(quest.objectives[0]).toMatchObject({ kind: 'collect', itemId: trophyId(step) });
+      });
+
+      const capstone = getQuest(`${line.zoneId}_kit_05`);
+      // A handful of everything the line taught you to farm.
+      expect(capstone.objectives).toHaveLength(4);
+      for (const step of line.steps) {
+        expect(capstone.objectives.some((o) => o.kind === 'collect' && o.itemId === trophyId(step))).toBe(true);
+      }
+      for (const cls of PLAYABLE_CLASSES) {
+        const weapon = getItem(capstone.rewards.classItems![cls.id]!);
+        expect(weapon.slot).toBe('weapon');
+        expect(canEquip(weapon, cls.id)).toBe(true);
+      }
+    }
+  });
+
+  it('takes the trophies when you hand them in', () => {
+    const world = new World({ seed: 960, zone: getZone('fenmarch'), classId: 'warrior' });
+    const player = world.player;
+    const maeve = [...world.entities.values()].find((e) => e.vendorId === 'maeve')!;
+    player.pos = { x: maeve.pos.x + 1, z: maeve.pos.z };
+    player.level = 20;
+
+    const step = ARMOUR_LINES.find((l) => l.zoneId === 'fenmarch')!.steps[0]!;
+    // One more than the quest wants, so we can see exactly what was taken.
+    world.addItem(player, { itemId: trophyId(step), qty: step.count + 1 });
+    world.submit(player.id, { t: 'acceptQuest', vendorId: maeve.id, questId: 'fenmarch_kit_01' });
+    world.tick();
+    expect(world.isQuestComplete(player, 'fenmarch_kit_01')).toBe(true);
+
+    world.submit(player.id, { t: 'turnInQuest', vendorId: maeve.id, questId: 'fenmarch_kit_01' });
+    world.tick();
+    const left = player.inventory?.find((s) => s.itemId === trophyId(step))?.qty ?? 0;
+    expect(left, 'the trophies were not handed over').toBe(1);
+    // And the piece is in the bags.
+    const line = ARMOUR_LINES.find((l) => l.zoneId === 'fenmarch')!;
+    expect(player.inventory?.some((s) => s.itemId === questArmourId(line, step))).toBe(true);
+  });
+
+  it('is better than the shops and worse than the bosses', () => {
+    // Quest gear is the reliable path, so it must not be the best path.
+    for (const line of ARMOUR_LINES) {
+      for (const step of line.steps) {
+        const piece = getItem(questArmourId(line, step));
+        expect(piece.quality).toBe('rare');
+        expect(piece.armor).toBeGreaterThan(
+          curveArmorTotal(step.level) * ARMOR_SLOT_SHARE[step.slot] * 0.99,
+        );
+        expect(piece.armor).toBeLessThan(
+          curveArmorTotal(step.level) * ARMOR_SLOT_SHARE[step.slot] * 1.2,
+        );
+        // No affixes: those belong to rare spawns alone.
+        expect(piece.critBonus ?? 0).toBe(0);
+        expect(piece.healthBonus ?? 0).toBe(0);
+      }
+      for (const cls of PLAYABLE_CLASSES) {
+        const weapon = getItem(questWeaponId(line, cls.id));
+        const dps = (((weapon.damageMin! + weapon.damageMax!) / 2) * 1000) / weapon.swingMs!;
+        const curve = curveWeaponDps(line.capstone.level);
+        expect(dps / curve).toBeGreaterThan(1.0);
+        // A signature weapon from a rare spawn is 1.22x. This must stay under.
+        expect(dps / curve).toBeLessThan(1.15);
       }
     }
   });

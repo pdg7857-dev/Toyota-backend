@@ -12,8 +12,18 @@ import {
   xpToNext,
 } from '../src/sim/formulas.js';
 import { BOSS_STARS, type ClassId, type MobDef } from '../src/sim/types.js';
-import { LOOT_TABLES, MOBS } from '../src/content/mobs.js';
-import { RARES, RARE_SPAWN_CHANCE, rareMobId } from '../src/content/rares.js';
+import { BOUNTY_MOBS, LOOT_TABLES, MOBS } from '../src/content/mobs.js';
+import {
+  BOUNTY_SPAWN_CHANCE,
+  RARES,
+  RARE_SPAWN_CHANCE,
+  rareMobId,
+} from '../src/content/rares.js';
+import {
+  ARMOUR_LINES,
+  TROPHY_DROP_CHANCE,
+  questArmourId,
+} from '../src/content/questgear.js';
 import { FENMARCH, PLAYABLE_CLASSES, ZONES } from '../src/content/zone.js';
 import { QUESTS } from '../src/content/quests.js';
 import { ITEMS, WEAPON_LADDER, canEquip, gearSetFor, getItem } from '../src/content/items.js';
@@ -995,6 +1005,68 @@ describe('rare spawns are a fight, and worth the wait', () => {
   });
 });
 
+describe('the armour lines are a plannable grind', () => {
+  it('costs a known number of kills per piece, and more for the weapon', () => {
+    const rows: string[] = [];
+    for (const line of ARMOUR_LINES) {
+      for (const step of line.steps) {
+        const kills = step.count / TROPHY_DROP_CHANCE;
+        const piece = getItem(questArmourId(line, step));
+        rows.push(
+          `  ${piece.name.padEnd(22)} lv${String(step.level).padStart(3)} ` +
+            `${String(piece.armor).padStart(4)} armour  ~${kills.toFixed(0)} ${MOBS[step.mobId]!.name} kills`,
+        );
+        // Long enough to be a decision, short enough to finish in a sitting.
+        expect(kills, `${piece.name} is a formality`).toBeGreaterThan(30);
+        expect(kills, `${piece.name} is a second job`).toBeLessThan(120);
+      }
+      const capstoneKills = (line.capstone.each * line.steps.length) / TROPHY_DROP_CHANCE;
+      rows.push(`  ${line.capstone.name.padEnd(22)} → ~${capstoneKills.toFixed(0)} kills for a weapon`);
+      // The weapon should cost more than any single piece did.
+      expect(capstoneKills).toBeGreaterThan(
+        Math.max(...line.steps.map((st) => st.count / TROPHY_DROP_CHANCE)),
+      );
+    }
+    console.log('\nARMOUR LINES\n' + rows.join('\n'));
+  });
+
+  it('does not out-earn the story chain it runs beside', () => {
+    // The levelling curve is tuned against the story chain plus the grind. A
+    // second chain paying story-sized experience would quietly shorten every
+    // band by a third; this one pays in gear.
+    for (const zone of Object.values(ZONES)) {
+      const story = Object.values(QUESTS).filter((q) => q.chain === `${zone.id}_story`);
+      const kit = Object.values(QUESTS).filter((q) => q.chain === `${zone.id}_kit`);
+      const xp = (qs: typeof story): number => qs.reduce((total, q) => total + q.rewards.xp, 0);
+      expect(xp(kit), `${zone.id}'s armour line pays nothing at all`).toBeGreaterThan(0);
+      expect(xp(kit), `${zone.id}'s armour line out-earns its story`).toBeLessThan(xp(story) * 0.5);
+    }
+  });
+
+  it('gives a bounty spawn a windfall you would notice', () => {
+    const rows: string[] = [];
+    for (const bounty of BOUNTY_MOBS) {
+      const host = MOBS[bounty.rareOf!]!;
+      const goldOf = (mob: MobDef): number => {
+        const g = goldForKill(mob.level, mob.stars, LOOT_TABLES[mob.lootTableId]!.goldMultiplier ?? 1);
+        return (g.min + g.max) / 2;
+      };
+      const points = Object.values(ZONES)
+        .flatMap((z) => z.spawns)
+        .filter((sp) => sp.mobId === bounty.rareOf).length;
+      const minutes = 1 / (((points * 60000) / host.respawnMs) * BOUNTY_SPAWN_CHANCE);
+      const worth =
+        bounty.bounty === 'gold'
+          ? `${goldOf(bounty).toFixed(0)}g (${(goldOf(bounty) / goldOf(host)).toFixed(0)}x a kill)`
+          : `${bounty.xp} xp (${(bounty.xp / host.xp).toFixed(0)}x a kill)`;
+      rows.push(`  ${bounty.name.padEnd(30)} ${worth.padEnd(28)} ~${minutes.toFixed(0)} min apart`);
+      expect(minutes, `${bounty.name} is not rare`).toBeGreaterThan(3);
+      expect(minutes, `${bounty.name} may as well not exist`).toBeLessThan(45);
+    }
+    console.log('\nBOUNTY SPAWNS\n' + rows.join('\n'));
+  });
+});
+
 describe('the vendor economy', () => {
   it('pays full value for merchant goods and a fraction for gear', () => {
     // Merchant goods exist to be sold, so they fetch their listed value.
@@ -1229,8 +1301,8 @@ describe('the whole 1-100 progression', () => {
 describe('quest chains give each zone a route', () => {
   it('gives every zone a chain that ends by pointing at the next', () => {
     for (const zone of Object.values(ZONES)) {
-      const chain = Object.values(QUESTS).filter((q) => q.zoneId === zone.id);
-      expect(chain.length, `${zone.id} has no quests`).toBeGreaterThanOrEqual(5);
+      const chain = Object.values(QUESTS).filter((q) => q.chain === `${zone.id}_story`);
+      expect(chain.length, `${zone.id} has no story chain`).toBeGreaterThanOrEqual(5);
 
       // Every zone except the last should end with a road out.
       const isLast = zone.levelRange[1] === MAX_LEVEL;
@@ -1242,9 +1314,15 @@ describe('quest chains give each zone a route', () => {
   });
 
   it('links every chain in one unbroken, correctly ordered line', () => {
-    for (const zone of Object.values(ZONES)) {
+    // A zone runs more than one chain — its story, and its armour line — so
+    // group by chain rather than by zone. Grouping by zone read the two as one
+    // broken chain the moment the second existed.
+    const chains = new Set(Object.values(QUESTS).map((q) => q.chain));
+    expect(chains.size).toBeGreaterThanOrEqual(Object.keys(ZONES).length * 2);
+
+    for (const chainId of chains) {
       const chain = Object.values(QUESTS)
-        .filter((q) => q.zoneId === zone.id)
+        .filter((q) => q.chain === chainId)
         .sort((a, b) => a.id.localeCompare(b.id));
       chain.forEach((quest, i) => {
         if (i === 0) {
@@ -1252,6 +1330,9 @@ describe('quest chains give each zone a route', () => {
         } else {
           expect(quest.requires, `${quest.id} is orphaned`).toBe(chain[i - 1]!.id);
         }
+        // Every step in a chain is given by one person, in one place.
+        expect(quest.zoneId, `${chainId} spans zones`).toBe(chain[0]!.zoneId);
+        expect(quest.giverVendorId, `${chainId} has two givers`).toBe(chain[0]!.giverVendorId);
       });
     }
   });

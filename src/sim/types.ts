@@ -273,6 +273,14 @@ export interface QuestDef {
   zoneId: string;
   giverVendorId: string;
   minLevel: number;
+  /**
+   * Which chain this belongs to.
+   *
+   * A zone runs more than one: the story chain that walks you through its
+   * bands, and the armour line that outfits you as you go. Grouping by zone
+   * alone would read the two as one broken chain.
+   */
+  chain: string;
   /** Quest that must be finished first, if any — this is how chains are built. */
   requires?: string;
   summary: string;
@@ -335,6 +343,14 @@ export interface MobDef {
    */
   rareVariant?: string;
   rareOf?: string;
+  /**
+   * Marks a rare that carries a windfall rather than an item.
+   *
+   * A `gold` or `xp` bounty is not a harder fight — it is the same creature
+   * with a purse. Making it tougher would turn a piece of luck into a wall,
+   * and a windfall you cannot collect is worse than no windfall.
+   */
+  bounty?: 'gold' | 'xp';
   /** Rares only: the line shown when one turns up. */
   sighting?: string;
   /** Renderer hints only — the sim never reads these. */

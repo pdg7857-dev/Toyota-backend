@@ -1024,6 +1024,15 @@ export class Hud {
       const row = document.createElement('div');
       row.className = `inv-row${item.slot && usable ? ' clickable' : ''}${usable ? '' : ' unusable'}`;
 
+      // Is anything you are carrying this for? A collection grind is a lot
+      // easier to read when the bag itself says 4/6.
+      const wanted = (player.quests ?? [])
+        .map((q) => ({ quest: getQuest(q.questId), progress: q }))
+        .flatMap(({ quest, progress }) =>
+          quest.objectives.map((o, i) => ({ o, have: progress.counts[i] ?? 0 })),
+        )
+        .find(({ o }) => o.kind === 'collect' && o.itemId === stack.itemId);
+
       const taught = item.teaches ? getSkill(item.teaches) : null;
       const known = taught ? (player.learnedSkills ?? []).includes(taught.id) : false;
       const learnable = !!taught && usable && !known && player.level >= taught.reqLevel;
@@ -1035,6 +1044,12 @@ export class Hud {
         tag = `<span class="locked-class">${item.classes?.join('/')} only</span>`;
       } else if (taught) {
         tag = known ? 'known' : learnable ? 'learn' : `Lv ${taught.reqLevel}`;
+      } else if (wanted && wanted.o.kind === 'collect') {
+        const enough = Math.min(wanted.have, wanted.o.count) >= wanted.o.count;
+        tag = `<span class="${enough ? 'quest-have' : 'quest-want'}">${Math.min(
+          wanted.have,
+          wanted.o.count,
+        )}/${wanted.o.count}</span>`;
       } else if (item.slot) {
         tag = item.slot;
       } else {

@@ -768,3 +768,7 @@ canvas { display: block; }
 
 /* A rare sighting in the combat log — the one line worth scrolling back for. */
 .log-rare { color: #ffd25e; font-weight: 600; }
+
+/* Bag tags for a collection objective: what you have against what is wanted. */
+.quest-want { color: #d8c07a; }
+.quest-have { color: #6fd08a; font-weight: 600; }

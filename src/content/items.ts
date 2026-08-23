@@ -1,4 +1,5 @@
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from './curves.js';
+import { buildQuestGear } from './questgear.js';
 import { buildSignatureItems } from './rares.js';
 import { skillsTaughtBy, tomeNoun } from './skills.js';
 import type { Attributes, ClassId, DamageType, ItemDef, ItemQuality } from '../sim/types.js';
@@ -780,6 +781,9 @@ Object.assign(ITEMS, buildTomes());
 // Signature gear from rare spawns. Generated in `rares.ts` because the
 // creature and its item are one piece of content — see the note there.
 Object.assign(ITEMS, buildSignatureItems());
+
+// Trophies, armour sets and capstone weapons from the zones' armour lines.
+Object.assign(ITEMS, buildQuestGear());
 
 export function getItem(id: string): ItemDef {
   const item = ITEMS[id];

@@ -62,6 +62,103 @@ export const RARE_LEVEL_BONUS = 2;
  */
 export const RARE_SPAWN_CHANCE = 0.0025;
 
+/**
+ * Bounty spawns: the same creature with a purse.
+ *
+ * The item rares above are permanent rewards, so they are worth a long wait.
+ * A bounty is spent the moment you pick it up, which is why it turns up more
+ * often and why it is NOT a harder fight — it is a windfall, not a wall. Two
+ * per zone, one gold and one experience, on camps the item rares do not use so
+ * that different camps are worth farming for different reasons.
+ */
+export interface BountySpec {
+  epithet: string;
+  hostMobId: string;
+  zoneId: string;
+  kind: 'gold' | 'xp';
+  sighting: string;
+}
+
+/** Odds per respawn on a bounty's host point. */
+export const BOUNTY_SPAWN_CHANCE = 0.004;
+
+/**
+ * What a bounty is worth, as a multiple of an ordinary kill from its camp.
+ *
+ * Sized against the gap between sightings rather than against how big a number
+ * feels: at roughly one bounty per thirty ordinary kills, fifteen times a kill
+ * is a real spike in a session's income without halving the grind a tome or a
+ * vendor set is meant to cost. A test asserts the ratio from the other side.
+ */
+export const BOUNTY_MULTIPLIER = 15;
+
+export const BOUNTIES: BountySpec[] = [
+  {
+    epithet: 'Coinhoard',
+    hostMobId: 'mossback_boar',
+    zoneId: 'fenmarch',
+    kind: 'gold',
+    sighting: 'A boar roots through a spilled purse, and does not want to share.',
+  },
+  {
+    epithet: 'Elderling',
+    hostMobId: 'fen_adder',
+    zoneId: 'fenmarch',
+    kind: 'xp',
+    sighting: 'An adder older than the fen itself uncoils.',
+  },
+  {
+    epithet: 'Tallykeeper',
+    hostMobId: 'cattle_raider',
+    zoneId: 'ardmoor',
+    kind: 'gold',
+    sighting: 'This one has been paid, and is carrying it all.',
+  },
+  {
+    epithet: 'Oldblood',
+    hostMobId: 'crag_goat',
+    zoneId: 'ardmoor',
+    kind: 'xp',
+    sighting: 'A goat with a grey muzzle and too many scars watches the path.',
+  },
+  {
+    epithet: 'Gildmaw',
+    hostMobId: 'wrecker_scavenger',
+    zoneId: 'reach',
+    kind: 'gold',
+    sighting: 'A scavenger who found the strongbox before anyone else did.',
+  },
+  {
+    epithet: 'Deepmemory',
+    hostMobId: 'reach_eel',
+    zoneId: 'reach',
+    kind: 'xp',
+    sighting: 'An eel as long as a boat turns in the shallows.',
+  },
+  {
+    epithet: 'Paymaster',
+    hostMobId: 'siege_engineer',
+    zoneId: 'caer_dubh',
+    kind: 'gold',
+    sighting: 'The warband\'s pay chest has legs today.',
+  },
+  {
+    epithet: 'Longwatch',
+    hostMobId: 'fort_mastiff',
+    zoneId: 'caer_dubh',
+    kind: 'xp',
+    sighting: 'A mastiff that has held this gate for longer than the warband has.',
+  },
+];
+
+export function bountyMobId(spec: BountySpec): string {
+  return `bounty_${slug(spec.epithet)}`;
+}
+
+export function bountyLootTableId(spec: BountySpec): string {
+  return `${bountyMobId(spec)}_loot`;
+}
+
 /** Weapon noun per class, so one epithet names five weapons. */
 const SIGNATURE_WEAPON_NOUN: Record<ClassId, string> = {
   warrior: 'Blade',

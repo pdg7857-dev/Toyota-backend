@@ -285,6 +285,69 @@ async function main() {
     untaught: document.querySelectorAll('#skill-bar .slot.unlearned').length,
   }));
 
+  // --- the armour line ----------------------------------------------------
+  // Take the first step of the Fenmarch's kit chain, hand over the trophies,
+  // and check the piece comes back and the trophies do not.
+  const armour = await page.evaluate(async () => {
+    const g = window.__game;
+    g.world.travelTo('fenmarch');
+    await new Promise((r) => setTimeout(r, 400));
+
+    const player = g.world.player;
+    player.level = 20;
+    const maeve = [...g.world.entities.values()].find((e) => e.vendorId === 'maeve');
+    player.pos.x = maeve.pos.x + 2;
+    player.pos.z = maeve.pos.z;
+
+    const quest = g.questOf('fenmarch_kit_01');
+    const objective = quest.objectives[0];
+    g.world.addItem(player, { itemId: objective.itemId, qty: objective.count });
+    g.world.submit(player.id, { t: 'acceptQuest', vendorId: maeve.id, questId: quest.id });
+    await new Promise((r) => setTimeout(r, 400));
+    const ready = g.world.isQuestComplete(player, quest.id);
+
+    g.world.submit(player.id, { t: 'turnInQuest', vendorId: maeve.id, questId: quest.id });
+    await new Promise((r) => setTimeout(r, 400));
+
+    const rewardId = quest.rewards.items[0];
+    return {
+      ok:
+        ready &&
+        player.inventory.some((st) => st.itemId === rewardId) &&
+        !player.inventory.some((st) => st.itemId === objective.itemId),
+      piece: g.itemOf(rewardId).name,
+      slot: g.itemOf(rewardId).slot,
+    };
+  });
+  await wait(300);
+  await page.keyboard.press('i');
+  await wait(400);
+  await page.screenshot({ path: join(OUT, '11-armour-line.png') });
+  await page.keyboard.press('i');
+
+  // --- a bounty spawn -----------------------------------------------------
+  const bounty = await page.evaluate(async () => {
+    const g = window.__game;
+    const player = g.world.player;
+    const host = [...g.world.entities.values()].find(
+      (e) => e.kind === 'mob' && g.mobOf(g.mobOf(e.defId).rareVariant ?? e.defId).bounty,
+    );
+    if (!host) return { ok: false, why: 'no bounty camp in this zone' };
+    const spec = g.mobOf(g.mobOf(host.defId).rareVariant);
+
+    host.defId = spec.id;
+    host.name = spec.name;
+    host.dead = false;
+    host.corpseGold = 0;
+    host.health = 1;
+    player.pos.x = host.pos.x + 2;
+    player.pos.z = host.pos.z;
+    g.world.submit(player.id, { t: 'target', id: host.id });
+    g.world.submit(player.id, { t: 'autoAttack', on: true });
+    await new Promise((r) => setTimeout(r, 1500));
+    return { ok: host.dead && (host.corpseGold ?? 0) > 0, name: spec.name, kind: spec.bounty, gold: host.corpseGold };
+  });
+
   // --- a rare spawn -------------------------------------------------------
   // Force one up on a camp spawn point and check the four things that make it
   // findable: it is visibly a different creature, the plate reads from further
@@ -297,10 +360,14 @@ async function main() {
 
     const player = g.world.player;
     player.level = 20;
-    const host = [...g.world.entities.values()].find(
-      (e) => e.kind === 'mob' && g.mobOf(e.defId).rareVariant,
-    );
-    if (!host) return { ok: false, why: 'no host camp in the zone' };
+    // An ITEM rare specifically: bounty hosts also carry a variant now, and
+    // a bounty carries a purse rather than a signature piece.
+    const host = [...g.world.entities.values()].find((e) => {
+      if (e.kind !== 'mob') return false;
+      const variantId = g.mobOf(e.defId).rareVariant;
+      return !!variantId && !g.mobOf(variantId).bounty;
+    });
+    if (!host) return { ok: false, why: 'no item-rare camp in the zone' };
     const rareId = g.mobOf(host.defId).rareVariant;
     const rare = g.mobOf(rareId);
 
@@ -437,6 +504,9 @@ async function main() {
     ['rare is named for what it carries', rareLoot.namedForItem === true],
     ['rare renders bigger than its camp', rareCheck.taller === true],
     ['rare nameplate marked', rarePlate > 0],
+    ['armour line paid out its piece', armour.ok],
+    ['armour line piece fits a slot', !!armour.slot],
+    ['bounty spawn paid a windfall', bounty.ok],
     ['no page errors', errors.length === 0],
   ];
 
@@ -444,6 +514,7 @@ async function main() {
   for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
   console.log('\nplayer:', state.hp, '| xp:', state.xp, '| target:', state.target);
   console.log('log tail:', state.log.slice(0, 6));
+  console.log('armour:', JSON.stringify(armour), '| bounty:', JSON.stringify(bounty));
   console.log('rare:', JSON.stringify({ ...rareCheck, ...rareLoot }), '| rare plates:', rarePlate);
   console.log('taught:', JSON.stringify(taught), '| bar:', JSON.stringify(bar));
   console.log('zones:', looks.map((l) => `${l.zone}/${l.theme} sky#${l.sky.toString(16)}`).join('  '));

@@ -103,6 +103,34 @@ Collection objectives read the bags directly rather than counting pickups, so
 items gathered before accepting still count. That reads as a bug every time it
 does not work.
 
+### The armour lines
+
+Each zone runs a **second** chain from the same trader: four steps, one armour
+slot each, then a capstone that asks for a handful of every trophy the line
+taught you to farm and pays out a weapon for your class. `QuestDef.chain` is
+what separates the two — a zone has a `_story` chain and a `_kit` chain, and a
+test walks each chain rather than each zone.
+
+It exists because every other piece of gear in the game is a drop rate you
+fight and hope against. A trophy at a **known** rate (`TROPHY_DROP_CHANCE`)
+turns hope into "sixty more kills", which is the difference between a grind
+that feels long and one that feels arbitrary. It also pays in the slots drops
+are worst at filling: a player who never sees a chest piece can go and get one.
+
+The gear is deliberately not best-in-slot — a hair above the ladder curve
+(`QUEST_GEAR_POWER`), below what a boss or a rare spawn carries, and with no
+affixes. Guaranteed gear that beat the drops would make the drops pointless.
+
+Rewards are also **xp-light on purpose**. The levelling curve is tuned against
+the story chain plus the grind; a second chain paying story-sized experience
+would quietly shorten every band by a third. A test asserts the kit chain pays
+under half what the story chain does.
+
+Turning in a collection step **consumes** the items. Collection objectives read
+the bags rather than counting pickups, so without that a single stack would
+satisfy the same requirement twice — and the capstone, which asks for the same
+trophies again, would cost nothing.
+
 ## Each zone teaches you something
 
 The level-granted kit finishes at 15. Over a hundred-level game that meant
@@ -270,6 +298,24 @@ Attributes alone still cap crit at 0.5; an affix can push to 0.6. Folding both
 into one cap quietly raised the ceiling for high-Dexterity classes wearing
 ordinary gear, and the balance suite caught it inside one run.
 
+### Bounty spawns: the same creature with a purse
+
+The sixteen above carry permanent rewards, which is why they are worth a long
+wait. A **bounty** is spent the moment you pick it up, so it turns up more often
+(`BOUNTY_SPAWN_CHANCE`, one every five to ten minutes) and — deliberately — it
+is a *softer* fight than the camp, not a harder one. A jackpot you cannot cash
+because it hits like a ★4 two levels up is worse than no jackpot.
+
+Two per zone, one gold and one experience, worth `BOUNTY_MULTIPLIER` (15x) of
+an ordinary kill from their camp. They sit on camps the item rares do not use,
+so different camps are worth farming for different reasons — and a test asserts
+one variant per host, because the spawn roll picks between "ordinary" and "the
+variant" and a host carrying two would silently drop one.
+
+Their worth is **anchored to the camp they hide in**: fifteen times a Mossback
+Boar is still Mossback Boar money. That is what stops a level-90 character
+farming a level-3 camp for gold, without needing a level check anywhere.
+
 ### Two rules the rest of the codebase depends on
 
 - **Rares stop at ★4.** ★5 and ★6 mean boss and elite boss everywhere else —
@@ -407,7 +453,7 @@ file changes** — the events that drive animation (`swing`, `castBegin`,
 ## Verifying a change
 
 ```bash
-npm run verify        # typecheck + 154 unit and balance tests
+npm run verify        # typecheck + 167 unit and balance tests
 npm run build && npm run preview &
 npm run smoke         # real browser, plays the game, writes screenshots/
 ```

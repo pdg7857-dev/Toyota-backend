@@ -1,7 +1,12 @@
 import { STAR_MODIFIERS, baseMobXp, curveMobDamageRange, curveMobHealth } from '../sim/formulas.js';
 import { zoneTomes } from './skills.js';
+import { TROPHY_DROP_CHANCE, trophiesByMob } from './questgear.js';
 import {
+  BOUNTIES,
+  BOUNTY_MULTIPLIER,
   RARES,
+  bountyLootTableId,
+  bountyMobId,
   rareLevel,
   rareLootTableId,
   rareMobId,
@@ -10,6 +15,7 @@ import {
   signatureRelicId,
   signatureTomes,
   signatureWeapons,
+  type BountySpec,
   type RareSpec,
 } from './rares.js';
 import type { LootTable, MobAbilityDef, MobDef, StarRating } from '../sim/types.js';
@@ -1140,12 +1146,89 @@ function rareLoot(spec: RareSpec): LootTable {
   };
 }
 
+// --------------------------------------------------------------------------
+// Armour-line trophies.
+//
+// One per step, dropping from the camp that step names at a KNOWN rate. That
+// is the whole point of the armour line: every other piece of gear in the game
+// is a drop rate you fight and hope against, and a trophy turns hope into a
+// number of kills you can decide to do.
+//
+// They are added here rather than written into each table by hand so the item,
+// the drop and the quest that wants it cannot drift apart.
+// --------------------------------------------------------------------------
+
+for (const [mobId, itemId] of Object.entries(trophiesByMob())) {
+  const mob = MOBS[mobId];
+  if (!mob) throw new Error(`An armour line asks for a trophy from unknown mob ${mobId}`);
+  const table = LOOT_TABLES[mob.lootTableId]!;
+  LOOT_TABLES[table.id] = {
+    ...table,
+    entries: [...table.entries, { itemId, chance: TROPHY_DROP_CHANCE, min: 1, max: 1 }],
+  };
+}
+
 for (const spec of RARES) {
   const mob = rareMob(spec);
   MOBS[mob.id] = mob;
   MOBS[spec.hostMobId] = { ...MOBS[spec.hostMobId]!, rareVariant: mob.id };
   LOOT_TABLES[mob.lootTableId] = rareLoot(spec);
 }
+
+// --------------------------------------------------------------------------
+// Bounty spawns: the same creature, carrying a windfall.
+//
+// Not a harder fight — deliberately a slightly SOFTER one. The reward is the
+// event itself, and a jackpot you cannot cash because it hits like a ★4 two
+// levels up is just a worse version of no jackpot.
+// --------------------------------------------------------------------------
+
+function bountyMob(spec: BountySpec): MobDef {
+  const host = MOBS[spec.hostMobId];
+  if (!host) throw new Error(`Bounty ${spec.epithet} hides among an unknown mob: ${spec.hostMobId}`);
+  return {
+    ...host,
+    id: bountyMobId(spec),
+    name: `${spec.epithet} the ${host.name}`,
+    baseHealth: Math.round(host.baseHealth * 0.8),
+    xp: spec.kind === 'xp' ? host.xp * BOUNTY_MULTIPLIER : host.xp,
+    lootTableId: bountyLootTableId(spec),
+    // Long enough that one is an event rather than a rotation.
+    respawnMs: 120000,
+    rareOf: spec.hostMobId,
+    bounty: spec.kind,
+    sighting: spec.sighting,
+    view: {
+      ...host.view,
+      // Gold for coin, pale blue for the old and knowing.
+      color: spec.kind === 'gold' ? 0xffd25e : 0x9fd8ff,
+      height: host.view.height * 1.15,
+      radius: host.view.radius * 1.1,
+    },
+  };
+}
+
+function bountyLoot(spec: BountySpec): LootTable {
+  const hostTable = getLootTable(getMob(spec.hostMobId).lootTableId);
+  return {
+    id: bountyLootTableId(spec),
+    ...(spec.kind === 'gold' ? { goldMultiplier: BOUNTY_MULTIPLIER } : {}),
+    // An xp bounty pays in experience only; it carries the camp's ordinary
+    // drops and nothing more, so the two kinds stay distinguishable.
+    entries: hostTable.entries,
+  };
+}
+
+for (const spec of BOUNTIES) {
+  const mob = bountyMob(spec);
+  MOBS[mob.id] = mob;
+  MOBS[spec.hostMobId] = { ...MOBS[spec.hostMobId]!, rareVariant: mob.id };
+  LOOT_TABLES[mob.lootTableId] = bountyLoot(spec);
+}
+
+/** Every bounty spawn, for content that needs to walk them. */
+export const BOUNTY_MOBS: MobDef[] = BOUNTIES.map((spec) => MOBS[bountyMobId(spec)]!);
+
 
 /** Every rare spawn, for content that needs to walk them. */
 export const RARE_MOBS: MobDef[] = RARES.map((spec) => MOBS[rareMobId(spec)]!);
