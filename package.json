@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "smoke": "node tools/smoke.mjs",
-    "verify": "npm run typecheck && npm run test"
+    "verify": "npm run typecheck && npm run test",
+    "bundle": "npm run build && node tools/bundle.mjs"
   },
   "dependencies": {
     "three": "^0.169.0"

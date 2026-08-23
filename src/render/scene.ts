@@ -30,8 +30,14 @@ const CELL_RADIUS = 3;
  */
 const REFERENCE_AREA = 290 * 290;
 
-/** Half-width of the sun's shadow frustum, which follows the player. */
-const SHADOW_HALF = 70;
+/**
+ * Half-width of the sun's shadow frustum, which follows the player.
+ *
+ * Wide enough that its edge sits out in the fog rather than across the middle
+ * of the screen, and no wider: this is 2048 texels across, so every metre added
+ * here is resolution taken off the shadows you can actually see.
+ */
+const SHADOW_HALF = 150;
 
 /** Half-width of the box the ambient motes drift in. */
 const MOTE_SPAN = 90;
@@ -101,7 +107,13 @@ export class SceneRig {
     this.sun = new THREE.DirectionalLight(0xffffff, 1.5);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.camera.near = 1;
     this.sun.shadow.camera.far = 400;
+    // Without a bias, a shadow frustum this size self-shadows the ground it is
+    // lighting: the whole near field renders as one dark band with the lit
+    // world beyond it, which reads as dusk falling in a circle around you.
+    this.sun.shadow.bias = -0.0006;
+    this.sun.shadow.normalBias = 0.6;
     this.scene.add(this.sun, this.sun.target);
 
     this.scene.add(this.zoneRoot);
@@ -645,7 +657,13 @@ function tintGround(geo: THREE.BufferGeometry, theme: ZoneTheme): void {
   const damp = new THREE.Color(theme.ground.damp);
   const jitter = mulberry(90210);
   const tmp = new THREE.Color();
-  const amp = Math.max(0.5, theme.terrain.amplitude);
+  // Normalised against the FULL relief, not the rolling hills alone. With
+  // mountains forty metres up and lake beds thirteen down, dividing by the hill
+  // amplitude pinned every hollow to fully damp and every rise to fully dry —
+  // so the ground stopped being a gradient and became a hard contour line
+  // drawn across the middle distance.
+  const t = theme.terrain;
+  const amp = Math.max(0.5, t.amplitude + (t.mountains?.amplitude ?? 0) * (t.mountains?.mask ?? 0));
 
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i);
@@ -656,8 +674,8 @@ function tintGround(geo: THREE.BufferGeometry, theme: ZoneTheme): void {
       Math.sin((x + z) * 0.11) * 0.25 +
       Math.cos((x - z) * 0.17) * 0.15;
     const low = -pos.getY(i) / amp; // below zero = hollow = damp
-    const t = Math.max(0, Math.min(1, 0.5 + n * 0.32 + low * 0.3));
-    tmp.copy(dry).lerp(damp, t);
+    const mix = Math.max(0, Math.min(1, 0.5 + n * 0.32 + low * 0.55));
+    tmp.copy(dry).lerp(damp, mix);
     const v = 0.94 + jitter() * 0.12;
     colors[i * 3] = tmp.r * v;
     colors[i * 3 + 1] = tmp.g * v;
