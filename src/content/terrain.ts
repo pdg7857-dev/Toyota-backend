@@ -17,17 +17,39 @@
 
 /** Shape of the ground itself. */
 export interface TerrainSpec {
-  /** Peak displacement in world units, up and down from zero. */
+  /** Peak displacement of the rolling ground, up and down from zero. */
   amplitude: number;
   /** Feature size: bigger means broader, lazier hills. */
   featureSize: number;
-  /** Weight of the fine second octave — broken, rocky ground. 0..1. */
+  /** Weight of the fine octaves — broken, rocky ground. 0..1. */
   roughness: number;
   /**
    * Number of steps to quantise height into. 0 leaves the ground smooth;
    * higher values read as shelves and crags rather than rolling moor.
    */
   terrace?: number;
+  /**
+   * The high ground.
+   *
+   * Separate from `amplitude` because mountains are not just louder hills: they
+   * come in ranges with ridgelines and passes, they only occupy part of a map,
+   * and the ground between them has to stay walkable. `mask` is how much of the
+   * zone they claim — the rest of it never sees them.
+   */
+  mountains?: {
+    amplitude: number;
+    featureSize: number;
+    /** How much of the map is high country, 0..1. */
+    mask: number;
+  };
+  /**
+   * Where the water sits, in world units.
+   *
+   * Anything below this is under it. The ground is *carved* toward it rather
+   * than merely covered, so lakes have beds and rivers have banks instead of a
+   * sheet of blue laid over a hillside.
+   */
+  waterLevel?: number;
 }
 
 export type PropKind =
@@ -63,6 +85,14 @@ export interface ZoneTheme {
   blurb: string;
   sky: number;
   fog: { color: number; near: number; far: number };
+  /**
+   * How the water reads. Present only where the terrain has a `waterLevel`.
+   *
+   * Colour rather than shader: at this art level water is a flat translucent
+   * sheet, and what sells it is the ground being carved away underneath and
+   * the shore tint on the bank — not the surface.
+   */
+  water?: { color: number; opacity: number };
   /** The two colours the ground lerps between. */
   ground: { dry: number; damp: number };
   hemisphere: { sky: number; ground: number; intensity: number };
@@ -75,28 +105,123 @@ export interface ZoneTheme {
 }
 
 /**
- * Layered sine height. Deterministic, cheap, and continuous everywhere, so the
- * renderer can sample it per-vertex and per-entity every frame without a cache.
+ * Value noise, and the fractal sum of it.
  *
- * It is not real noise — sines betray themselves as a grid if you stare at a
- * flyover — but at player camera height, under fog, with scatter on top, the
- * difference is invisible and the cost is a handful of multiplies.
+ * The ground used to be layered sines. That is cheap and continuous, and on a
+ * three-hundred-metre map under fog nobody could tell — but a zone is ten times
+ * that across now, and sines betray themselves as a grid the moment you can see
+ * far enough to notice one. This is a hashed lattice with smoothstep
+ * interpolation: the same cost bracket, no grid, and still a pure function of
+ * (x, z) so the renderer can sample it per-vertex every frame without a cache.
+ */
+function lattice(ix: number, iz: number, seed: number): number {
+  let h = ix * 374761393 + iz * 668265263 + seed * 1442695040888963407;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+}
+
+function valueNoise(x: number, z: number, seed: number): number {
+  const ix = Math.floor(x);
+  const iz = Math.floor(z);
+  const fx = x - ix;
+  const fz = z - iz;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sz = fz * fz * (3 - 2 * fz);
+  const a = lattice(ix, iz, seed);
+  const b = lattice(ix + 1, iz, seed);
+  const c = lattice(ix, iz + 1, seed);
+  const d = lattice(ix + 1, iz + 1, seed);
+  return (a + (b - a) * sx) * (1 - sz) + (c + (d - c) * sx) * sz;
+}
+
+/** Fractal sum: broad shapes first, finer detail on top. */
+function fbm(x: number, z: number, octaves: number, seed: number, gain = 0.5): number {
+  let sum = 0;
+  let amp = 1;
+  let norm = 0;
+  let freq = 1;
+  for (let i = 0; i < octaves; i++) {
+    sum += valueNoise(x * freq, z * freq, seed + i * 101) * amp;
+    norm += amp;
+    amp *= gain;
+    freq *= 2.03;
+  }
+  return sum / norm;
+}
+
+/**
+ * Ridged noise: what makes a mountain a mountain.
+ *
+ * Ordinary noise gives rounded lumps. Folding it about its midpoint turns the
+ * zero crossings into creases, and those creases are ridgelines — so a range
+ * has spines and passes instead of being a big smooth dome.
+ */
+function ridged(x: number, z: number, octaves: number, seed: number): number {
+  let sum = 0;
+  let amp = 1;
+  let norm = 0;
+  let freq = 1;
+  for (let i = 0; i < octaves; i++) {
+    const n = 1 - Math.abs(valueNoise(x * freq, z * freq, seed + i * 313) * 2 - 1);
+    sum += n * n * amp;
+    norm += amp;
+    amp *= 0.52;
+    freq *= 2.07;
+  }
+  return sum / norm;
+}
+
+/**
+ * The ground at a point: rolling country, high country on top of it, and water
+ * cut into the low places.
+ *
+ * Three layers, each doing a job the others cannot:
+ *
+ *  - **hills** — the fractal base. Always present, walkable everywhere.
+ *  - **mountains** — ridged noise, gated behind a slow mask so a range occupies
+ *    part of a zone rather than all of it. A map that is mountains everywhere
+ *    is as flat, in the sense that matters, as one that is mountains nowhere.
+ *  - **water** — the low ground is pulled *down* toward the water line rather
+ *    than the water being laid over it, so a lake has a bed and a shore. Laying
+ *    a blue plane over untouched terrain gives you puddles on hillsides.
  */
 export function terrainHeight(x: number, z: number, t: TerrainSpec): number {
   const f = 1 / Math.max(1, t.featureSize);
-  let h =
-    Math.sin(x * f) * Math.cos(z * f * 0.9) * 0.6 +
-    Math.sin((x + z) * f * 1.7 + 1.3) * 0.25 +
-    Math.cos((x - z) * f * 2.6 + 0.7) * 0.15;
-  h += Math.sin(x * f * 5.1 + 2.1) * Math.cos(z * f * 4.3 - 1.1) * t.roughness * 0.35;
+  const base = fbm(x * f, z * f, 4, 1, 0.5 + t.roughness * 0.22) * 2 - 1;
+  let h = base * t.amplitude;
+
+  if (t.mountains) {
+    const mf = 1 / Math.max(1, t.mountains.featureSize);
+    // A slow mask decides where the high country is at all. Smoothstepped, so
+    // a range rises out of the hills instead of starting at a cliff.
+    const region = fbm(x * mf * 0.42, z * mf * 0.42, 2, 77);
+    const cut = 1 - t.mountains.mask;
+    const m = Math.max(0, Math.min(1, (region - cut) / Math.max(0.08, 1 - cut)));
+    const shaped = m * m * (3 - 2 * m);
+    h += ridged(x * mf, z * mf, 4, 909) * shaped * t.mountains.amplitude;
+  }
+
   if (t.terrace && t.terrace > 0) {
     // Blend the stepped version with the smooth one: pure quantisation reads as
     // a staircase, a blend reads as shelves worn down by weather.
     const stepped = Math.round(h * t.terrace) / t.terrace;
     h = stepped * 0.7 + h * 0.3;
   }
-  return h * t.amplitude;
+
+  if (t.waterLevel !== undefined) {
+    const depth = t.waterLevel - h;
+    // Only the ground already heading below the line gets carved, and the
+    // carve eases in, so a shoreline is a beach rather than a step.
+    if (depth > 0) {
+      const bite = Math.min(1, depth / WATER_CARVE);
+      h -= bite * bite * WATER_CARVE * 0.85;
+    }
+  }
+  return h;
 }
+
+/** How deep the ground is cut below the water line at its deepest. */
+const WATER_CARVE = 9;
 
 /** Fraction of a clearing's radius that is dead flat before the blend starts. */
 const CLEARING_CORE = 0.6;
@@ -140,7 +265,10 @@ export class HeightField {
       const core = c.r * CLEARING_CORE;
       const t = Math.max(0, Math.min(1, (d - core) / (c.r - core)));
       const blend = t * t * (3 - 2 * t);
-      const level = terrainHeight(c.x, c.z, this.spec);
+      // Never level a clearing to the bottom of a lake: a shopfront or a boss
+      // arena is somewhere you stand, so it comes up out of the water if the
+      // ground it was authored on turned out to be under it.
+      const level = this.levelAt(c.x, c.z);
       // Pull TOWARDS the clearing's level, in both directions. Only ever
       // lowering the ground leaves the hollows untouched, which is how half of
       // Aonghus's arena ended up as a pit with a flat floor around it.
@@ -148,7 +276,23 @@ export class HeightField {
     }
     return out;
   }
+
+  /** The height a clearing flattens to: its own ground, or dry land. */
+  private levelAt(x: number, z: number): number {
+    const raw = terrainHeight(x, z, this.spec);
+    const water = this.spec.waterLevel;
+    return water === undefined ? raw : Math.max(raw, water + SHORE_CLEARANCE);
+  }
+
+  /** True if this point is under water. */
+  underwater(x: number, z: number): boolean {
+    const water = this.spec.waterLevel;
+    return water !== undefined && this.at(x, z) < water;
+  }
 }
+
+/** How far above the water line anything walkable is levelled to. */
+export const SHORE_CLEARANCE = 1.6;
 
 export const THEMES: Record<string, ZoneTheme> = {
   /** The Fenmarch: ordinary country. Open moor, low hills, wet in the hollows. */
@@ -156,12 +300,22 @@ export const THEMES: Record<string, ZoneTheme> = {
     id: 'plains',
     blurb: 'Open moor and low hills, wet underfoot.',
     sky: 0x8fa9b8,
-    fog: { color: 0x8fa9b8, near: 45, far: 130 },
+    fog: { color: 0x8fa9b8, near: 90, far: 340 },
+    water: { color: 0x2f4a5c, opacity: 0.78 },
     ground: { dry: 0x6d854a, damp: 0x3f5a33 },
     hemisphere: { sky: 0xbcd6e8, ground: 0x4a5a3a, intensity: 0.85 },
     sun: { color: 0xfff0d0, intensity: 1.5, position: [30, 55, 20] },
     boundary: 0x3d4a33,
-    terrain: { amplitude: 2.4, featureSize: 44, roughness: 0.22 },
+    // Open moor: broad, gentle, wet in the hollows. One line of hills along
+    // part of it so the horizon is not a ruler, and tarns in the low ground —
+    // this is the zone a player learns the game in, so it stays walkable.
+    terrain: {
+      amplitude: 11,
+      featureSize: 320,
+      roughness: 0.24,
+      mountains: { amplitude: 42, featureSize: 620, mask: 0.3 },
+      waterLevel: -4.2,
+    },
     props: [
       { kind: 'broadleaf', count: 110, scale: 1, jitter: 0.6, color: 0x4a3a2a, accent: 0x35562f },
       { kind: 'rock', count: 70, scale: 1, jitter: 0.9, color: 0x6d6d68 },
@@ -175,12 +329,23 @@ export const THEMES: Record<string, ZoneTheme> = {
     id: 'crags',
     blurb: 'High crags and broken shelves. Thin soil, colder wind.',
     sky: 0x9aa5ac,
-    fog: { color: 0x9aa5ac, near: 38, far: 118 },
+    fog: { color: 0x9aa5ac, near: 80, far: 330 },
+    water: { color: 0x2a3b4a, opacity: 0.8 },
     ground: { dry: 0x7a7256, damp: 0x474a38 },
     hemisphere: { sky: 0xc4cdd4, ground: 0x51503f, intensity: 0.8 },
     sun: { color: 0xe8ecf0, intensity: 1.25, position: [-24, 48, 26] },
     boundary: 0x4b4a41,
-    terrain: { amplitude: 7.5, featureSize: 34, roughness: 0.55, terrace: 5 },
+    // The high country, and it should read as high: terraced shelves under a
+    // proper range that claims half the map. The passes between the ridges are
+    // where the road goes.
+    terrain: {
+      amplitude: 22,
+      featureSize: 260,
+      roughness: 0.55,
+      terrace: 5,
+      mountains: { amplitude: 115, featureSize: 700, mask: 0.5 },
+      waterLevel: -8,
+    },
     props: [
       { kind: 'boulder', count: 95, scale: 1.2, jitter: 1, color: 0x74736a },
       { kind: 'rock', count: 85, scale: 1, jitter: 0.9, color: 0x6a6960 },
@@ -201,12 +366,22 @@ export const THEMES: Record<string, ZoneTheme> = {
     id: 'wyldwood',
     blurb: 'A drowned wood gone strange. Close canopy, standing water, cold light.',
     sky: 0x24413c,
-    fog: { color: 0x24413c, near: 24, far: 92 },
+    fog: { color: 0x24413c, near: 55, far: 255 },
+    water: { color: 0x1d3a33, opacity: 0.72 },
     ground: { dry: 0x4a7c52, damp: 0x264536 },
     hemisphere: { sky: 0x8fd0b4, ground: 0x24382d, intensity: 1.1 },
     sun: { color: 0xdcf3cc, intensity: 1.3, position: [18, 60, -22] },
     boundary: 0x2b4033,
-    terrain: { amplitude: 3.6, featureSize: 26, roughness: 0.5 },
+    // A drowned forest, so the water line sits high and most of the low ground
+    // is under it: standing water between the trees, islands of dry root, and
+    // a few wooded ridges that never went under.
+    terrain: {
+      amplitude: 13,
+      featureSize: 230,
+      roughness: 0.5,
+      mountains: { amplitude: 38, featureSize: 520, mask: 0.26 },
+      waterLevel: -1.5,
+    },
     props: [
       { kind: 'broadleaf', count: 210, scale: 1.25, jitter: 0.7, color: 0x33291f, accent: 0x1f4433 },
       { kind: 'conifer', count: 80, scale: 1.15, jitter: 0.6, color: 0x2e2519, accent: 0x1a3b2c },
@@ -227,12 +402,22 @@ export const THEMES: Record<string, ZoneTheme> = {
     id: 'otherworld',
     blurb: 'Twilight that never breaks. Glass shelves, lit stones, no sun to speak of.',
     sky: 0x1b1533,
-    fog: { color: 0x1b1533, near: 22, far: 96 },
+    fog: { color: 0x1b1533, near: 60, far: 275 },
+    water: { color: 0x241a4a, opacity: 0.82 },
     ground: { dry: 0x554379, damp: 0x241a3f },
     hemisphere: { sky: 0xb094f0, ground: 0x2a2145, intensity: 1.35 },
     sun: { color: 0xe4d6ff, intensity: 1.2, position: [-30, 40, -30] },
     boundary: 0x2a2145,
-    terrain: { amplitude: 5.8, featureSize: 30, roughness: 0.5, terrace: 3 },
+    // Otherworld country: shelved violet rock under peaks that have no business
+    // being that steep, and black meres in the hollows between them.
+    terrain: {
+      amplitude: 19,
+      featureSize: 250,
+      roughness: 0.5,
+      terrace: 3,
+      mountains: { amplitude: 130, featureSize: 660, mask: 0.42 },
+      waterLevel: -7,
+    },
     props: [
       { kind: 'crystal', count: 95, scale: 1.1, jitter: 0.9, color: 0x4a3f78, accent: 0xb08cff, glow: 1 },
       { kind: 'standingStone', count: 34, scale: 1.4, jitter: 0.5, color: 0x3a3358, accent: 0x9d7dff, glow: 0.55 },

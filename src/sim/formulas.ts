@@ -12,6 +12,7 @@ import type {
   MobDef,
   StarRating,
 } from './types.js';
+import { BOSS_STARS } from './types.js';
 import type { Rng } from './rng.js';
 
 export const TICK_MS = 50;
@@ -88,12 +89,111 @@ export function xpTotalForLevel(level: number): number {
  */
 export const STAR_MODIFIERS: Record<StarRating, { health: number; damage: number; defense: number }> = {
   1: { health: 1.0, damage: 1.0, defense: 1.0 },
-  2: { health: 1.45, damage: 1.15, defense: 1.12 },
-  3: { health: 2.1, damage: 1.32, defense: 1.26 },
-  4: { health: 3.1, damage: 1.52, defense: 1.42 },
+  2: { health: 1.4, damage: 1.08, defense: 1.12 },
+  3: { health: 1.85, damage: 1.18, defense: 1.26 },
+  // Compressed hard at the top rather than stretched. Once every creature in
+  // the world hits enough to kill you, a ★4 does not also need half again as
+  // much of it — that measured as two thirds of fights lost, which is not "play
+  // this one well", it is "do not pull this one". What separates the ratings
+  // now is mostly how long the thing stays up while it does it.
+  4: { health: 2.3, damage: 1.3, defense: 1.42 },
   5: { health: 9.0, damage: 1.85, defense: 1.6 },
   6: { health: 15.0, damage: 2.15, defense: 1.75 },
 };
+
+/**
+ * How hard an ordinary creature hits, over the curve fitted to the Fenmarch.
+ *
+ * The Fenmarch bestiary was hand-tuned to be *survivable*, and the balance
+ * suite duly reported that a level-appropriate fight cost between five and
+ * twenty percent of your health. That is not a fight, it is a toll: nothing in
+ * the world could kill a player who was paying attention, so no gear decision,
+ * no cooldown and no consumable mattered.
+ *
+ * This is the dial that fixes it. A ★1 at your level is now a real fight you
+ * can lose to a bad streak; a ★4 will kill you unless you use everything you
+ * have. `balance.test.ts` asserts both as *death rates*, which is the only
+ * honest way to measure "can this kill me".
+ *
+ * Applied in `deriveMobStats` rather than in `curveMobDamage`, and that is not
+ * a detail: the twelve Fenmarch creatures are hand-authored and never read the
+ * curve, so scaling the curve made every zone dangerous except the one every
+ * player learns the game in. The measurement said so — ★1 sat at 79% health
+ * left through three rounds of raising a number that could not reach it.
+ *
+ * Ordinary creatures only. Bosses were already the one thing in the game that
+ * could kill you, and they are tuned fight by fight against printed win rates;
+ * multiplying them by this as well made every dragon unbeatable at any level.
+ * The first attempt compensated by cutting the ★5 and ★6 damage multipliers
+ * below ★4's, which quietly broke the one thing the star ladder promises — that
+ * more stars is strictly worse news.
+ */
+export const MOB_DAMAGE_SCALE = 2.9;
+
+/**
+ * How much longer an ordinary creature lives than the Fenmarch fit gave it.
+ *
+ * Damage alone could not make a fight dangerous, and the measurement is what
+ * showed why: an even fight was over in three seconds, so a mob got one or two
+ * swings in however hard it hit. Danger needs an exchange, and an exchange
+ * needs the thing to still be standing. Bosses are exempt — they already have
+ * a ★5/★6 health multiplier doing this job.
+ */
+export const MOB_HEALTH_SCALE = 2.0;
+
+/**
+ * The level by which an ordinary creature is as dangerous as it is going to get.
+ *
+ * Both dials phase in rather than landing at level 1, for the same reason
+ * mitigation and defensive buffs already scale by level: the player's health,
+ * armour and kit all climb steeply out of nothing, so a flat multiplier bites
+ * hardest exactly where they have least to answer it with. Measured, not
+ * guessed — at full strength from level 1, the suite reported a clean band
+ * either side and a trough at 8-11 where a Bog Wolf beat four classes out of
+ * five and a Moor Stag beat all of them.
+ *
+ * By the time a player has the level-granted kit, the world is at full
+ * strength and stays there for ninety levels.
+ */
+const DANGER_FROM = 12;
+
+/** Share of the ordinary-creature dials in effect at level 1. */
+const DANGER_AT_ONE = 0.52;
+
+/** How much of `MOB_DAMAGE_SCALE` and `MOB_HEALTH_SCALE` applies at a level. */
+export function dangerRamp(level: number): number {
+  const t = Math.max(0, Math.min(1, (level - 1) / (DANGER_FROM - 1)));
+  return DANGER_AT_ONE + (1 - DANGER_AT_ONE) * t;
+}
+
+/**
+ * Undo the ordinary-creature dials for one stat block.
+ *
+ * For a boss's summoned adds. An add is a creature of the world by definition —
+ * Cadfael whistles up two Outlaw Bowmen, and an Outlaw Bowman in a camp is
+ * meant to be able to kill you. But a boss fight is tuned as a *unit* against a
+ * printed win rate, and scaling its adds scaled the fight: Cadfael went from
+ * "36% standing in it, 100% dodging" to "0% and 15%" without a single number on
+ * Cadfael changing. The boss is the encounter; its adds are part of the boss.
+ */
+export function unscaleAdd(stats: DerivedStats, level: number): DerivedStats {
+  const { bite, bulk } = ordinaryScales(level);
+  return {
+    ...stats,
+    maxHealth: Math.round(stats.maxHealth / bulk),
+    damageMin: stats.damageMin / bite,
+    damageMax: stats.damageMax / bite,
+  };
+}
+
+/** Both ordinary-creature dials, at the level they are being applied to. */
+function ordinaryScales(level: number): { bite: number; bulk: number } {
+  const ramp = dangerRamp(level);
+  return {
+    bite: 1 + (MOB_DAMAGE_SCALE - 1) * ramp,
+    bulk: 1 + (MOB_HEALTH_SCALE - 1) * ramp,
+  };
+}
 
 /**
  * Gold multiplier per star.
@@ -213,6 +313,15 @@ export interface DeriveInput {
 }
 
 /**
+ * How fast a character walks, before anything they are riding.
+ *
+ * Exported because the map is sized against it: a zone is authored to take ten
+ * minutes to cross on foot, and that sentence is only checkable if the number
+ * lives in one place.
+ */
+export const BASE_MOVE_SPEED = 5.2;
+
+/**
  * Turn attributes + gear into the numbers combat actually reads.
  *
  * Deliberately linear and readable. Tuning happens by changing coefficients
@@ -239,7 +348,7 @@ export function deriveStats(input: DeriveInput): DerivedStats {
     damageMax: weapon.damageMax + affix.damage,
     damageType: weapon.damageType,
     attackRange: weapon.attackRange,
-    moveSpeed: 5.2 + affix.moveSpeed,
+    moveSpeed: BASE_MOVE_SPEED + affix.moveSpeed,
     skillPower: affix.skillPower,
     regenPerSec: affix.regen,
   };
@@ -298,15 +407,21 @@ export function curveMobDamageRange(level: number): { min: number; max: number }
 /** Mob stat block, derived the same way so player and mob math stay symmetric. */
 export function deriveMobStats(def: MobDef): DerivedStats {
   const star = STAR_MODIFIERS[def.stars];
+  // Bosses are exempt from both ordinary-creature dials: their ★5/★6
+  // multipliers already do this job, and they are tuned fight by fight.
+  const ordinary = def.stars < BOSS_STARS;
+  const scales = ordinaryScales(def.level);
+  const bulk = ordinary ? scales.bulk : 1;
+  const bite = ordinary ? scales.bite : 1;
   return {
-    maxHealth: Math.round(def.baseHealth * star.health),
+    maxHealth: Math.round(def.baseHealth * star.health * bulk),
     maxEnergy: 100,
     attack: Math.round(10 + def.attributes.strength * 2 + def.level * 3),
     defense: Math.round((def.attributes.vitality * 1.5 + def.level * 2) * star.defense),
     critChance: Math.min(0.3, 0.02 + def.attributes.dexterity * 0.002),
     swingMs: def.swingMs,
-    damageMin: def.damageMin * star.damage,
-    damageMax: def.damageMax * star.damage,
+    damageMin: def.damageMin * star.damage * bite,
+    damageMax: def.damageMax * star.damage * bite,
     damageType: def.damageType,
     attackRange: def.attackRange,
     moveSpeed: def.moveSpeed,

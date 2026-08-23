@@ -6,6 +6,37 @@ import type { Clearing, PropSpec, ZoneTheme } from '../content/terrain.js';
 import type { ZoneDef } from '../content/zone.js';
 
 /**
+ * How much ground the moving terrain tile covers, and at what resolution.
+ *
+ * Sized against the fog rather than the zone: the tile only has to reach past
+ * where you can see, and everything beyond it is not built at all.
+ */
+const TILE_SIZE = 880;
+const TILE_SEGMENTS = 320;
+
+/** Scenery is built and dropped in squares this big. */
+const CELL_SIZE = 155;
+
+/** How many cells out from the player stay built. */
+const CELL_RADIUS = 3;
+
+/**
+ * The patch a theme's prop counts are authored against.
+ *
+ * Themes say "110 broadleaf", which used to mean "in this zone". Zones are now
+ * a hundred times bigger, so it means "in a patch this size" instead — the
+ * numbers keep the density they were tuned to and the table did not have to be
+ * rewritten in units nobody can picture.
+ */
+const REFERENCE_AREA = 290 * 290;
+
+/** Half-width of the sun's shadow frustum, which follows the player. */
+const SHADOW_HALF = 70;
+
+/** Half-width of the box the ambient motes drift in. */
+const MOTE_SPAN = 90;
+
+/**
  * Scene, lighting, terrain and the follow camera.
  *
  * Everything here is presentation. The sim has no idea any of it exists, and
@@ -34,6 +65,15 @@ export class SceneRig {
   /** Everything belonging to the current zone, dropped wholesale on travel. */
   private zoneRoot = new THREE.Group();
   private motes: THREE.Points | null = null;
+  private water: THREE.Mesh | null = null;
+  /** The zone being streamed, kept for the cell builders. */
+  private zone!: ZoneDef;
+  private clearingList: Clearing[] = [];
+  /** Cell key -> the scenery standing in it. Built and dropped as you walk. */
+  private cells = new Map<string, THREE.Group>();
+  /** Where the ground tile is currently centred, snapped to the vertex grid. */
+  private tileAt = { x: Infinity, z: Infinity };
+  private motesAt = { x: Infinity, z: Infinity };
 
   /**
    * Camera orbit state, driven by right-drag and scroll.
@@ -53,7 +93,7 @@ export class SceneRig {
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 400);
+    this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1200);
 
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.85);
     this.scene.add(this.hemi);
@@ -61,7 +101,7 @@ export class SceneRig {
     this.sun = new THREE.DirectionalLight(0xffffff, 1.5);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.far = 240;
+    this.sun.shadow.camera.far = 400;
     this.scene.add(this.sun, this.sun.target);
 
     this.scene.add(this.zoneRoot);
@@ -94,20 +134,47 @@ export class SceneRig {
     this.sun.color.setHex(theme.sun.color);
     this.sun.intensity = theme.sun.intensity;
     this.sun.position.set(...theme.sun.position);
-    const s = zone.halfSize;
+    // The shadow camera follows the player rather than covering the zone. Over
+    // three kilometres of ground a zone-wide shadow map is one and a half
+    // metres per texel, which is not a shadow, it is a smear.
+    const s = SHADOW_HALF;
     this.sun.shadow.camera.left = -s;
     this.sun.shadow.camera.right = s;
     this.sun.shadow.camera.top = s;
     this.sun.shadow.camera.bottom = -s;
     this.sun.shadow.camera.updateProjectionMatrix();
 
-    const clearings = this.clearings(zone);
-    this.height = new HeightField(theme.terrain, clearings);
+    this.zone = zone;
+    this.clearingList = this.clearings(zone);
+    this.height = new HeightField(theme.terrain, this.clearingList);
 
-    this.addGround(zone, theme);
-    this.addScatter(zone, theme, clearings);
-    this.addBoundary(zone, theme);
-    this.addMotes(zone, theme);
+    this.buildGroundTile(theme);
+    this.buildWater(theme);
+    this.stream(zone.playerStart.x, zone.playerStart.z, true);
+  }
+
+  /**
+   * Build the world around a point, and drop what is behind you.
+   *
+   * A zone is three kilometres across. One ground mesh at a resolution worth
+   * looking at would be millions of vertices, and a zone's worth of trees is
+   * tens of thousands of objects — so neither exists. The ground is a single
+   * tile that re-centres on the player, and the scenery is built per cell from
+   * a hash of that cell's coordinates, which is what makes it identical every
+   * time you walk back and free when you are not there.
+   *
+   * The fog is doing the other half of the job: it is set closer than the tile
+   * edge, so the place where the world stops being built is never on screen.
+   */
+  stream(x: number, z: number, force = false): void {
+    this.recentreGround(x, z, force);
+    this.streamCells(x, z);
+    this.recentreMotes(x, z, force);
+    // Keep the shadow frustum on the player, and the sun's direction fixed.
+    const dir = this.theme.sun.position;
+    this.sun.position.set(x + dir[0], dir[1], z + dir[2]);
+    this.sun.target.position.set(x, 0, z);
+    this.sun.target.updateMatrixWorld();
   }
 
   private disposeZone(): void {
@@ -122,6 +189,10 @@ export class SceneRig {
     this.zoneRoot = new THREE.Group();
     this.scene.add(this.zoneRoot);
     this.motes = null;
+    this.water = null;
+    this.cells.clear();
+    this.tileAt = { x: Infinity, z: Infinity };
+    this.motesAt = { x: Infinity, z: Infinity };
   }
 
   /** Ground height under a world position. Everything visual sits on this. */
@@ -130,31 +201,86 @@ export class SceneRig {
   }
 
   /**
-   * Displaced, vertex-tinted ground.
+   * The ground: one displaced, vertex-tinted tile that follows the player.
    *
-   * Resolution is per-zone-metre-ish rather than fixed: a coarse grid turns
-   * Ardmoor's shelves into origami, and a fine one on the flat Fenmarch is
-   * wasted vertices.
+   * Resolution is per-metre rather than per-zone, which is the whole reason a
+   * zone can be any size at all. `TILE_SEGMENTS` across `TILE_SIZE` metres is
+   * the same vertex density the old whole-zone mesh had over a small one.
    */
-  private addGround(zone: ZoneDef, theme: ZoneTheme): void {
-    const segments = theme.terrain.amplitude > 4 ? 192 : 128;
-    const geo = new THREE.PlaneGeometry(zone.halfSize * 2, zone.halfSize * 2, segments, segments);
+  private buildGroundTile(theme: ZoneTheme): void {
+    const geo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE, TILE_SEGMENTS, TILE_SEGMENTS);
     geo.rotateX(-Math.PI / 2);
-
-    const pos = geo.attributes.position!;
-    for (let i = 0; i < pos.count; i++) {
-      pos.setY(i, this.height.at(pos.getX(i), pos.getZ(i)));
-    }
-    pos.needsUpdate = true;
-    geo.computeVertexNormals();
-    tintGround(geo, theme);
-
+    geo.setAttribute(
+      'color',
+      new THREE.BufferAttribute(new Float32Array(geo.attributes.position!.count * 3), 3),
+    );
     this.ground = new THREE.Mesh(
       geo,
       new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }),
     );
     this.ground.receiveShadow = true;
+    this.ground.frustumCulled = false;
     this.zoneRoot.add(this.ground);
+    void theme;
+  }
+
+  /**
+   * The water surface: one flat sheet the size of the ground tile, riding along
+   * with it at the theme's water line.
+   *
+   * The ground is carved down to meet it (see `terrainHeight`), so this is only
+   * ever the top of something that already has a bed and a shore. A sheet laid
+   * over untouched terrain gives you puddles on hillsides.
+   */
+  private buildWater(theme: ZoneTheme): void {
+    const level = theme.terrain.waterLevel;
+    if (level === undefined || !theme.water) return;
+    const geo = new THREE.PlaneGeometry(TILE_SIZE, TILE_SIZE, 1, 1);
+    geo.rotateX(-Math.PI / 2);
+    this.water = new THREE.Mesh(
+      geo,
+      new THREE.MeshStandardMaterial({
+        color: theme.water.color,
+        transparent: true,
+        opacity: theme.water.opacity,
+        roughness: 0.12,
+        metalness: 0.35,
+        depthWrite: false,
+      }),
+    );
+    this.water.position.y = level;
+    this.water.renderOrder = 1;
+    this.water.frustumCulled = false;
+    this.zoneRoot.add(this.water);
+  }
+
+  /**
+   * Move the tile under the player and re-sample it.
+   *
+   * Snapped to whole vertex spacings. Sliding it smoothly would make every hill
+   * swim as the grid slid through the height function — the noise is anchored
+   * to the world, so the sampling grid has to be too.
+   */
+  private recentreGround(x: number, z: number, force: boolean): void {
+    const step = TILE_SIZE / TILE_SEGMENTS;
+    const cx = Math.round(x / step) * step;
+    const cz = Math.round(z / step) * step;
+    if (!force && cx === this.tileAt.x && cz === this.tileAt.z) return;
+    this.tileAt = { x: cx, z: cz };
+
+    const geo = this.ground.geometry as THREE.BufferGeometry;
+    const pos = geo.attributes.position!;
+    for (let i = 0; i < pos.count; i++) {
+      pos.setY(i, this.height.at(pos.getX(i) + cx, pos.getZ(i) + cz));
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    tintGround(geo, this.theme);
+    this.ground.position.set(cx, 0, cz);
+    if (this.water) {
+      this.water.position.x = cx;
+      this.water.position.z = cz;
+    }
   }
 
   /**
@@ -181,22 +307,73 @@ export class SceneRig {
     return out;
   }
 
-  /** Trees, stones and whatever else the theme asks for. */
-  private addScatter(zone: ZoneDef, theme: ZoneTheme, clearings: Clearing[]): void {
-    const blocked = (x: number, z: number): boolean =>
-      clearings.some((c) => Math.hypot(x - c.x, z - c.z) < c.r);
-    // A local PRNG, seeded per zone so each place has its own arrangement and
-    // every load of that place is identical. Deliberately NOT the sim's Rng:
-    // decor must never be able to shift a gameplay roll.
-    const rng = mulberry(hash(zone.id));
-    const group = new THREE.Group();
+  /**
+   * Build every cell within sight and drop the rest.
+   *
+   * A cell's contents come from a hash of its coordinates, so walking away and
+   * back rebuilds exactly what was there. Nothing is remembered, which is what
+   * keeps a three-kilometre zone the same cost to stand in as a small one.
+   */
+  private streamCells(x: number, z: number): void {
+    const cx = Math.floor(x / CELL_SIZE);
+    const cz = Math.floor(z / CELL_SIZE);
+    const wanted = new Set<string>();
 
-    for (const spec of theme.props) {
+    for (let dz = -CELL_RADIUS; dz <= CELL_RADIUS; dz++) {
+      for (let dx = -CELL_RADIUS; dx <= CELL_RADIUS; dx++) {
+        const key = `${cx + dx},${cz + dz}`;
+        wanted.add(key);
+        if (this.cells.has(key)) continue;
+        const group = this.buildCell(cx + dx, cz + dz);
+        this.cells.set(key, group);
+        this.zoneRoot.add(group);
+      }
+    }
+
+    for (const [key, group] of this.cells) {
+      if (wanted.has(key)) continue;
+      this.zoneRoot.remove(group);
+      disposeTree(group);
+      this.cells.delete(key);
+    }
+  }
+
+  /** Everything standing in one cell: scenery, and the zone wall if it edges one. */
+  private buildCell(cx: number, cz: number): THREE.Group {
+    const group = new THREE.Group();
+    const x0 = cx * CELL_SIZE;
+    const z0 = cz * CELL_SIZE;
+    const limit = this.zone.halfSize;
+    // Cells entirely outside the wall hold nothing but the wall itself.
+    const inside = x0 + CELL_SIZE > -limit && x0 < limit && z0 + CELL_SIZE > -limit && z0 < limit;
+
+    if (inside) this.addCellScatter(group, x0, z0);
+    this.addCellBoundary(group, x0, z0);
+    return group;
+  }
+
+  private addCellScatter(group: THREE.Group, x0: number, z0: number): void {
+    const blocked = (x: number, z: number): boolean =>
+      this.clearingList.some((c) => Math.hypot(x - c.x, z - c.z) < c.r);
+    // Seeded from the cell and the zone, never from the sim's Rng: decor must
+    // not be able to shift a gameplay roll, and this runs as you walk.
+    const rng = mulberry(hash(`${this.zone.id}:${x0}:${z0}`));
+    const limit = this.zone.halfSize;
+
+    for (const spec of this.theme.props) {
+      // `count` is authored against a reference patch, so a theme table written
+      // for a small zone keeps meaning the same thing on a large one.
+      const expected = (spec.count * CELL_SIZE * CELL_SIZE) / REFERENCE_AREA;
+      const n = Math.floor(expected) + (rng() < expected % 1 ? 1 : 0);
+      if (n <= 0) continue;
       const built = buildProp(spec);
-      for (let i = 0; i < spec.count; i++) {
-        const x = (rng() * 2 - 1) * zone.halfSize * 0.95;
-        const z = (rng() * 2 - 1) * zone.halfSize * 0.95;
+      for (let i = 0; i < n; i++) {
+        const x = x0 + rng() * CELL_SIZE;
+        const z = z0 + rng() * CELL_SIZE;
+        if (Math.abs(x) > limit * 0.98 || Math.abs(z) > limit * 0.98) continue;
         if (blocked(x, z)) continue;
+        // Reeds stand in the shallows; nothing else grows under a lake.
+        if (spec.kind !== 'reed' && this.height.underwater(x, z)) continue;
         const scale = spec.scale * (1 + (rng() * 2 - 1) * (spec.jitter ?? 0.4) * 0.5);
         const prop = built.clone();
         prop.position.set(x, this.height.at(x, z), z);
@@ -209,64 +386,85 @@ export class SceneRig {
         group.add(prop);
       }
     }
-    this.zoneRoot.add(group);
+  }
+
+  /** A low wall marking the zone edge, so the clamp in the sim is legible. */
+  private addCellBoundary(group: THREE.Group, x0: number, z0: number): void {
+    const s = this.zone.halfSize;
+    const step = 8;
+    const mat = new THREE.MeshStandardMaterial({ color: this.theme.boundary, roughness: 1 });
+    let used = false;
+
+    // Segmented rather than four long boxes, so the wall follows the hills
+    // instead of hovering over the valleys — and built per cell, because a
+    // three-kilometre perimeter at this spacing is fifteen hundred boxes.
+    const run = (along: 'x' | 'z', edge: number): void => {
+      const from = along === 'x' ? x0 : z0;
+      for (let t = from; t < from + CELL_SIZE; t += step) {
+        const mid = t + step / 2;
+        if (Math.abs(mid) > s) continue;
+        const x = along === 'x' ? mid : edge;
+        const z = along === 'x' ? edge : mid;
+        const wall = new THREE.Mesh(
+          new THREE.BoxGeometry(along === 'x' ? step : 0.6, 2.4, along === 'x' ? 0.6 : step),
+          mat,
+        );
+        wall.position.set(x, this.height.at(x, z) + 0.9, z);
+        wall.castShadow = true;
+        wall.receiveShadow = true;
+        group.add(wall);
+        used = true;
+      }
+    };
+
+    for (const edge of [-s, s]) {
+      if (edge >= z0 && edge < z0 + CELL_SIZE) run('x', edge);
+      if (edge >= x0 && edge < x0 + CELL_SIZE) run('z', edge);
+    }
+    if (!used) mat.dispose();
   }
 
   /**
-   * Slow drifting particles. Cheap, and it is most of what separates "a forest
-   * at dusk" from "a forest with the brightness turned down".
+   * Slow drifting particles, in a box that follows the player.
+   *
+   * Cheap, and it is most of what separates "a forest at dusk" from "a forest
+   * with the brightness turned down". Nobody can tell they are local: they are
+   * ambient by definition and the fog eats the edge.
    */
-  private addMotes(zone: ZoneDef, theme: ZoneTheme): void {
-    if (!theme.motes) return;
-    const rng = mulberry(hash(zone.id) ^ 0x5eed);
-    const positions = new Float32Array(theme.motes.count * 3);
-    for (let i = 0; i < theme.motes.count; i++) {
-      const x = (rng() * 2 - 1) * zone.halfSize * 0.9;
-      const z = (rng() * 2 - 1) * zone.halfSize * 0.9;
-      positions[i * 3] = x;
-      positions[i * 3 + 1] = this.height.at(x, z) + 0.5 + rng() * theme.motes.height;
-      positions[i * 3 + 2] = z;
+  private recentreMotes(x: number, z: number, force: boolean): void {
+    const spec = this.theme.motes;
+    if (!spec) return;
+    if (!force && Math.hypot(x - this.motesAt.x, z - this.motesAt.z) < MOTE_SPAN * 0.25) return;
+    this.motesAt = { x, z };
+
+    const rng = mulberry(hash(this.zone.id) ^ 0x5eed);
+    const positions = new Float32Array(spec.count * 3);
+    for (let i = 0; i < spec.count; i++) {
+      const px = x + (rng() * 2 - 1) * MOTE_SPAN;
+      const pz = z + (rng() * 2 - 1) * MOTE_SPAN;
+      positions[i * 3] = px;
+      positions[i * 3 + 1] = this.height.at(px, pz) + 0.5 + rng() * spec.height;
+      positions[i * 3 + 2] = pz;
+    }
+    if (this.motes) {
+      this.zoneRoot.remove(this.motes);
+      this.motes.geometry.dispose();
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     this.motes = new THREE.Points(
       geo,
       new THREE.PointsMaterial({
-        color: theme.motes.color,
-        size: theme.motes.size,
+        color: spec.color,
+        size: spec.size,
         transparent: true,
         opacity: 0.75,
         depthWrite: false,
         fog: true,
       }),
     );
+    this.motes.frustumCulled = false;
     this.zoneRoot.add(this.motes);
-  }
-
-  /** A low wall marking the zone edge, so the clamp in the sim is legible. */
-  private addBoundary(zone: ZoneDef, theme: ZoneTheme): void {
-    const s = zone.halfSize;
-    const mat = new THREE.MeshStandardMaterial({ color: theme.boundary, roughness: 1 });
-    const group = new THREE.Group();
-    // Segmented rather than four long boxes, so the wall follows the hills
-    // instead of hovering over the valleys.
-    const step = 8;
-    for (let t = -s; t < s; t += step) {
-      const mid = t + step / 2;
-      for (const [x, z, w, d] of [
-        [mid, -s, step, 0.6],
-        [mid, s, step, 0.6],
-        [-s, mid, 0.6, step],
-        [s, mid, 0.6, step],
-      ] as Array<[number, number, number, number]>) {
-        const wall = new THREE.Mesh(new THREE.BoxGeometry(w, 2.4, d), mat);
-        wall.position.set(x, this.height.at(x, z) + 0.9, z);
-        wall.castShadow = true;
-        wall.receiveShadow = true;
-        group.add(wall);
-      }
-    }
-    this.zoneRoot.add(group);
   }
 
   /** Orbit the camera around a focus point. */
@@ -298,6 +496,17 @@ export class SceneRig {
   render(): void {
     this.renderer.render(this.scene, this.camera);
   }
+}
+
+/** Free every geometry and material under an object, before dropping it. */
+function disposeTree(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (mesh.geometry) mesh.geometry.dispose();
+    const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
+    if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+    else mat?.dispose();
+  });
 }
 
 /**

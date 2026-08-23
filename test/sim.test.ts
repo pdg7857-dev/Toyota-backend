@@ -20,7 +20,7 @@ import {
   getHolding,
 } from '../src/content/factions.js';
 import { DRAGONS, dragonMobId } from '../src/content/dragons.js';
-import { MOUNTS, getMount } from '../src/content/mounts.js';
+import { KIND_RARITY, MOUNTS, getMount, mountsOfKind, type MountKind } from '../src/content/mounts.js';
 import {
   ADVENTURERS,
   ADVENTURERS_PER_ZONE,
@@ -44,7 +44,7 @@ import {
   rareMobId,
   signatureWeaponId,
 } from '../src/content/rares.js';
-import { BOUNTY_MOBS, LOOT_TABLES, MOBS, getMob } from '../src/content/mobs.js';
+import { BOUNTY_MOBS, LOOT_TABLES, MOBS, RESPAWN_MS, getMob } from '../src/content/mobs.js';
 import { BOSS_STARS, isBoss } from '../src/sim/types.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
 
@@ -339,7 +339,9 @@ describe('threat and AI', () => {
     // Stop attacking, or the player just kills it again the moment it returns.
     world.submit(world.playerId, { t: 'autoAttack', on: false });
     world.submit(world.playerId, { t: 'target', id: null });
-    const events = world.advance(21000);
+    // Five minutes now, not twenty seconds: the timer is what makes a big map
+    // worth crossing instead of a camp worth standing in.
+    const events = world.advance(RESPAWN_MS + 2000);
     expect(events.some((e) => e.t === 'spawn' && e.entityId === mob.id)).toBe(true);
     expect(mob.dead).toBe(false);
     expect(mob.health).toBe(world.statsOf(mob).maxHealth);
@@ -507,7 +509,10 @@ describe('boss abilities', () => {
 
 describe('progression', () => {
   it('awards xp and levels up, granting points and unlocking skills', () => {
-    const world = newWorld(9);
+    // A hare rather than a boar: this is a test about the xp curve, and a
+    // level-1 character now takes a real fight off a level-3 ★1 — which is the
+    // point of the world being dangerous, and nothing to do with levelling.
+    const world = newWorld(9, duelZone('moor_hare'));
     const player = levelPlayer(world, { level: 1, gear: ['bronze_shortsword'] });
     player.xp = xpToNext(1) - 1;
 
@@ -1241,23 +1246,91 @@ describe('zone terrain and theme', () => {
   it('gets rougher as you go inland, and the Fenmarch stays gentle', () => {
     // The starting zone is the reference for feel as well as for balance:
     // whatever the later zones do, the moor stays walkable and readable.
-    const amp = (id: string): number => getTheme(getZone(id).theme).terrain.amplitude;
-    expect(amp('fenmarch')).toBeLessThan(3);
-    expect(amp('ardmoor')).toBeGreaterThan(amp('fenmarch') * 2);
-    expect(amp('caer_dubh')).toBeGreaterThan(amp('fenmarch'));
+    //
+    // Measured as total relief now rather than as one number, because the
+    // ground is two layers: rolling country everywhere, and high country over
+    // the part of a map its mask claims. Ardmoor is not rougher because its
+    // hills are steeper, it is rougher because it has mountains.
+    const relief = (id: string): number => {
+      const t = getTheme(getZone(id).theme).terrain;
+      return t.amplitude + (t.mountains?.amplitude ?? 0) * (t.mountains?.mask ?? 0);
+    };
+    expect(relief('fenmarch')).toBeLessThan(relief('ardmoor') / 2);
+    expect(relief('caer_dubh')).toBeGreaterThan(relief('fenmarch'));
+    // And the moor keeps the gentlest hills of the four, whatever stands
+    // behind them.
+    const hills = (id: string): number => getTheme(getZone(id).theme).terrain.amplitude;
+    for (const id of ['ardmoor', 'reach', 'caer_dubh']) {
+      expect(hills('fenmarch'), `${id} has gentler ground than the moor`).toBeLessThan(hills(id));
+    }
+  });
+
+  it('puts water in the low ground of every zone', () => {
+    // A map with no water on it is a map with nothing on it but slopes.
+    for (const zone of Object.values(ZONES)) {
+      const theme = getTheme(zone.theme);
+      const spec = theme.terrain;
+      expect(spec.waterLevel, `${zone.name} has no water`).toBeDefined();
+      expect(theme.water, `${zone.name} has water with no colour`).toBeDefined();
+
+      const field = new HeightField(spec, clearingsOf(zone));
+      let wet = 0;
+      let samples = 0;
+      const step = zone.halfSize / 22;
+      for (let x = -zone.halfSize; x <= zone.halfSize; x += step) {
+        for (let z = -zone.halfSize; z <= zone.halfSize; z += step) {
+          samples++;
+          if (field.underwater(x, z)) wet++;
+        }
+      }
+      const share = wet / samples;
+      console.log(`  ${zone.name.padEnd(18)} ${(share * 100).toFixed(0)}% under water`);
+      // Enough to be a feature of the place, not so much that it is a sea with
+      // some hills in it — and the drowned wood is allowed to be the wettest.
+      expect(share, `${zone.name} is dry`).toBeGreaterThan(0.02);
+      expect(share, `${zone.name} is a lake`).toBeLessThan(0.45);
+    }
+  });
+
+  it('keeps camps, traders and arenas out of the water', () => {
+    // Somewhere you have to stand and fight cannot be at the bottom of a lake,
+    // and on a map this size nobody is checking four hundred camps by hand.
+    for (const zone of Object.values(ZONES)) {
+      const field = new HeightField(getTheme(zone.theme).terrain, clearingsOf(zone));
+      const dry = (pos: { x: number; z: number }, what: string): void => {
+        expect(field.underwater(pos.x, pos.z), `${what} in ${zone.name} is under water`).toBe(false);
+      };
+      dry(zone.playerStart, 'the arrival point');
+      for (const vendor of zone.vendors) dry(vendor.pos, vendor.vendorId);
+      for (const exit of zone.exits) dry(exit.pos, exit.label);
+      // Camp centres rather than every point: a spawn on the shoreline of a
+      // tarn is scenery, a camp in the middle of one is a bug.
+      const seen = new Map<string, { x: number; z: number }>();
+      for (const spawn of zone.spawns) {
+        const key = `${spawn.mobId}:${Math.round(spawn.pos.x / 60)}:${Math.round(spawn.pos.z / 60)}`;
+        if (!seen.has(key)) seen.set(key, spawn.pos);
+      }
+      let drowned = 0;
+      for (const pos of seen.values()) if (field.underwater(pos.x, pos.z)) drowned++;
+      expect(drowned, `${drowned} camps in ${zone.name} are under water`).toBe(0);
+    }
   });
 
   it('keeps the ground continuous and inside the amplitude it declares', () => {
     for (const zone of Object.values(ZONES)) {
       const spec = getTheme(zone.theme).terrain;
       const field = new HeightField(spec, clearingsOf(zone));
+      // Total relief the two layers can produce between them, plus the bite
+      // the water line takes out of the low ground.
+      const ceiling = (spec.amplitude + (spec.mountains?.amplitude ?? 0)) * 1.05 + 10;
       let last = field.at(-zone.halfSize, 0);
       for (let x = -zone.halfSize; x <= zone.halfSize; x += 0.5) {
         const h = field.at(x, 0);
-        expect(Math.abs(h)).toBeLessThanOrEqual(spec.amplitude * 1.05);
+        expect(Math.abs(h), `${zone.name} at x=${x}`).toBeLessThanOrEqual(ceiling);
         // No cliffs: a half-metre step must not move the ground more than the
-        // player's own height, or entities visibly pop as they walk.
-        expect(Math.abs(h - last)).toBeLessThan(1.8);
+        // player's own height, or entities visibly pop as they walk. This is
+        // what keeps "mountains" from meaning "walls".
+        expect(Math.abs(h - last), `a cliff in ${zone.name} at x=${x}`).toBeLessThan(1.8);
         last = h;
       }
     }
@@ -2313,15 +2386,61 @@ describe('horses and mounts', () => {
     expect(thrown).toBeGreaterThan(0);
   });
 
-  it('makes the good one very hard to keep rather than hard to find', () => {
-    // A herd you can walk to and a horse that shrugs you off eleven times in
-    // twelve is a better story than a spawn timer.
-    const grey = getMount('ashen_grey');
-    expect(grey.count).toBe(1);
-    expect(grey.captureChance).toBeLessThan(0.12);
-    for (const other of MOUNTS.filter((m) => m.id !== 'ashen_grey')) {
-      expect(other.captureChance).toBeGreaterThan(grey.captureChance);
-      expect(other.speed).toBeLessThan(grey.speed);
+  it('makes the good ones very hard to keep rather than hard to find', () => {
+    // A herd you can walk to and an animal that shrugs you off is a better
+    // story than a spawn timer. Both legendaries run alone.
+    for (const id of ['ashen_grey', 'caer_unicorn']) {
+      const legend = getMount(id);
+      expect(legend.count, `${legend.name} runs in a herd`).toBe(1);
+      expect(legend.captureChance, `${legend.name} is too easy to take`).toBeLessThan(0.12);
+    }
+  });
+
+  it('keeps the three families in rarity order', () => {
+    // Horse, then dire wolf, then unicorn. The ladder is the feature, so it
+    // must hold across every member of every family rather than on average —
+    // one generous number in the rare family and the rare family is the easy
+    // one.
+    const order: MountKind[] = ['horse', 'direwolf', 'unicorn'];
+    const rows: string[] = [];
+    for (const kind of order) {
+      const family = mountsOfKind(kind);
+      expect(family.length, `no ${kind}s`).toBeGreaterThan(0);
+      for (const m of family) {
+        rows.push(
+          `  ${m.name.padEnd(26)} ${kind.padEnd(9)} lv${String(m.level).padStart(3)}  ` +
+            `1 in ${(1 / m.captureChance).toFixed(0).padStart(2)} attempts  speed ${m.speed}`,
+        );
+        const band = KIND_RARITY[kind];
+        expect(m.captureChance, `${m.name} is out of its family's rarity band`).toBeLessThanOrEqual(
+          band.max,
+        );
+        expect(m.captureChance, `${m.name} is out of its family's rarity band`).toBeGreaterThanOrEqual(
+          band.min,
+        );
+      }
+    }
+    console.log('\nMOUNTS\n' + rows.join('\n'));
+
+    // The unicorn is the rarest thing in the game you can ride, and the best.
+    const unicorn = getMount('caer_unicorn');
+    for (const other of MOUNTS.filter((m) => m.id !== unicorn.id)) {
+      expect(other.captureChance, `${other.name} is rarer than the unicorn`).toBeGreaterThan(
+        unicorn.captureChance,
+      );
+      expect(other.speed, `${other.name} is faster than the unicorn`).toBeLessThan(unicorn.speed);
+    }
+
+    // And a wolf is worth more in a fight than any horse, which is why both
+    // families exist rather than one ladder of numbers.
+    const worth = (m: (typeof MOUNTS)[number]): number =>
+      (m.bonus.damageBonus ?? 0) + (m.bonus.armorBonus ?? 0) * 0.4 + (m.bonus.regenBonus ?? 0) * 4;
+    const wolves = mountsOfKind('direwolf');
+    for (const wolf of wolves) {
+      const peers = mountsOfKind('horse').filter((h) => h.level <= wolf.level);
+      for (const horse of peers) {
+        expect(worth(wolf), `${horse.name} out-fights ${wolf.name}`).toBeGreaterThan(worth(horse));
+      }
     }
   });
 

@@ -1,5 +1,6 @@
 import { LUXURY_VENDOR_ID, luxuryMerchant } from './luxury.js';
 import { zoneTomes } from './skills.js';
+import { consumablesFor } from './consumables.js';
 import type { ItemDef, VendorDef } from '../sim/types.js';
 
 /**
@@ -63,6 +64,9 @@ export const VENDORS: Record<string, VendorDef> = {
       'tattered_hood',
       'boiled_leather_vest',
       'leather_coif',
+      // And the bottles. A trader who does not sell potions in a world where
+      // everything can kill you is a trader nobody visits twice.
+      ...consumablesFor(1),
     ],
     view: { color: 0xd8c79a, height: 1.8, radius: 0.44 },
   },
@@ -80,6 +84,7 @@ export const VENDORS: Record<string, VendorDef> = {
       'bogstrider_greaves',
       'outlaw_hood',
       'reaver_legguards',
+      ...consumablesFor(20),
     ],
     view: { color: 0xb8a37e, height: 1.85, radius: 0.46 },
   },
@@ -94,6 +99,8 @@ function lateVendor(
   color: number,
   /** Zone whose uncommon skill tomes this trader teaches from. */
   zoneId: string,
+  /** Level band whose potions this trader keeps. */
+  consumableTier: number,
 ): VendorDef {
   const stock: string[] = [];
   for (const adjective of tierAdjectives) {
@@ -106,6 +113,7 @@ function lateVendor(
   // One tome per class: the zone's first taught skill. The rare and epic ones
   // are on its bosses, and no trader anywhere carries them.
   stock.push(...Object.values(zoneTomes(zoneId, 'uncommon')));
+  stock.push(...consumablesFor(consumableTier));
   return { id, name, greeting, stock, view: { color, height: 1.82, radius: 0.45 } };
 }
 
@@ -117,6 +125,7 @@ Object.assign(VENDORS, {
     ['Honed', 'Bloodiron'],
     0xc9b98d,
     'ardmoor',
+    20,
   ),
   odhran: lateVendor(
     'odhran',
@@ -125,6 +134,7 @@ Object.assign(VENDORS, {
     ['Sunken', 'Tidewrought'],
     0x9fb3a8,
     'reach',
+    40,
   ),
   aoife: lateVendor(
     'aoife',
@@ -133,6 +143,7 @@ Object.assign(VENDORS, {
     ['Blackstone', 'Dread'],
     0xb0a8bc,
     'caer_dubh',
+    66,
   ),
 });
 

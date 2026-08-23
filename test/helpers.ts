@@ -25,6 +25,34 @@ export function duelZone(mobId: string, distance = 2.5): ZoneDef {
   };
 }
 
+/**
+ * An arena with several of the same creature, all within reach.
+ *
+ * The single-mob duel measures whether a fight is winnable. This measures the
+ * thing players actually die to: pulling more than you meant to. A world where
+ * one creature cannot kill you and two still cannot is a world with no bad
+ * decisions available in it.
+ */
+export function pullZone(mobId: string, count: number): ZoneDef {
+  const spawns = [];
+  for (let i = 0; i < count; i++) {
+    const a = (i / count) * Math.PI * 2;
+    spawns.push({ mobId, pos: { x: Math.cos(a) * 3 + 3, z: Math.sin(a) * 3 } });
+  }
+  return {
+    id: 'test-pull',
+    name: 'Test Pull',
+    halfSize: 120,
+    playerStart: { x: 0, z: 0 },
+    spawns,
+    vendors: [],
+    exits: [],
+    levelRange: [1, 100],
+    rareSpawns: false,
+    adventurers: false,
+  };
+}
+
 /** An empty arena, for tests that don't want anything attacking them. */
 export function emptyZone(): ZoneDef {
   return {
@@ -150,6 +178,15 @@ export interface FightResult {
   durationSec: number;
   /** Player health remaining, as a fraction of max. */
   healthLeft: number;
+  /**
+   * The lowest the player's health got at any point, as a fraction of max.
+   *
+   * "Can this kill me" is a question about the worst moment of a fight, not the
+   * last one. A creature you beat at 60% having dipped to 8% on the way is one
+   * that kills you the day you pull it with anything else nearby — and the
+   * average health left says nothing about that at all.
+   */
+  lowestHealth: number;
   timedOut: boolean;
   /** Telegraphed AoEs that landed on the player. */
   slamsTaken: number;
@@ -164,6 +201,18 @@ export interface FightResult {
 }
 
 export interface FightOptions {
+  /**
+   * Potions to carry, and drink when things go badly.
+   *
+   * Off by default, because the two questions are different: "is this creature
+   * dangerous" is measured by a character who has nothing but their rotation,
+   * and "is it beatable" by one who plays properly. Measuring only the second
+   * hides a world that cannot kill anybody; measuring only the first hides the
+   * fact that the answer to it exists.
+   */
+  potion?: string;
+  /** Health fraction below which the potion goes down. */
+  potionAt?: number;
   /** Skills to fire whenever they are off cooldown. */
   skills?: string[];
   /**
@@ -216,6 +265,7 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
   let mobHealed = 0;
   let selfHealed = 0;
   let lastMove = { x: 0, z: 0 };
+  let lowestHealth = 1;
 
   const move = (x: number, z: number): void => {
     if (x === lastMove.x && z === lastMove.z) return;
@@ -231,8 +281,21 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
     return ability ?? null;
   };
 
+  if (opts.potion) {
+    // A pouch, not a barrel: the family cooldown is what limits this, not the
+    // stack size, and a fight nobody could carry enough for is not a fight.
+    world.addItem(player, { itemId: opts.potion, qty: 12 });
+  }
+
   for (let i = 0; i < maxTicks; i++) {
     const healthFraction = player.health / maxHealth;
+    lowestHealth = Math.min(lowestHealth, Math.max(0, healthFraction));
+
+    // Drink when it is going wrong, which is the only time a potion is a
+    // decision. Firing one at 95% would measure a bigger health bar.
+    if (opts.potion && healthFraction < (opts.potionAt ?? 0.45)) {
+      world.submit(player.id, { t: 'use', itemId: opts.potion });
+    }
     const casting = mobCasting();
 
     // Saving the interrupt for a heal means HOLDING the global cooldown for it.
@@ -336,6 +399,7 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
         interrupts,
         mobHealed,
         selfHealed,
+        lowestHealth,
       };
     }
   }
@@ -343,12 +407,64 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
     playerWon: false,
     durationSec: timeoutSec,
     healthLeft: player.health / maxHealth,
+    lowestHealth,
     timedOut: true,
     slamsTaken,
     slamsDodged,
     interrupts,
     mobHealed,
     selfHealed,
+  };
+}
+
+/**
+ * Fight everything in the arena at once, and report whether you lived.
+ *
+ * Deliberately simpler than `simulateFight`: no telegraph dodging, no held
+ * interrupt. A player who over-pulls is not executing a rotation, they are
+ * pressing buttons and hoping — and that is exactly the situation this is meant
+ * to measure.
+ */
+export function simulatePull(
+  world: World,
+  skills: string[],
+  timeoutSec = 240,
+): { survived: boolean; killed: number; healthLeft: number; durationSec: number } {
+  const player = world.player;
+  const mobs = [...world.entities.values()].filter((e) => e.kind === 'mob');
+  const maxHealth = world.statsOf(player).maxHealth;
+  const maxTicks = Math.round((timeoutSec * 1000) / TICK_MS);
+
+  // Wake all of them: this is a pull, not a series of duels.
+  for (const mob of mobs) {
+    mob.aiState = 'chasing';
+    mob.targetId = player.id;
+    mob.threat = { [player.id]: 1 };
+  }
+  world.submit(player.id, { t: 'autoAttack', on: true });
+
+  for (let i = 0; i < maxTicks; i++) {
+    const alive = mobs.filter((m) => !m.dead);
+    if (player.dead || alive.length === 0) {
+      return {
+        survived: !player.dead,
+        killed: mobs.length - alive.length,
+        healthLeft: Math.max(0, player.health) / maxHealth,
+        durationSec: (i * TICK_MS) / 1000,
+      };
+    }
+    if (player.targetId === null || world.entity(player.targetId)?.dead) {
+      world.submit(player.id, { t: 'target', id: alive[0]!.id });
+      world.submit(player.id, { t: 'autoAttack', on: true });
+    }
+    for (const id of skills) world.submit(player.id, { t: 'useSkill', skillId: id });
+    world.tick();
+  }
+  return {
+    survived: !player.dead,
+    killed: mobs.filter((m) => m.dead).length,
+    healthLeft: Math.max(0, player.health) / maxHealth,
+    durationSec: timeoutSec,
   };
 }
 

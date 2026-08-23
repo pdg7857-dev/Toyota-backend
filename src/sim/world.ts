@@ -17,6 +17,7 @@ import {
   addAttributes,
   applyItem,
   deriveMobStats,
+  unscaleAdd,
   deriveStats,
   dist,
   emptyAffixes,
@@ -56,6 +57,13 @@ import type {
   Vec2,
 } from './types.js';
 import { canEquip, getItem } from '../content/items.js';
+import {
+  CONSUMABLE_DROP_CHANCE,
+  ELIXIR_COOLDOWN_MS,
+  ELIXIR_DURATION_MS,
+  POTION_COOLDOWN_MS,
+  consumableDropFor,
+} from '../content/consumables.js';
 import { getLootTable, getMob } from '../content/mobs.js';
 import { BOUNTY_SPAWN_CHANCE, RARE_SPAWN_CHANCE } from '../content/rares.js';
 import {
@@ -1078,7 +1086,11 @@ export class World {
   statsOf(e: Entity): DerivedStats {
     let stats: DerivedStats;
     if (e.kind === 'mob') {
-      stats = deriveMobStats(getMob(e.defId!));
+      const def = getMob(e.defId!);
+      stats = deriveMobStats(def);
+      // An add belongs to the boss that called it, and a boss fight is tuned as
+      // one thing. See `unscaleAdd`.
+      if (e.summonedBy !== undefined) stats = unscaleAdd(stats, def.level);
     } else {
       const acc = {
         attributes: { ...(e.attributes ?? emptyAttributes()) },
@@ -1208,6 +1220,9 @@ export class World {
         break;
       case 'learnSkill':
         this.tryLearnSkill(e, cmd.itemId);
+        break;
+      case 'use':
+        this.tryUse(e, cmd.itemId);
         break;
       case 'capture':
         this.tryCapture(e, cmd.id);
@@ -1356,6 +1371,14 @@ export class World {
   private tickCooldowns(): void {
     for (const e of this.entities.values()) {
       if (e.gcdMs !== undefined && e.gcdMs > 0) e.gcdMs = Math.max(0, e.gcdMs - TICK_MS);
+      const drinks = e.consumableCooldowns;
+      if (drinks) {
+        for (const family of Object.keys(drinks) as Array<'potion' | 'elixir'>) {
+          const remaining = (drinks[family] ?? 0) - TICK_MS;
+          if (remaining <= 0) delete drinks[family];
+          else drinks[family] = remaining;
+        }
+      }
       for (const bag of [e.skillCooldowns, e.abilityCooldowns, e.abilityLockouts]) {
         if (!bag) continue;
         for (const id of Object.keys(bag)) {
@@ -1374,6 +1397,21 @@ export class World {
       for (const eff of e.effects) {
         eff.remainingMs -= TICK_MS;
         eff.sinceTickMs += TICK_MS;
+        if (eff.kind === 'buff' && eff.regenPerTick && eff.sinceTickMs >= eff.tickMs && !e.dead) {
+          eff.sinceTickMs -= eff.tickMs;
+          const stats = this.statsOf(e);
+          const before = e.health;
+          e.health = Math.min(stats.maxHealth, e.health + eff.regenPerTick);
+          const healed = Math.round(e.health - before);
+          if (healed > 0) {
+            this.events.push({
+              t: 'heal',
+              sourceId: e.id,
+              targetId: e.id,
+              amount: healed,
+            });
+          }
+        }
         if (eff.kind === 'dot' && eff.sinceTickMs >= eff.tickMs && !e.dead) {
           eff.sinceTickMs -= eff.tickMs;
           // DoTs bypass mitigation — that is what makes them worth a slot.
@@ -2043,6 +2081,14 @@ export class World {
       loot.push({ itemId: entry.itemId, qty: this.rng.int(entry.min, entry.max) });
     }
 
+    // A potion, often. Deliberately outside the loot table and outside the
+    // equipment drop cap: gear is meant to be rare and hoped for, and potions
+    // are meant to keep you stocked. A player who runs dry mid-zone gets to
+    // walk back to a trader, which is a punishment for the crime of fighting.
+    if (!def.horse && this.rng.chance(CONSUMABLE_DROP_CHANCE)) {
+      loot.push({ itemId: consumableDropFor(def.level), qty: 1 });
+    }
+
     const gold = goldForKill(def.level, def.stars, table.goldMultiplier ?? 1);
     mob.corpseLoot = loot;
     mob.corpseGold = this.rng.int(gold.min, gold.max);
@@ -2682,9 +2728,102 @@ export class World {
     this.events.push({ t: 'skillUnlocked', entityId: player.id, skillId: skill.id });
   }
 
+  /**
+   * Drink a potion or an elixir.
+   *
+   * The cooldown is per *family*, not per item, and it is the whole reason
+   * consumables are a decision rather than a second health bar: a bag of forty
+   * draughts still only answers one crisis every eighteen seconds, so the
+   * question is always "now, or in ten seconds when it is worse".
+   */
+  private tryUse(player: Entity, itemId: string): void {
+    if (player.kind !== 'player') return;
+    const def = getItem(itemId);
+    const spec = def.consumable;
+    if (!spec) {
+      this.events.push({ t: 'error', entityId: player.id, message: `${def.name} is not for drinking.` });
+      return;
+    }
+    if (player.level < (def.reqLevel ?? 1)) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `${def.name} needs level ${def.reqLevel}.`,
+      });
+      return;
+    }
+    const cooldowns = (player.consumableCooldowns ??= {});
+    const left = cooldowns[spec.family] ?? 0;
+    if (left > 0) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `No more ${spec.family}s for ${Math.ceil(left / 1000)}s.`,
+      });
+      return;
+    }
+    if (!this.removeItem(player, itemId, 1)) {
+      this.events.push({ t: 'error', entityId: player.id, message: `No ${def.name} left.` });
+      return;
+    }
+
+    cooldowns[spec.family] =
+      spec.family === 'potion' ? POTION_COOLDOWN_MS : ELIXIR_COOLDOWN_MS;
+
+    const stats = this.statsOf(player);
+    let healed = 0;
+    if (spec.healPercent) {
+      const before = player.health;
+      player.health = Math.min(stats.maxHealth, player.health + stats.maxHealth * spec.healPercent);
+      healed = Math.round(player.health - before);
+      if (healed > 0) {
+        this.events.push({
+          t: 'heal',
+          sourceId: player.id,
+          targetId: player.id,
+          amount: healed,
+        });
+      }
+    }
+
+    // Anything that lasts goes through the same effect list skills use, so a
+    // buff from a bottle and a buff from a spell cannot drift apart.
+    if (spec.regen) {
+      player.effects.push({
+        id: `${itemId}:regen`,
+        kind: 'buff',
+        sourceId: player.id,
+        sourceAbilityId: itemId,
+        remainingMs: spec.regen.seconds * 1000,
+        tickMs: 1000,
+        sinceTickMs: 0,
+        damageType: 'nature',
+        regenPerTick: spec.regen.perSec,
+      });
+    }
+    if (spec.damageMultiplier || spec.defenseBonus) {
+      player.effects.push({
+        id: `${itemId}:buff`,
+        kind: 'buff',
+        sourceId: player.id,
+        sourceAbilityId: itemId,
+        remainingMs: ELIXIR_DURATION_MS,
+        tickMs: ELIXIR_DURATION_MS,
+        sinceTickMs: 0,
+        damageType: 'physical',
+        ...(spec.damageMultiplier ? { damageMultiplier: spec.damageMultiplier } : {}),
+        ...(spec.defenseBonus ? { defenseBonus: spec.defenseBonus } : {}),
+      });
+    }
+
+    this.events.push({ t: 'consumed', entityId: player.id, itemId, healed });
+  }
+
   private tryEquip(player: Entity, itemId: string): void {
     const def = getItem(itemId);
-    if (!def.slot) {
+    // A potion has a slot of 'none' rather than null, so the inventory can tell
+    // "you drink this" apart from "you sell this".
+    if (!def.slot || def.slot === 'none') {
       this.events.push({ t: 'error', entityId: player.id, message: `${def.name} cannot be equipped.` });
       return;
     }
@@ -2706,9 +2845,10 @@ export class World {
     }
     if (!this.removeItem(player, itemId, 1)) return;
 
+    const slot = def.slot as EquipSlot;
     player.equipment = player.equipment ?? {};
-    const previous = player.equipment[def.slot];
-    player.equipment[def.slot] = itemId;
+    const previous = player.equipment[slot];
+    player.equipment[slot] = itemId;
     if (previous) this.addItem(player, { itemId: previous, qty: 1 });
 
     // Clamp to the new maxima so swapping gear can never leave you over-full.

@@ -38,6 +38,23 @@ import type { LootTable, MobAbilityDef, MobDef, StarRating } from '../sim/types.
  * a higher level than the band it sits in.
  */
 
+/**
+ * How long an ordinary creature takes to come back: five minutes.
+ *
+ * Ten times what it was, and the reason it works is the map. A long timer on a
+ * small map is a player standing in an empty clearing watching the ground —
+ * which is queueing, not grinding. On a map with somewhere else to go it is the
+ * rule that makes you go there: `balance.test.ts` measures what fraction of the
+ * game is spent waiting on a timer and fails if this becomes that.
+ */
+export const RESPAWN_MS = 300000;
+
+/** Bosses. Long enough that finding one up is luck as well as travel. */
+export const BOSS_RESPAWN_MS = 15 * 60000;
+
+/** Elite bosses, which are the reason to come back to a zone at all. */
+export const ELITE_RESPAWN_MS = 25 * 60000;
+
 // --------------------------------------------------------------------------
 // Loot.
 //
@@ -510,7 +527,7 @@ function generated(spec: GeneratedMobSpec): MobDef {
     leashRadius: boss ? 48 : 32,
     xp: baseMobXp(spec.level, spec.stars),
     lootTableId: spec.lootTableId,
-    respawnMs: spec.respawnMs ?? (boss ? 300000 : 30000),
+    respawnMs: spec.respawnMs ?? (boss ? BOSS_RESPAWN_MS : RESPAWN_MS),
     ...(spec.abilities ? { abilities: spec.abilities } : {}),
     view: spec.view,
   };
@@ -602,7 +619,7 @@ export const MOBS: Record<string, MobDef> = {
     aggroRadius: 5,
     leashRadius: 18,
     lootTableId: 'hare',
-    respawnMs: 18000,
+    respawnMs: RESPAWN_MS,
     view: { color: 0xa08a6a, height: 0.7, radius: 0.36 },
   }),
   mossback_boar: mob({
@@ -621,7 +638,7 @@ export const MOBS: Record<string, MobDef> = {
     aggroRadius: 7,
     leashRadius: 22,
     lootTableId: 'boar',
-    respawnMs: 20000,
+    respawnMs: RESPAWN_MS,
     view: { color: 0x8a6b4f, height: 1.1, radius: 0.55 },
   }),
   fen_adder: mob({
@@ -640,7 +657,7 @@ export const MOBS: Record<string, MobDef> = {
     aggroRadius: 8,
     leashRadius: 22,
     lootTableId: 'adder',
-    respawnMs: 22000,
+    respawnMs: RESPAWN_MS,
     view: { color: 0x5c7a3f, height: 0.55, radius: 0.42 },
   }),
   bog_wolf: mob({
@@ -659,7 +676,7 @@ export const MOBS: Record<string, MobDef> = {
     aggroRadius: 10,
     leashRadius: 28,
     lootTableId: 'wolf',
-    respawnMs: 24000,
+    respawnMs: RESPAWN_MS,
     view: { color: 0x5a5f68, height: 1.2, radius: 0.5 },
   }),
   moor_stag: mob({
@@ -678,7 +695,7 @@ export const MOBS: Record<string, MobDef> = {
     aggroRadius: 9,
     leashRadius: 30,
     lootTableId: 'stag',
-    respawnMs: 28000,
+    respawnMs: RESPAWN_MS,
     view: { color: 0x7a5b3a, height: 1.9, radius: 0.55 },
   }),
   outlaw_bowman: mob({
@@ -698,7 +715,7 @@ export const MOBS: Record<string, MobDef> = {
     aggroRadius: 12,
     leashRadius: 30,
     lootTableId: 'outlaw_common',
-    respawnMs: 26000,
+    respawnMs: RESPAWN_MS,
     view: { color: 0x6b6152, height: 1.75, radius: 0.44 },
   }),
   outlaw_reaver: mob({
@@ -717,7 +734,7 @@ export const MOBS: Record<string, MobDef> = {
     aggroRadius: 12,
     leashRadius: 32,
     lootTableId: 'outlaw_reaver',
-    respawnMs: 30000,
+    respawnMs: RESPAWN_MS,
     view: { color: 0x7d5b45, height: 1.85, radius: 0.48 },
   }),
   marsh_bear: mob({
@@ -736,7 +753,7 @@ export const MOBS: Record<string, MobDef> = {
     aggroRadius: 12,
     leashRadius: 34,
     lootTableId: 'bear',
-    respawnMs: 38000,
+    respawnMs: RESPAWN_MS,
     view: { color: 0x4a3728, height: 2.2, radius: 0.8 },
   }),
   cadfael: mob({
@@ -755,7 +772,7 @@ export const MOBS: Record<string, MobDef> = {
     aggroRadius: 14,
     leashRadius: 45,
     lootTableId: 'cadfael',
-    respawnMs: 240000,
+    respawnMs: BOSS_RESPAWN_MS,
     abilities: CADFAEL_ABILITIES,
     view: { color: 0x8c4a3a, height: 2.1, radius: 0.6 },
   }),
@@ -775,7 +792,7 @@ export const MOBS: Record<string, MobDef> = {
     aggroRadius: 12,
     leashRadius: 32,
     lootTableId: 'lynx',
-    respawnMs: 32000,
+    respawnMs: RESPAWN_MS,
     view: { color: 0x9a8258, height: 1.15, radius: 0.5 },
   }),
   outlaw_marauder: mob({
@@ -794,7 +811,7 @@ export const MOBS: Record<string, MobDef> = {
     aggroRadius: 13,
     leashRadius: 34,
     lootTableId: 'marauder',
-    respawnMs: 40000,
+    respawnMs: RESPAWN_MS,
     view: { color: 0x6e4436, height: 1.95, radius: 0.52 },
   }),
   old_scar: mob({
@@ -813,7 +830,7 @@ export const MOBS: Record<string, MobDef> = {
     aggroRadius: 16,
     leashRadius: 50,
     lootTableId: 'old_scar',
-    respawnMs: 420000,
+    respawnMs: ELITE_RESPAWN_MS,
     abilities: OLD_SCAR_ABILITIES,
     view: { color: 0x33251a, height: 3.2, radius: 1.15 },
   }),
@@ -1091,11 +1108,17 @@ export function getMob(id: string): MobDef {
 // --------------------------------------------------------------------------
 
 /** How much tougher a rare is than the camp mob it replaces, effective. */
-const RARE_TOUGHNESS = 1.75;
+const RARE_TOUGHNESS = 1.55;
 
 /** And how much harder it hits. Kept well under the health bump: a rare should
  * take a while, not delete a player who found one at the right level. */
-const RARE_MENACE = 1.2;
+// Re-cut once the ordinary creature it hides among became able to kill you.
+// A named rare was 1.2x the damage of a camp mob back when a camp mob cost you
+// a tenth of your health; 1.2x of the new number is 1.2x of a fight you can
+// already lose, and the suite duly reported a warrior beating Mirefang zero
+// times out of twenty. Being *tougher* is what a rare is for — being deadlier
+// on top of that is what made it unfightable.
+const RARE_MENACE = 1.05;
 
 function rareMob(spec: RareSpec): MobDef {
   const host = MOBS[spec.hostMobId];
@@ -1127,7 +1150,7 @@ function rareMob(spec: RareSpec): MobDef {
     lootTableId: rareLootTableId(spec),
     // Long enough that killing one clears the camp of it for a while, short
     // enough that a farmer is not punished for finding it early.
-    respawnMs: 120000,
+    respawnMs: RESPAWN_MS,
     aggroRadius: host.aggroRadius + 2,
     rareOf: spec.hostMobId,
     sighting: spec.sighting,
@@ -1202,7 +1225,7 @@ function bountyMob(spec: BountySpec): MobDef {
     xp: spec.kind === 'xp' ? host.xp * BOUNTY_MULTIPLIER : host.xp,
     lootTableId: bountyLootTableId(spec),
     // Long enough that one is an event rather than a rotation.
-    respawnMs: 120000,
+    respawnMs: RESPAWN_MS,
     rareOf: spec.hostMobId,
     bounty: spec.kind,
     sighting: spec.sighting,
@@ -1282,19 +1305,26 @@ for (const mob of Object.values(MOBS)) {
 }
 
 // --------------------------------------------------------------------------
-// Wild horses.
+// Wild mounts: horses, dire wolves, and the one unicorn.
 //
 // Deliberately soft and worth almost nothing dead: no gear, barely any gold,
 // a fraction of the experience their level implies. Everything about the stat
 // block is trying to say "this is not what you are here for". What you are
 // here for is `capture`.
+//
+// All three families run on the same generator. A dire wolf is not a different
+// mechanic from a horse, it is a rarer one with better numbers — and one
+// generator is what stops the rarest family quietly ending up the softest to
+// fight because nobody re-checked its stat block.
 // --------------------------------------------------------------------------
 
-function wildHorse(def: MountDef): MobDef {
+function wildMount(def: MountDef): MobDef {
   const damage = curveMobDamageRange(def.level);
   return {
     id: def.mobId,
-    name: `Wild ${def.name}`,
+    // "Wild The Pale of Caer Dubh" is not a name. Anything already named with
+    // an article is already wild enough.
+    name: def.name.startsWith('The ') ? def.name : `Wild ${def.name}`,
     level: def.level,
     stars: 2,
     attributes: {
@@ -1304,20 +1334,21 @@ function wildHorse(def: MountDef): MobDef {
       vitality: Math.round(def.level * 0.9),
     },
     baseHealth: Math.round(curveMobHealth(def.level) * 0.85),
-    // It kicks. It is not trying to kill you.
+    // It kicks, or it snaps. It is not trying to kill you.
     damageMin: Math.round(damage.min * 0.5),
     damageMax: Math.round(damage.max * 0.5),
     damageType: 'physical',
     swingMs: 2000,
     attackRange: 2.4,
     moveSpeed: def.speed,
-    // Horses do not pick fights. Walk into the herd and they mind their own
-    // business until you start something.
+    // Nothing in a herd picks fights — a wolf included. A herd is a place you
+    // go, not a thing that happens to you: being ambushed by the mount you were
+    // hoping to find is the opposite of noticing something.
     aggroRadius: 0,
     leashRadius: 40,
     xp: Math.round(baseMobXp(def.level, 2) * 0.25),
     lootTableId: 'wild_horse',
-    respawnMs: 45000,
+    respawnMs: RESPAWN_MS,
     horse: def.id,
     view: def.view,
   };
@@ -1325,9 +1356,9 @@ function wildHorse(def: MountDef): MobDef {
 
 LOOT_TABLES.wild_horse = { id: 'wild_horse', goldMultiplier: 0.15, entries: [] };
 
-for (const def of MOUNTS) MOBS[def.mobId] = wildHorse(def);
+for (const def of MOUNTS) MOBS[def.mobId] = wildMount(def);
 
-/** Every wild horse, for content that needs to walk them. */
+/** Every wild mount, for content that needs to walk them. */
 export const HORSE_MOBS: MobDef[] = MOUNTS.map((m) => MOBS[m.mobId]!);
 
 // --------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import type { Attributes, ClassId, Vec2 } from '../sim/types.js';
+import { SHORE_CLEARANCE, getTheme, terrainHeight } from './terrain.js';
 
 /**
  * Zone definition: static spawn points laid out by hand. When this grows past a
@@ -97,22 +98,88 @@ export interface ZoneDef {
  * simulation, and must not depend on the sim's Rng.
  */
 /**
- * A herd of wild horses.
+ * How big a zone is.
  *
- * Well off the road on purpose. Horses have no aggro radius, so a herd is a
- * place you go rather than a thing you walk into — and finding one should feel
- * like noticing something, not like being ambushed by it.
+ * Sized against walking speed, not against how much content there is: 3120
+ * units across is ten minutes on foot and just under three on the best mount,
+ * and `balance.test.ts` fails if either of those drifts. That ratio is the
+ * whole argument for mounts existing — a map you can cross in a minute makes a
+ * horse a cosmetic.
+ *
+ * The consequence is that a zone is a hundred times the area it used to be, so
+ * nothing here is placed by hand any more: the road and its bands are generated
+ * and the wilds either side are filled from the same table. Hand-placing four
+ * hundred camps is four hundred chances to put one in a lake.
  */
-function herd(mobId: string, cx: number, cz: number, count: number): SpawnPoint[] {
-  return camp(mobId, cx, cz, 11, count);
+export const ZONE_HALF = 1560;
+
+/** Where the road starts and ends, north to south. */
+// Leaves room north of the road for the arrival point, the traders and the
+// road out, and room south of it for the elite boss to stand alone — all of it
+// inside the wall, which the sim clamps to and a test checks.
+const ROAD_START = ZONE_HALF * 0.78;
+const ROAD_END = -ZONE_HALF * 0.88;
+
+/** How far off the road the near camps sit. */
+const ROAD_OFFSET = 165;
+
+/** Where the wilds begin, and how far apart camps are out there. */
+const WILD_FROM = 560;
+const WILD_STEP = 330;
+
+/** Camp size, now that there is room for one. */
+const CAMP_RADIUS = 17;
+/**
+ * Mobs per camp.
+ *
+ * Bigger than it was, because the walk between camps is now amortised over the
+ * camp: the pacing test measures what fraction of the game is spent walking,
+ * and six-mob camps on a map this size put it over half.
+ */
+const CAMP_COUNT = 8;
+
+/**
+ * Nudge a point onto dry, buildable ground.
+ *
+ * Zones have lakes in them now, and a camp at the bottom of one is a camp you
+ * cannot fight in. Spirals outward from the authored spot until it finds land,
+ * which keeps the layout table readable — it says where a camp belongs, and
+ * this says where it actually fits.
+ */
+function dryPlace(
+  x: number,
+  z: number,
+  themeId: string | undefined,
+  rings = 14,
+  step = 34,
+): Vec2 {
+  const spec = getTheme(themeId).terrain;
+  const water = spec.waterLevel;
+  const limit = ZONE_HALF * 0.96;
+  const clamp = (v: number): number => Math.max(-limit, Math.min(limit, v));
+  if (water === undefined) return { x: clamp(x), z: clamp(z) };
+
+  for (let ring = 0; ring < rings; ring++) {
+    const r = ring * step;
+    const steps = ring === 0 ? 1 : 8;
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2 + ring;
+      const px = clamp(x + Math.cos(a) * r);
+      const pz = clamp(z + Math.sin(a) * r);
+      if (terrainHeight(px, pz, spec) > water + SHORE_CLEARANCE) return { x: px, z: pz };
+    }
+  }
+  return { x: clamp(x), z: clamp(z) };
 }
 
-/** Mark a camp's spawn points as the guard posts of a holding. */
-function post(holding: string, spawns: SpawnPoint[]): SpawnPoint[] {
-  return spawns.map((sp) => ({ ...sp, holding }));
-}
-
-function camp(mobId: string, cx: number, cz: number, radius: number, count: number): SpawnPoint[] {
+function camp(
+  mobId: string,
+  cx: number,
+  cz: number,
+  radius: number,
+  count: number,
+  theme?: string,
+): SpawnPoint[] {
   const out: SpawnPoint[] = [];
   const offset = (Math.abs(cx * 7 + cz * 13) % 100) / 100;
   for (let i = 0; i < count; i++) {
@@ -120,223 +187,248 @@ function camp(mobId: string, cx: number, cz: number, radius: number, count: numb
     // Alternate between the ring and a tighter inner ring so camps don't read
     // as perfect circles.
     const r = radius * (i % 2 === 0 ? 1 : 0.55);
-    out.push({ mobId, pos: { x: cx + Math.cos(a) * r, z: cz + Math.sin(a) * r } });
+    // Every point, not just the centre: a dry camp centre with two of its ring
+    // standing in a tarn is still two creatures standing in a tarn.
+    const at = dryPlace(cx + Math.cos(a) * r, cz + Math.sin(a) * r, theme, 5, 12);
+    out.push({ mobId, pos: at });
   }
   return out;
 }
 
 /**
- * The Fenmarch — the levels 1–25 starting region.
+ * A herd of wild mounts.
  *
- * Laid out as bands running north to south: you spawn at the standing stones on
- * the northern moor and the danger rises the further down you push. Cadfael's
- * outlaw camp sits at the two-thirds mark, and Old Scar holds the southern
- * marsh alone.
+ * Well off the road on purpose. They have no aggro radius, so a herd is a place
+ * you go rather than a thing you walk into — and finding one should feel like
+ * noticing something, not like being ambushed by it.
+ */
+function herd(mobId: string, cx: number, cz: number, count: number, theme?: string): SpawnPoint[] {
+  const at = dryPlace(cx, cz, theme);
+  return camp(mobId, at.x, at.z, count > 2 ? 26 : 10, count, theme);
+}
+
+/** Mark a camp's spawn points as the guard posts of a holding. */
+function post(holding: string, spawns: SpawnPoint[]): SpawnPoint[] {
+  return spawns.map((sp) => ({ ...sp, holding }));
+}
+
+/**
+ * One band of the zone: a creature, and how far down the road you meet it.
+ *
+ * `wilds` is how many camps of it stand out in the open country either side.
+ * That number is what makes a big map worth crossing rather than a long
+ * corridor with grass on both sides — and it is what makes a five-minute
+ * respawn survivable, because there is always another camp.
+ */
+interface BandSpec {
+  mobId: string;
+  /** Position along the road: 0 is the arrival point, 1 is the far end. */
+  at: number;
+  /** Makes this band the guard posts of a holding rather than a plain camp. */
+  holding?: string;
+  /** Camps out in the wilds, split either side of the road. */
+  wilds?: number;
+}
+
+/**
+ * Lay a zone out from its bands.
+ *
+ * Difficulty runs north to south along the road, exactly as it did when this
+ * was four hand-written literals; what is new is everything either side of it.
+ */
+function layout(theme: string, bands: BandSpec[]): SpawnPoint[] {
+  const out: SpawnPoint[] = [];
+  for (const [index, band] of bands.entries()) {
+    const z = ROAD_START + (ROAD_END - ROAD_START) * band.at;
+    const points: SpawnPoint[] = [];
+
+    // The road itself: three camps you cannot miss walking past.
+    // Three camps close enough together to rotate through while the first one
+    // comes back, which is what makes a five-minute respawn a reason to move
+    // rather than a reason to stand still.
+    for (const [dx, dz] of [
+      [-ROAD_OFFSET, 0],
+      [ROAD_OFFSET, -35],
+      [0, -125],
+    ] as Array<[number, number]>) {
+      const at = dryPlace(dx, z + dz, theme);
+      points.push(...camp(band.mobId, at.x, at.z, CAMP_RADIUS, CAMP_COUNT, theme));
+    }
+
+    // And the wilds. Deterministic from the band index rather than random: a
+    // zone whose camps move between loads is a zone nobody can learn.
+    for (let w = 0; w < (band.wilds ?? 0); w++) {
+      const side = w % 2 === 0 ? -1 : 1;
+      const out_ = WILD_FROM + Math.floor(w / 2) * WILD_STEP;
+      const wobble = ((index * 37 + w * 61) % 100) / 100;
+      const at = dryPlace(side * out_, z - 220 + wobble * 300, theme);
+      points.push(...camp(band.mobId, at.x, at.z, CAMP_RADIUS, CAMP_COUNT, theme));
+    }
+
+    out.push(...(band.holding ? post(band.holding, points) : points));
+  }
+  return out;
+}
+
+/** A boss and the guards that belong to it, on levelled ground off the road. */
+function arena(bossId: string, guardId: string, at: number, theme: string, guards = 4): SpawnPoint[] {
+  const z = ROAD_START + (ROAD_END - ROAD_START) * at;
+  const spot = dryPlace(0, z, theme);
+  return [
+    ...camp(guardId, spot.x, spot.z, 34, guards, theme).map((sp) => ({ ...sp, guardOf: bossId })),
+    { mobId: bossId, pos: { x: spot.x, z: spot.z - 4 } },
+  ];
+}
+
+/**
+ * The Fenmarch — the levels 1-25 starting region.
+ *
+ * Bands running north to south: you arrive at the standing stones on the
+ * northern moor and the danger rises the further down you push. Cadfael's
+ * outlaw camp sits at the two-thirds mark and Old Scar holds the southern marsh
+ * alone. The wilds either side hold the same creatures as the road beside them,
+ * so wandering is a choice about scenery and rares rather than a difficulty
+ * cliff.
  */
 export const FENMARCH: ZoneDef = {
   id: 'fenmarch',
   name: 'The Fenmarch',
-  halfSize: 145,
-  playerStart: { x: 0, z: 88 },
+  halfSize: ZONE_HALF,
+  playerStart: { x: 0, z: ROAD_START + 190 },
   spawns: [
-    // --- lv1 hares: the northern moor, right on top of the spawn point ------
-    ...camp('moor_hare', -14, 76, 8, 5),
-    ...camp('moor_hare', 14, 74, 8, 5),
-    ...camp('moor_hare', 0, 64, 10, 6),
-
-    // --- lv3 boars ---------------------------------------------------------
-    ...camp('mossback_boar', -22, 56, 9, 6),
-    ...camp('mossback_boar', 20, 54, 9, 6),
-    ...camp('mossback_boar', -2, 46, 10, 6),
-
-    // --- lv5 adders: the first wet ground ----------------------------------
-    ...camp('fen_adder', -26, 38, 9, 6),
-    ...camp('fen_adder', 24, 36, 9, 6),
-    ...camp('fen_adder', 0, 28, 10, 6),
-
-    // --- lv8 wolves --------------------------------------------------------
-    ...camp('bog_wolf', -28, 20, 9, 6),
-    ...camp('bog_wolf', 26, 18, 9, 6),
-    ...camp('bog_wolf', -4, 10, 10, 6),
-
-    // --- lv11 stags --------------------------------------------------------
-    ...camp('moor_stag', -30, 0, 10, 6),
-    ...camp('moor_stag', 28, -2, 10, 6),
-    ...camp('moor_stag', 0, -10, 10, 5),
-
-    // --- lv13 outlaw bowmen: the road watch --------------------------------
-    // These are guard POSTS, not a camp: what stands here follows whoever
-    // holds the Road Watch. Take it off the outlaws and the bowmen go.
-    ...post('road_watch', camp('outlaw_bowman', -26, -18, 9, 6)),
-    ...post('road_watch', camp('outlaw_bowman', 24, -20, 9, 6)),
-
-    // --- lv16 outlaw reavers -----------------------------------------------
-    ...camp('outlaw_reaver', -28, -32, 9, 6),
-    ...camp('outlaw_reaver', 26, -34, 9, 6),
-    ...camp('outlaw_reaver', 0, -34, 8, 5),
-
-    // --- lv19 marsh bears --------------------------------------------------
-    ...camp('marsh_bear', -26, -46, 9, 5),
-    ...camp('marsh_bear', 26, -48, 9, 5),
-
-    // --- lv20 boss: Cadfael's camp, deliberately guarded ---------------------
-    ...camp('outlaw_reaver', 0, -62, 13, 4).map((s) => ({ ...s, guardOf: 'cadfael' })),
-    { mobId: 'cadfael', pos: { x: 0, z: -64 } },
-
-    // --- lv21 lynxes -------------------------------------------------------
-    ...camp('fen_lynx', -30, -74, 9, 6),
-    ...camp('fen_lynx', 28, -76, 9, 6),
-
-    // --- lv23 marauders: the southern marsh's guard posts -------------------
-    ...post('southern_marsh', camp('outlaw_marauder', -26, -86, 9, 5)),
-    ...post('southern_marsh', camp('outlaw_marauder', 26, -88, 9, 5)),
-
-    // --- the horse herd, east and well off the road -------------------------
-    ...herd('wild_cob', 62, 44, 5),
-
-    // --- lv25 elite boss: the southern marsh, genuinely alone ---------------
+    ...layout('plains', [
+      { mobId: 'moor_hare', at: 0.0, wilds: 2 },
+      { mobId: 'mossback_boar', at: 0.09, wilds: 3 },
+      { mobId: 'fen_adder', at: 0.18, wilds: 3 },
+      { mobId: 'bog_wolf', at: 0.27, wilds: 4 },
+      { mobId: 'moor_stag', at: 0.36, wilds: 4 },
+      { mobId: 'outlaw_bowman', at: 0.45, wilds: 3, holding: 'road_watch' },
+      { mobId: 'outlaw_reaver', at: 0.54, wilds: 4 },
+      { mobId: 'marsh_bear', at: 0.63, wilds: 3 },
+    ]),
+    ...arena('cadfael', 'outlaw_reaver', 0.71, 'plains'),
+    ...layout('plains', [
+      { mobId: 'fen_lynx', at: 0.8, wilds: 4 },
+      { mobId: 'outlaw_marauder', at: 0.89, wilds: 3, holding: 'southern_marsh' },
+    ]),
+    ...herd('wild_cob', 680, 470, 5, 'plains'),
+    ...herd('wild_fen_direwolf', -900, 120, 4, 'plains'),
     // No guards and a wide empty approach: Old Scar is meant to be fought with
     // nothing else on the screen.
-    { mobId: 'old_scar', pos: { x: 0, z: -118 } },
+    { mobId: 'old_scar', pos: { x: 0, z: ROAD_END - 60 } },
   ],
   vendors: [
-    // At the standing stones, where you start and where you come back to.
-    { vendorId: 'maeve', pos: { x: 0, z: 96 } },
+    // At the standing stones, where you arrive and where you come back to.
+    { vendorId: 'maeve', pos: { x: 0, z: ROAD_START + 250 } },
     // And the one whose wagon a level-1 character walks straight past on the
     // way to kill hares. The carrot has to be visible from the beginning.
-    { vendorId: 'ceallach', pos: { x: -14, z: 98 } },
+    { vendorId: 'ceallach', pos: { x: -46, z: ROAD_START + 262 } },
     // Off the road east of the outlaw watch, for the second half of the zone.
-    { vendorId: 'bryn', pos: { x: 52, z: -30 } },
+    { vendorId: 'bryn', pos: { x: 430, z: -330 } },
   ],
   exits: [
-    { toZoneId: 'ardmoor', pos: { x: 78, z: -60 }, label: 'The Hill Road to Ardmoor', minLevel: 20 },
+    { toZoneId: 'ardmoor', pos: { x: 760, z: -700 }, label: 'The Hill Road to Ardmoor', minLevel: 20 },
   ],
   levelRange: [1, 25],
   theme: 'plains',
 };
 
 // --------------------------------------------------------------------------
-// Zones 2-4.
-//
-// Same shape as the Fenmarch — difficulty rising north to south in bands, a
-// trader near the arrival point, a boss at the two-thirds mark and another at
-// the far end. Built from a helper because four hand-written zone literals is
-// four chances for a camp to end up somewhere it should not be.
+// Zones 2-4. Same shape as the Fenmarch, from the same generator.
 // --------------------------------------------------------------------------
-
-interface BandSpec {
-  mobId: string;
-  z: number;
-  /** Camp centres are mirrored either side of the road plus one on it. */
-  wide?: boolean;
-  /** Makes this band the guard posts of a holding rather than a plain camp. */
-  holding?: string;
-}
-
-function bands(specs: BandSpec[]): SpawnPoint[] {
-  const out: SpawnPoint[] = [];
-  for (const { mobId, z, wide, holding } of specs) {
-    const band: SpawnPoint[] = [];
-    band.push(...camp(mobId, -27, z, 9, 6));
-    band.push(...camp(mobId, 27, z - 2, 9, 6));
-    if (wide) band.push(...camp(mobId, 0, z - 9, 9, 5));
-    out.push(...(holding ? post(holding, band) : band));
-  }
-  return out;
-}
 
 export const ARDMOOR: ZoneDef = {
   id: 'ardmoor',
   name: 'Ardmoor',
-  halfSize: 140,
-  playerStart: { x: 0, z: 104 },
+  halfSize: ZONE_HALF,
+  playerStart: { x: 0, z: ROAD_START + 190 },
   levelRange: [20, 40],
   theme: 'crags',
   spawns: [
-    ...bands([
-      { mobId: 'crag_goat', z: 88, wide: true },
-      { mobId: 'hill_wolf', z: 64, wide: true },
-      { mobId: 'cattle_raider', z: 40, wide: true, holding: 'cattle_road' },
-      { mobId: 'moor_eagle', z: 16 },
+    ...layout('crags', [
+      { mobId: 'crag_goat', at: 0.0, wilds: 3 },
+      { mobId: 'hill_wolf', at: 0.11, wilds: 4 },
+      { mobId: 'cattle_raider', at: 0.22, wilds: 3, holding: 'cattle_road' },
+      { mobId: 'moor_eagle', at: 0.33, wilds: 4 },
     ]),
-    // Aonghus holds the cattle-fold, with his axemen posted around it.
-    ...camp('clan_axeman', 0, -6, 13, 4).map((sp) => ({ ...sp, guardOf: 'aonghus' })),
-    { mobId: 'aonghus', pos: { x: 0, z: -8 } },
-    ...bands([
-      { mobId: 'clan_axeman', z: -34, holding: 'high_shelves' },
-      { mobId: 'highland_bear', z: -58 },
-      { mobId: 'clan_berserker', z: -82 },
+    ...arena('aonghus', 'clan_axeman', 0.44, 'crags'),
+    ...layout('crags', [
+      { mobId: 'clan_axeman', at: 0.56, wilds: 3, holding: 'high_shelves' },
+      { mobId: 'highland_bear', at: 0.68, wilds: 4 },
+      { mobId: 'clan_berserker', at: 0.8, wilds: 4 },
     ]),
-    ...herd('wild_courser', -66, 20, 5),
-    { mobId: 'muireann', pos: { x: 0, z: -116 } },
+    ...herd('wild_courser', -720, 220, 5, 'crags'),
+    ...herd('wild_crag_direwolf', 880, -260, 4, 'crags'),
+    { mobId: 'muireann', pos: { x: 0, z: ROAD_END - 60 } },
   ],
-  vendors: [{ vendorId: 'sorcha', pos: { x: 0, z: 112 } }],
+  vendors: [{ vendorId: 'sorcha', pos: { x: 0, z: ROAD_START + 250 } }],
   exits: [
-    { toZoneId: 'fenmarch', pos: { x: -58, z: 112 }, label: 'The Hill Road to the Fenmarch', minLevel: 1 },
-    { toZoneId: 'reach', pos: { x: 80, z: -60 }, label: 'The Drowned Causeway', minLevel: 38 },
+    { toZoneId: 'fenmarch', pos: { x: -640, z: ROAD_START + 260 }, label: 'The Hill Road to the Fenmarch', minLevel: 1 },
+    { toZoneId: 'reach', pos: { x: 800, z: -700 }, label: 'The Drowned Causeway', minLevel: 38 },
   ],
 };
 
 export const SUNKEN_REACH: ZoneDef = {
   id: 'reach',
   name: 'The Sunken Wood',
-  halfSize: 140,
-  playerStart: { x: 0, z: 104 },
+  halfSize: ZONE_HALF,
+  playerStart: { x: 0, z: ROAD_START + 190 },
   levelRange: [38, 70],
   theme: 'wyldwood',
   spawns: [
-    ...bands([
-      { mobId: 'reach_eel', z: 88, wide: true },
-      { mobId: 'wrecker_scavenger', z: 64, wide: true },
-      { mobId: 'marsh_heron', z: 40, wide: true },
-      { mobId: 'smuggler_enforcer', z: 16, holding: 'drowned_causeway' },
+    ...layout('wyldwood', [
+      { mobId: 'reach_eel', at: 0.0, wilds: 3 },
+      { mobId: 'wrecker_scavenger', at: 0.11, wilds: 4 },
+      { mobId: 'marsh_heron', at: 0.22, wilds: 4 },
+      { mobId: 'smuggler_enforcer', at: 0.33, wilds: 3, holding: 'drowned_causeway' },
     ]),
-    ...camp('smuggler_enforcer', 0, -6, 13, 4).map((sp) => ({ ...sp, guardOf: 'fiachra' })),
-    { mobId: 'fiachra', pos: { x: 0, z: -8 } },
-    ...bands([
-      { mobId: 'tidewatch_marauder', z: -34, holding: 'deepwood' },
-      { mobId: 'great_pike', z: -58 },
-      { mobId: 'grey_seal_bull', z: -82 },
+    ...arena('fiachra', 'smuggler_enforcer', 0.44, 'wyldwood'),
+    ...layout('wyldwood', [
+      { mobId: 'tidewatch_marauder', at: 0.56, wilds: 3, holding: 'deepwood' },
+      { mobId: 'great_pike', at: 0.68, wilds: 4 },
+      { mobId: 'grey_seal_bull', at: 0.8, wilds: 4 },
     ]),
-    ...herd('wild_destrier', 64, 30, 4),
-    { mobId: 'old_cauldron', pos: { x: 0, z: -116 } },
+    ...herd('wild_destrier', 700, 330, 4, 'wyldwood'),
+    ...herd('wild_drowned_direwolf', -840, -420, 3, 'wyldwood'),
+    { mobId: 'old_cauldron', pos: { x: 0, z: ROAD_END - 60 } },
   ],
-  vendors: [{ vendorId: 'odhran', pos: { x: 0, z: 112 } }],
+  vendors: [{ vendorId: 'odhran', pos: { x: 0, z: ROAD_START + 250 } }],
   exits: [
-    { toZoneId: 'ardmoor', pos: { x: -58, z: 112 }, label: 'The Causeway to Ardmoor', minLevel: 1 },
-    { toZoneId: 'caer_dubh', pos: { x: 80, z: -60 }, label: 'The Black Road to Caer Dubh', minLevel: 66 },
+    { toZoneId: 'ardmoor', pos: { x: -640, z: ROAD_START + 260 }, label: 'The Causeway to Ardmoor', minLevel: 1 },
+    { toZoneId: 'caer_dubh', pos: { x: 800, z: -700 }, label: 'The Black Road to Caer Dubh', minLevel: 66 },
   ],
 };
 
 export const CAER_DUBH: ZoneDef = {
   id: 'caer_dubh',
   name: 'Caer Dubh',
-  halfSize: 140,
-  playerStart: { x: 0, z: 104 },
+  halfSize: ZONE_HALF,
+  playerStart: { x: 0, z: ROAD_START + 190 },
   levelRange: [66, 100],
   theme: 'otherworld',
   spawns: [
-    ...bands([
-      { mobId: 'fort_mastiff', z: 88, wide: true },
-      { mobId: 'warband_levy', z: 64, wide: true },
-      { mobId: 'blackshield_spearman', z: 40, wide: true, holding: 'black_road' },
-      { mobId: 'siege_engineer', z: 16 },
+    ...layout('otherworld', [
+      { mobId: 'fort_mastiff', at: 0.0, wilds: 3 },
+      { mobId: 'warband_levy', at: 0.11, wilds: 4 },
+      { mobId: 'blackshield_spearman', at: 0.22, wilds: 3, holding: 'black_road' },
+      { mobId: 'siege_engineer', at: 0.33, wilds: 4 },
     ]),
-    ...camp('blackshield_spearman', 0, -6, 13, 4).map((sp) => ({ ...sp, guardOf: 'ruadhan' })),
-    { mobId: 'ruadhan', pos: { x: 0, z: -8 } },
-    ...bands([
-      { mobId: 'warhound_alpha', z: -34 },
-      { mobId: 'blackshield_champion', z: -58, holding: 'gatehouse' },
-      { mobId: 'fort_warden', z: -82 },
+    ...arena('ruadhan', 'blackshield_spearman', 0.44, 'otherworld'),
+    ...layout('otherworld', [
+      { mobId: 'warhound_alpha', at: 0.56, wilds: 4 },
+      { mobId: 'blackshield_champion', at: 0.68, wilds: 3, holding: 'gatehouse' },
+      { mobId: 'fort_warden', at: 0.8, wilds: 4 },
     ]),
-    ...herd('wild_ashen_grey', -70, 28, 1),
-    { mobId: 'donnchadh', pos: { x: 0, z: -116 } },
+    ...herd('wild_ashen_grey', -780, 300, 1, 'otherworld'),
+    ...herd('wild_unicorn', 920, -520, 1, 'otherworld'),
+    { mobId: 'donnchadh', pos: { x: 0, z: ROAD_END - 60 } },
   ],
-  vendors: [{ vendorId: 'aoife', pos: { x: 0, z: 112 } }],
+  vendors: [{ vendorId: 'aoife', pos: { x: 0, z: ROAD_START + 250 } }],
   exits: [
-    { toZoneId: 'reach', pos: { x: -58, z: 112 }, label: 'The Black Road to the Sunken Wood', minLevel: 1 },
+    { toZoneId: 'reach', pos: { x: -640, z: ROAD_START + 260 }, label: 'The Black Road to the Sunken Wood', minLevel: 1 },
   ],
 };
+
 
 /** Every zone, keyed by id. Save files store a zone id, not a zone. */
 export const ZONES: Record<string, ZoneDef> = {

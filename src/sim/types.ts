@@ -89,10 +89,29 @@ export type EquipSlot = 'weapon' | ArmorSlot | 'offhand' | 'amulet' | 'bracelet'
 
 export type ItemQuality = 'common' | 'uncommon' | 'rare' | 'epic';
 
+/** What a potion or elixir does when it goes down. */
+export interface ConsumableEffect {
+  /** Fraction of maximum health restored instantly. */
+  healPercent?: number;
+  /** Health per second, and for how long. */
+  regen?: { perSec: number; seconds: number };
+  /** Multiplier on outgoing damage while it lasts. */
+  damageMultiplier?: number;
+  /** Flat defence added while it lasts. */
+  defenseBonus?: number;
+  /**
+   * Which cooldown clock it runs on.
+   *
+   * Two clocks, not one per item: a consumable you can chain is not a decision,
+   * it is a health bar with extra steps.
+   */
+  family: 'potion' | 'elixir';
+}
+
 export interface ItemDef {
   id: string;
   name: string;
-  slot: EquipSlot | null;
+  slot: EquipSlot | 'none' | null;
   /** Rough tier for colouring and vendor value. */
   quality: ItemQuality;
   value: number;
@@ -114,6 +133,16 @@ export interface ItemDef {
    * a reward you cannot use is not a reward.
    */
   teaches?: string;
+  /**
+   * What drinking this does. Present only on potions and elixirs.
+   *
+   * A consumable is the answer to a fight going wrong, which is a thing that
+   * only started happening when the creatures got dangerous. See
+   * `content/consumables.ts` for why the two families work differently.
+   */
+  consumable?: ConsumableEffect;
+  /** One line of colour, shown in the tooltip. */
+  flavor?: string;
   attributes?: Partial<Attributes>;
   damageMin?: number;
   damageMax?: number;
@@ -470,6 +499,8 @@ export interface ActiveEffect {
   dotPower?: number;
   /** buff: flat defence added while active. */
   defenseBonus?: number;
+  /** buff: health restored per tick, from a salve. */
+  regenPerTick?: number;
   /** buff: multiplier on outgoing weapon damage while active. */
   damageMultiplier?: number;
 }
@@ -519,6 +550,13 @@ export interface Entity {
   inventory?: ItemStack[];
   equipment?: Partial<Record<EquipSlot, string>>;
   skillCooldowns?: Record<string, number>;
+  /**
+   * Milliseconds left on each consumable family's cooldown.
+   *
+   * Per family rather than per item, so a bag full of different potions is
+   * still one potion every eighteen seconds.
+   */
+  consumableCooldowns?: Partial<Record<'potion' | 'elixir', number>>;
   /** Skills learned from a tome. Level-granted skills are not listed here. */
   learnedSkills?: string[];
   /** What each faction makes of you. See `content/factions.ts`. */
@@ -583,6 +621,8 @@ export type Command =
   | { t: 'useSkill'; skillId: string }
   | { t: 'loot'; id: EntityId }
   | { t: 'equip'; itemId: string }
+  /** Drink a potion or an elixir out of the bags. */
+  | { t: 'use'; itemId: string }
   | { t: 'learnSkill'; itemId: string }
   /** Try to take a weakened wild horse. */
   | { t: 'capture'; id: EntityId }
@@ -659,6 +699,8 @@ export type SimEvent =
   | { t: 'leash'; mobId: EntityId }
   | { t: 'xpGained'; entityId: EntityId; amount: number }
   | { t: 'levelUp'; entityId: EntityId; level: number }
+  /** A potion or elixir went down. */
+  | { t: 'consumed'; entityId: EntityId; itemId: string; healed: number }
   | { t: 'lootGained'; entityId: EntityId; items: ItemStack[]; gold: number }
   | { t: 'questAccepted'; entityId: EntityId; questId: string }
   | { t: 'questProgress'; entityId: EntityId; questId: string; objectiveIndex: number; count: number; needed: number }
