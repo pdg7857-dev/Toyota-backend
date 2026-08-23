@@ -37,6 +37,7 @@ import {
 import { isBoss } from './types.js';
 import type {
   ActiveEffect,
+  AwayReport,
   DragonState,
   FactionId,
   ActorCommand,
@@ -139,6 +140,26 @@ const COMBAT_TIMEOUT_MS = 6000;
 /** Save format version. Bump when the Entity shape changes. */
 const SAVE_VERSION = 8;
 
+/**
+ * How big a step `catchUp` takes through the time you were away.
+ *
+ * Shorter than the shortest dragon phase (`DRAGON_HUNT_MIN`, 90 seconds), so
+ * no dragon can skip a stop on its round — a coarser step would let one hunt
+ * and roost between two samples and take ground nobody ever saw it on.
+ */
+const AWAY_STEP_MS = 30000;
+
+/**
+ * The longest absence worth simulating.
+ *
+ * Drift converges: leave for long enough and every front reaches the far end
+ * of whatever it was heading for, and more steps buy nothing but time. Two
+ * weeks is comfortably past that, so a player returning after a year gets the
+ * same world as one returning after a fortnight — which is the honest answer,
+ * because the world they left is gone either way.
+ */
+const MAX_AWAY_MS = 14 * 24 * 60 * 60 * 1000;
+
 export interface WorldOptions {
   seed: number;
   zone: ZoneDef;
@@ -178,6 +199,8 @@ export class World {
   private lastCombatTick = new Map<EntityId, number>();
   /** World time of the last thing an adventurer said, for the chatter floor. */
   private lastChatMs = -Infinity;
+  /** True while `catchUp` is running the hours nobody was here for. */
+  private catchingUp = false;
 
   constructor(opts: WorldOptions) {
     this.zone = opts.zone;
@@ -320,11 +343,13 @@ export class World {
   /**
    * The war carries on without you.
    *
-   * Called once per tick. Each front drifts at its own rate, so a zone has
-   * places quietly falling and places quietly holding rather than one uniform
-   * tide — and a player who walks away and comes back finds the map moved.
+   * Called once per tick, and again in coarse steps by `catchUp` for the hours
+   * you were not here. `stepMs` is the only difference between the two: the
+   * world moving while you are away has to run the *same* rules as the world
+   * moving while you watch, or it is a second simulation that can disagree with
+   * the first.
    */
-  private tickTerritory(): void {
+  private tickTerritory(stepMs: number = TICK_MS): void {
     for (const holding of HOLDINGS) {
       if (holding.drift === 0) continue;
       // A front with a dragon on it is not a front. Nobody is contesting
@@ -332,8 +357,8 @@ export class World {
       // leaves or somebody kills it.
       if (this.isSuppressed(holding.id)) continue;
       const toward = holding.drift > 0 ? holding.claimants[1] : holding.claimants[0];
-      const perTick = (Math.abs(holding.drift) * TICK_MS) / 60000;
-      this.applyPressure(holding.id, toward, perTick, false);
+      const perStep = (Math.abs(holding.drift) * stepMs) / 60000;
+      this.applyPressure(holding.id, toward, perStep, false);
     }
   }
 
@@ -548,6 +573,11 @@ export class World {
    * notification feed. They need both.
    */
   private reactTo(template: readonly string[], subject: string): void {
+    // Nobody is standing here during a catch-up — and more to the point, a
+    // reaction draws from the Rng, so a front that fell while you were logged
+    // out would change the numbers of the next fight you picked. Time alone
+    // moves the world in your absence.
+    if (this.catchingUp) return;
     const npcs = [...this.entities.values()].filter((e) => e.kind === 'npc');
     if (npcs.length === 0) return;
     const who = npcs[this.rng.int(0, npcs.length - 1)]!;
@@ -712,12 +742,18 @@ export class World {
    * when someone finally manages it. The phases are minutes long because the
    * whole point is that a dragon is not something you queue for.
    */
-  private tickDragons(): void {
+  private tickDragons(stepMs: number = TICK_MS): void {
     for (const def of DRAGONS) {
       const state = this.dragons[def.id];
       if (!state) continue;
-      state.remainingMs -= TICK_MS;
+      state.remainingMs -= stepMs;
       if (state.remainingMs > 0) continue;
+      // Carry the overshoot into the next phase rather than discarding it.
+      // At tick granularity this is worth 50ms and nothing else; in `catchUp`,
+      // where a step is half a minute, throwing it away would round every
+      // phase up to the step and stretch a dragon's whole routine.
+      const carry = state.remainingMs;
+      const next = (ms: number) => ms + carry;
 
       switch (state.phase) {
         case 'dormant':
@@ -727,7 +763,7 @@ export class World {
           state.phase = 'hunting';
           state.stop = 0;
           state.holdingId = null;
-          state.remainingMs = minutes(DRAGON_HUNT_MIN);
+          state.remainingMs = next(minutes(DRAGON_HUNT_MIN));
           this.dragonEvent(def, state, def.waking);
           break;
         }
@@ -735,7 +771,7 @@ export class World {
           const holdingId = def.territory[state.stop % def.territory.length]!;
           state.phase = 'roosting';
           state.holdingId = holdingId;
-          state.remainingMs = minutes(DRAGON_ROOST_MIN);
+          state.remainingMs = next(minutes(DRAGON_ROOST_MIN));
           this.dragonEvent(def, state, def.arrival);
           this.syncDragonEntity(def);
           this.clearGarrison(holdingId);
@@ -748,11 +784,11 @@ export class World {
           this.despawnDragon(def);
           if (state.stop >= def.territory.length) {
             state.phase = 'dormant';
-            state.remainingMs = minutes(DRAGON_DORMANT_MIN);
+            state.remainingMs = next(minutes(DRAGON_DORMANT_MIN));
             this.dragonEvent(def, state, `${def.name} goes back to the dark.`);
           } else {
             state.phase = 'hunting';
-            state.remainingMs = minutes(DRAGON_HUNT_MIN);
+            state.remainingMs = next(minutes(DRAGON_HUNT_MIN));
             this.dragonEvent(def, state, `${def.name} is moving.`);
           }
           break;
@@ -1245,6 +1281,76 @@ export class World {
     const ticks = Math.round(ms / TICK_MS);
     for (let i = 0; i < ticks; i++) out.push(...this.tick());
     return out;
+  }
+
+  /**
+   * Run the hours you were not here.
+   *
+   * The whole faction layer exists so that walking away and coming back means
+   * walking into a different map. Until this, that was only true if you left
+   * the tab open — which made "the world moves without you" a claim the game
+   * only honoured while you were watching it.
+   *
+   * Three rules make this safe to run over a fortnight:
+   *
+   *  - **Only the world layers.** Territory drift and the dragons' routine,
+   *    which are the two things that are genuinely about elapsed time. No
+   *    combat, no respawns, no regeneration, nobody wandering: a mob that
+   *    fought a hundred battles in an empty room is not a simulation, it is a
+   *    random number generator with extra steps.
+   *  - **The same rules, at a coarser step.** `tickTerritory` and `tickDragons`
+   *    are the ones the live loop calls; only `stepMs` differs. A separate
+   *    "offline" path is a second implementation of the world that is free to
+   *    disagree with the first one.
+   *  - **A summary, not a transcript.** Fourteen days of drift is hundreds of
+   *    events, and a log that opens with forty lines of "Saorla is moving" has
+   *    buried the one line that mattered. What comes back is the net change:
+   *    which ground actually ended up in different hands.
+   *
+   * Time is a *parameter*, never a reading — `sim/` must never look at a clock.
+   * The host stamps the save and hands the elapsed span in, which is also
+   * exactly how a server would tell a reconnecting client what it missed.
+   */
+  catchUp(elapsedMs: number): AwayReport {
+    const away = Math.min(Math.max(0, elapsedMs), MAX_AWAY_MS);
+    const before = { ...this.controller };
+
+    // Swallow the event stream: this produces a report, not a play-by-play.
+    const live = this.events;
+    this.events = [];
+    this.catchingUp = true;
+    const steps = Math.floor(away / AWAY_STEP_MS);
+    for (let i = 0; i < steps; i++) {
+      this.tickTerritory(AWAY_STEP_MS);
+      this.tickDragons(AWAY_STEP_MS);
+    }
+    this.catchingUp = false;
+    this.events = live;
+
+    const fronts: AwayReport['fronts'] = [];
+    for (const holding of HOLDINGS) {
+      const from = before[holding.id];
+      const to = this.controller[holding.id];
+      // Net change only. A front that flipped twice and came back is a front
+      // that did not change, however busy the fortnight was.
+      if (!from || !to || from === to) continue;
+      fronts.push({ holdingId: holding.id, name: holding.name, from, to });
+    }
+
+    const dragons: AwayReport['dragons'] = [];
+    for (const def of DRAGONS) {
+      const state = this.dragons[def.id];
+      if (state?.phase !== 'roosting' || !state.holdingId) continue;
+      dragons.push({
+        dragonId: def.id,
+        name: def.name,
+        zoneId: def.zoneId,
+        holdingId: state.holdingId,
+        holdingName: getHolding(state.holdingId).name,
+      });
+    }
+
+    return { awayMs: away, cappedAt: away < Math.max(0, elapsedMs) ? MAX_AWAY_MS : null, fronts, dragons };
   }
 
   private tickCooldowns(): void {

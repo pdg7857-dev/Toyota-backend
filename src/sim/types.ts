@@ -351,6 +351,31 @@ export interface DragonState {
   holdingId: string | null;
 }
 
+/**
+ * What the world did while nobody was looking.
+ *
+ * `World.catchUp` runs the elapsed hours and hands this back instead of the
+ * event stream: net changes only, because a fortnight of drift is hundreds of
+ * events and a log opening with forty lines of "the wyrm is moving" has buried
+ * the one line that mattered.
+ */
+export interface AwayReport {
+  /** How much time was actually simulated, after the cap. */
+  awayMs: number;
+  /** The cap, if the absence hit it. Null when the whole span was run. */
+  cappedAt: number | null;
+  /** Ground that ended up in different hands than you left it in. */
+  fronts: Array<{ holdingId: string; name: string; from: FactionId; to: FactionId }>;
+  /** Any dragon that is out on a holding right now, as you walk back in. */
+  dragons: Array<{
+    dragonId: string;
+    name: string;
+    zoneId: string;
+    holdingId: string;
+    holdingName: string;
+  }>;
+}
+
 /** Live progress for one accepted quest: one counter per objective. */
 export interface QuestProgress {
   questId: string;

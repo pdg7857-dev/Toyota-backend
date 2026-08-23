@@ -68,6 +68,29 @@ async function closeToTarget(page, timeoutMs = 8000) {
   return d <= 0;
 }
 
+/**
+ * In-page: hold a creature on its last point of health until the swing that
+ * kills it lands.
+ *
+ * Setting health to 1 and sleeping a fixed 1.6s is a coin toss — a missed swing
+ * or a swing timer that has not come around leaves it alive, and the check
+ * reads as "the rare carried nothing" when the rare was simply still standing.
+ * That is the same fixed-duration trap `closeToTarget` was written to kill.
+ */
+const KILL_HELPER = `
+  async (victim, ms = 8000) => {
+    const g = window.__game;
+    g.world.submit(g.world.player.id, { t: 'target', id: victim.id });
+    g.world.submit(g.world.player.id, { t: 'autoAttack', on: true });
+    const until = Date.now() + ms;
+    while (!victim.dead && Date.now() < until) {
+      victim.health = 1;
+      await new Promise((r) => setTimeout(r, 120));
+    }
+    return victim.dead;
+  }
+`;
+
 async function main() {
   mkdirSync(OUT, { recursive: true });
 
@@ -76,7 +99,11 @@ async function main() {
     ...(executablePath ? { executablePath } : {}),
     args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'],
   });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 810 } });
+  // An explicit context, so the "coming back later" check below can open a
+  // second page on the same origin — and therefore the same localStorage —
+  // without reloading this one and firing its save-on-unload.
+  const context = await browser.newContext({ viewport: { width: 1440, height: 810 } });
+  const page = await context.newPage();
 
   const errors = [];
   page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
@@ -398,13 +425,12 @@ async function main() {
   );
 
   // Now kill it and check what it was carrying.
-  const rareLoot = await page.evaluate(async () => {
+  const rareLoot = await page.evaluate(async (helper) => {
+    const killIt = eval(helper);
     const g = window.__game;
     const host = g.__rare;
     const rare = g.mobOf(host.defId);
-    host.health = 1;
-    g.world.submit(g.world.player.id, { t: 'autoAttack', on: true });
-    await new Promise((r) => setTimeout(r, 1600));
+    await killIt(host);
     const loot = (host.corpseLoot ?? []).map((st) => g.itemOf(st.itemId));
     return {
       ok: host.dead && loot.some((i) => i.quality === 'epic'),
@@ -413,7 +439,7 @@ async function main() {
       // Named for what it carries: the creature's first word opens the item.
       namedForItem: loot.some((i) => i.name.startsWith(rare.name.split(' ')[0])),
     };
-  });
+  }, KILL_HELPER);
   await wait(400);
   await page.screenshot({ path: join(OUT, '10b-rare-killed.png') });
 
@@ -513,7 +539,8 @@ async function main() {
   // The population is the one feature whose entire purpose is being seen, so
   // it is the one a unit test can least vouch for: names over heads, a class
   // colour, a line in the log and a bubble over whoever said it.
-  const people = await page.evaluate(async () => {
+  const people = await page.evaluate(async (helper) => {
+    const killIt = eval(helper);
     const g = window.__game;
     if (g.world.zone.id !== 'fenmarch') g.world.travelTo('fenmarch');
     await new Promise((r) => setTimeout(r, 400));
@@ -521,30 +548,37 @@ async function main() {
     const crowd = [...g.world.entities.values()].filter((e) => e.kind === 'npc');
     if (crowd.length === 0) return { ok: false, why: 'nobody about' };
 
-    // Stand in the middle of them so every plate is on screen at once.
-    const anchorNpc = crowd[0];
-    player.pos.x = anchorNpc.pos.x + 4;
-    player.pos.z = anchorNpc.pos.z + 4;
-    for (const [i, person] of crowd.entries()) {
-      person.pos.x = player.pos.x + (i - 1) * 3;
-      person.pos.z = player.pos.z - 6;
-    }
-
-    // Level beside them: the congratulation is proximity-gated, so this also
-    // proves the gate is wired to real positions and not to nothing.
+    // Go to the creature rather than dragging it here: a mob moved off its
+    // spawn point walks straight back to it and heals on the way, which is the
+    // leash doing exactly what it should and a check quietly measuring nothing.
     const boar = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
     if (!boar) return { ok: false, why: 'nothing to kill' };
-    boar.pos.x = player.pos.x + 1.5;
-    boar.pos.z = player.pos.z;
-    boar.health = 1;
+    player.pos.x = boar.pos.x + 1.5;
+    player.pos.z = boar.pos.z;
+
+    // Stand the crowd around the player so every plate is on screen at once,
+    // and so somebody is close enough to see the level land.
+    for (const [i, person] of crowd.entries()) {
+      person.pos.x = player.pos.x + (i - 1.5) * 3;
+      person.pos.z = player.pos.z - 6;
+      // Parked: their own goal would walk them out of earshot mid-check.
+      person.npcGoal = { x: person.pos.x, z: person.pos.z };
+      person.npcUntilMs = 60000;
+    }
+
+    // A grey kill pays no experience at all, so at level 40 the level never
+    // lands and "nobody congratulated you" is measuring the wrong thing.
+    // Drop into the band this camp belongs to and the kill is worth something.
+    player.level = 4;
     player.xp = g.xpToNext(player.level) - 1;
     const levelBefore = player.level;
-    g.world.submit(player.id, { t: 'target', id: boar.id });
-    g.world.submit(player.id, { t: 'autoAttack', on: true });
-    await new Promise((r) => setTimeout(r, 2500));
+    const died = await killIt(boar);
+    // The grats fires on the tick the level lands; give the HUD a frame to put
+    // it in the log and over their head.
+    await new Promise((r) => setTimeout(r, 500));
 
     return {
-      ok: true,
+      ok: died,
       count: crowd.length,
       names: crowd.map((p) => `${p.name} ${p.level} ${p.classId}`),
       levelled: g.world.player.level > levelBefore,
@@ -554,7 +588,7 @@ async function main() {
         return view && view.group.visible;
       }).length,
     };
-  });
+  }, KILL_HELPER);
   await wait(600);
   await page.screenshot({ path: join(OUT, '15b-adventurers.png') });
   const crowdUi = await page.evaluate(() => ({
@@ -731,21 +765,20 @@ async function main() {
   await page.screenshot({ path: join(OUT, '13b-dragon-realm.png') });
   await page.keyboard.press('k');
 
-  const wyrmDead = await page.evaluate(async () => {
+  const wyrmDead = await page.evaluate(async (helper) => {
+    const killIt = eval(helper);
     const g = window.__game;
     const def = g.dragons().find((d) => d.zoneId === 'fenmarch');
     const entity = [...g.world.entities.values()].find((e) => e.dragonId === def.id);
     if (!entity) return { ok: false, why: 'never turned up' };
     const holdingId = g.world.dragonState(def.id).holdingId;
-    entity.health = 1;
-    g.world.submit(g.world.player.id, { t: 'autoAttack', on: true });
-    await new Promise((r) => setTimeout(r, 1800));
+    await killIt(entity);
     const loot = (entity.corpseLoot ?? []).map((st) => g.itemOf(st.itemId));
     return {
       ok: entity.dead && g.world.dragonState(def.id).phase === 'slain' && !g.world.isSuppressed(holdingId),
       carried: loot.map((i) => i.name),
     };
-  });
+  }, KILL_HELPER);
 
   // Pull gameplay state straight out of the running page for assertions.
   const state = await page.evaluate(() => {
@@ -764,6 +797,56 @@ async function main() {
       log,
     };
   });
+
+  // --- while you were away -------------------------------------------------
+  // The load path is the one thing unit tests cannot reach: the sim's catch-up
+  // is pure and covered, but "does the game actually run it on boot, and does
+  // the player see what changed" only happens in a browser.
+  //
+  // Force a save, backdate it five days, then open a SECOND page on the same
+  // origin — reloading this one would fire its beforeunload and rewrite the
+  // timestamp we just doctored.
+  const backdated = await page.evaluate((days) => {
+    window.dispatchEvent(new Event('beforeunload'));
+    const key = 'emerald-isle:save:v1';
+    const raw = localStorage.getItem(key);
+    if (!raw) return { ok: false, why: 'nothing saved' };
+    const envelope = JSON.parse(raw);
+    if (typeof envelope.savedAt !== 'number') return { ok: false, why: 'save is not stamped' };
+    envelope.savedAt = Date.now() - days * 24 * 3600 * 1000;
+    localStorage.setItem(key, JSON.stringify(envelope));
+    return { ok: true };
+  }, 5);
+
+  const returning = await context.newPage();
+  const returningErrors = [];
+  returning.on('pageerror', (e) => returningErrors.push(`pageerror: ${e.message}`));
+  await returning.goto(URL.replace('?fresh', ''), { waitUntil: 'networkidle' });
+  await wait(2200);
+  await returning.screenshot({ path: join(OUT, '16-while-you-were-away.png') });
+
+  const away = await returning.evaluate(() => {
+    const card = document.querySelector('#away-report');
+    const shown = card && getComputedStyle(card).display !== 'none';
+    return {
+      shown: !!shown,
+      title: document.querySelector('#away-title')?.textContent ?? '',
+      rows: document.querySelectorAll('#away-report .away-row').length,
+      logged: [...document.querySelectorAll('#log .log-line')].some((n) =>
+        /while you were away/i.test(n.textContent ?? ''),
+      ),
+      // It must be the same character, not a new one: catch-up runs the world,
+      // it does not restart it.
+      level: window.__game.world.player.level,
+      zone: window.__game.world.zone.id,
+    };
+  });
+  // Escape backs out of it, like every other layer of UI.
+  await returning.keyboard.press('Escape');
+  await wait(300);
+  const awayDismissed = await returning.evaluate(
+    () => getComputedStyle(document.querySelector('#away-report')).display === 'none',
+  );
 
   await browser.close();
 
@@ -815,7 +898,12 @@ async function main() {
     ['armour line paid out its piece', armour.ok],
     ['armour line piece fits a slot', !!armour.slot],
     ['bounty spawn paid a windfall', bounty.ok],
-    ['no page errors', errors.length === 0],
+    ['the world moved while logged out', backdated.ok && away.shown && away.rows > 0],
+    ['it says how long you were gone', /day/i.test(away.title)],
+    ['and left it in the log too', away.logged],
+    ['the returning character is the one who left', away.level > 1],
+    ['escape backs out of it', awayDismissed],
+    ['no page errors', errors.length === 0 && returningErrors.length === 0],
   ];
 
   console.log('\n--- smoke results ---');
@@ -827,10 +915,12 @@ async function main() {
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('armour:', JSON.stringify(armour), '| bounty:', JSON.stringify(bounty));
   console.log('rare:', JSON.stringify({ ...rareCheck, ...rareLoot }), '| rare plates:', rarePlate);
+  console.log('away:', JSON.stringify(backdated), JSON.stringify(away), 'dismissed:', awayDismissed);
   console.log('people:', JSON.stringify(people), '|', JSON.stringify(crowdUi), '|', JSON.stringify(crowdTarget));
   console.log('taught:', JSON.stringify(taught), '| bar:', JSON.stringify(bar));
   console.log('zones:', looks.map((l) => `${l.zone}/${l.theme} sky#${l.sky.toString(16)}`).join('  '));
-  if (errors.length) console.log('\nerrors:\n' + errors.join('\n'));
+  if (errors.length || returningErrors.length)
+    console.log('\nerrors:\n' + [...errors, ...returningErrors].join('\n'));
   console.log(`\nscreenshots in ${OUT}`);
 
   if (checks.some(([, ok]) => !ok)) process.exit(1);

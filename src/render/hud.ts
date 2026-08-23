@@ -17,7 +17,7 @@ import {
   standingBand,
   type StandingBand,
 } from '../content/factions.js';
-import type { Attributes, Command, Entity, EntityId, SimEvent } from '../sim/types.js';
+import type { Attributes, AwayReport, Command, Entity, EntityId, SimEvent } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 
 const MAX_LOG_LINES = 9;
@@ -106,6 +106,9 @@ export class Hud {
     questLogBody: HTMLElement;
     realmWindow: HTMLElement;
     realmBody: HTMLElement;
+    awayReport: HTMLElement;
+    awayTitle: HTMLElement;
+    awayBody: HTMLElement;
     vendorQuests: HTMLElement;
     vendorWindow: HTMLElement;
     vendorName: HTMLElement;
@@ -150,6 +153,9 @@ export class Hud {
       this.emit({ t: 'respawn' });
     });
     this.root.querySelector('#vendor-close')!.addEventListener('click', () => this.closeVendor());
+    this.root
+      .querySelector('#away-close')!
+      .addEventListener('click', () => this.hideAwayReport());
   }
 
   private q<T extends HTMLElement>(sel: string): T {
@@ -191,6 +197,9 @@ export class Hud {
       questLogBody: this.q('#quest-log-body'),
       realmWindow: this.q('#realm-window'),
       realmBody: this.q('#realm-body'),
+      awayReport: this.q('#away-report'),
+      awayTitle: this.q('#away-title'),
+      awayBody: this.q('#away-body'),
       vendorQuests: this.q('#vendor-quests'),
       vendorWindow: this.q('#vendor-window'),
       vendorName: this.q('#vendor-name'),
@@ -834,6 +843,70 @@ export class Hud {
     }
   }
 
+  // -------------------------------------------------------- while you were away
+
+  /**
+   * What the world did in your absence.
+   *
+   * Shown once, on load, and only when something actually changed. A card that
+   * opens on "nothing happened while you were away" is worse than no card: it
+   * teaches the player to dismiss the thing that will one day tell them the
+   * road they levelled on belongs to somebody else now.
+   */
+  showAwayReport(report: AwayReport): void {
+    if (report.fronts.length === 0 && report.dragons.length === 0) return;
+
+    this.els.awayTitle.textContent = `While you were away — ${describeSpan(report.awayMs)}`;
+    const body = this.els.awayBody;
+    body.innerHTML = '';
+
+    for (const front of report.fronts) {
+      const row = document.createElement('div');
+      row.className = 'away-row';
+      const to = getFaction(front.to);
+      row.innerHTML =
+        `<div class="away-what">${front.name}</div>` +
+        `<div class="away-who">${getFaction(front.from).name} → ` +
+        `<span style="color:${hex(to.color)}">${to.name}</span></div>`;
+      body.appendChild(row);
+    }
+
+    for (const dragon of report.dragons) {
+      const row = document.createElement('div');
+      row.className = 'away-row dragon';
+      row.innerHTML =
+        `<div class="away-what">${dragon.name}</div>` +
+        `<div class="away-who">is on ${dragon.holdingName}, in ${ZONES[dragon.zoneId]?.name ?? dragon.zoneId}</div>`;
+      body.appendChild(row);
+    }
+
+    if (report.cappedAt !== null) {
+      const note = document.createElement('div');
+      note.className = 'away-note';
+      note.textContent = 'You have been gone a long time. The map settled without you.';
+      body.appendChild(note);
+    }
+
+    this.els.awayReport.style.display = 'block';
+    // Also goes in the log, because the card is dismissible and the log is the
+    // record — a player who closes this should still be able to read what it said.
+    this.log(`While you were away — ${describeSpan(report.awayMs)}:`, 'log-realm');
+    for (const front of report.fronts) {
+      this.log(`${front.name} has fallen to ${getFaction(front.to).name}.`, 'log-realm');
+    }
+    for (const dragon of report.dragons) {
+      this.log(`${dragon.name} is out, over ${dragon.holdingName}.`, 'log-danger');
+    }
+  }
+
+  hideAwayReport(): void {
+    this.els.awayReport.style.display = 'none';
+  }
+
+  get awayReportOpen(): boolean {
+    return this.els.awayReport.style.display === 'block';
+  }
+
   // ------------------------------------------------------------------ panels
 
   /** Open the shop for a trader. Returns false if there is nobody to talk to. */
@@ -1363,6 +1436,17 @@ export class Hud {
   }
 }
 
+/**
+ * "three days", "four hours". Rounded hard on purpose: the number that matters
+ * is how much of the world moved, not that you were gone 3h 47m.
+ */
+function describeSpan(ms: number): string {
+  const hours = ms / 3600000;
+  if (hours < 1) return `${Math.max(1, Math.round(ms / 60000))} minutes`;
+  if (hours < 48) return `${Math.round(hours)} hours`;
+  return `${Math.round(hours / 24)} days`;
+}
+
 /** #rrggbb for a faction colour. */
 function hex(color: number): string {
   return `#${color.toString(16).padStart(6, '0')}`;
@@ -1432,6 +1516,11 @@ const TEMPLATE = `
   </div>
 
   <div id="zone-banner"></div>
+
+  <div id="away-report" class="panel clickable">
+    <h3><span id="away-title"></span><span id="away-close">✕</span></h3>
+    <div id="away-body"></div>
+  </div>
 
   <div id="travel-prompt"></div>
 

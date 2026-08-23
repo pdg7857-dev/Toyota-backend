@@ -95,6 +95,48 @@ Four rules hold it together, and each of them is load-bearing:
 A front is ~114 kills to flip against the drift — grind scale, deliberately, so
 territory is bought in the same currency as everything else.
 
+### The map moves while the game is closed
+
+`tickTerritory` made the war carry on without you, but only while the tab was
+open — which made "the world moves without you" a claim the game honoured
+exactly as long as you were watching it. `World.catchUp(elapsedMs)` closes that:
+the host stamps the save with a wall-clock time, works out the gap on load, and
+hands the sim a **duration**. Time is a parameter, never a reading — `sim/` must
+never look at a clock, and this is also precisely how a server tells a
+reconnecting client what it missed.
+
+Three rules make a fortnight safe to run:
+
+- **Only the world layers.** Territory drift and the dragons' routine, the two
+  things that are genuinely about elapsed time. No combat, no respawns, no
+  regeneration, nobody wandering. A mob that fought a hundred battles in an
+  empty room is a random number generator with extra steps.
+- **The same rules, at a coarser step.** `catchUp` calls the live loop's own
+  `tickTerritory` and `tickDragons`; only `stepMs` differs, and a test asserts
+  two hours ticked and two hours caught up land on the same map. A separate
+  "offline" path is a second implementation of the world, free to disagree with
+  the first one.
+- **It never touches the `Rng`.** Adventurer reactions are suppressed during a
+  catch-up — a test caught them drawing from the stream, which meant a front
+  falling while you were logged out changed the numbers of the next fight you
+  picked.
+
+`AWAY_STEP_MS` is 30s, shorter than the shortest dragon phase, so no dragon can
+hunt and roost between two samples and take ground nobody ever saw it on. The
+cap is a fortnight, which is past the point drift converges: a player returning
+after a year gets the same world as one returning after two weeks, because the
+world they left is gone either way.
+
+What comes back is an `AwayReport` — **net changes only**, not the event
+stream. Fourteen days is hundreds of flips, and a log that opens with forty
+lines of "the wyrm is moving" has buried the one line that mattered. A front
+that flipped twice and came back did not change.
+
+The card that shows it opens by itself and *only when something moved*: a panel
+that says "nothing happened while you were away" teaches the player to dismiss
+the thing that will one day tell them the road they levelled on belongs to
+somebody else now.
+
 ### Standing is the part you feel
 
 Factions remember. Standing moves with every kill and every quest, and the
@@ -644,7 +686,7 @@ file changes** — the events that drive animation (`swing`, `castBegin`,
 ## Verifying a change
 
 ```bash
-npm run verify        # typecheck + 213 unit and balance tests
+npm run verify        # typecheck + 222 unit and balance tests
 npm run build && npm run preview &
 npm run smoke         # real browser, plays the game, writes screenshots/
 ```

@@ -2606,3 +2606,169 @@ describe('the other adventurers', () => {
     expect(after).toEqual(before);
   });
 });
+
+describe('the world moves while you are gone', () => {
+  const HOUR = 3600000;
+  const DAY = 24 * HOUR;
+
+  function fresh(seed = 950) {
+    return new World({ seed, zone: getZone('fenmarch'), classId: 'warrior' });
+  }
+
+  /**
+   * The same zone with nothing living in it.
+   *
+   * Comparing catch-up against real ticking means running hours of the live
+   * loop, and the live loop is mostly creatures. Emptying the zone leaves
+   * exactly the two layers under test — the fronts and the dragons, which are
+   * world state and do not care what is standing in the grass.
+   */
+  function quiet(seed = 950) {
+    return new World({ seed, zone: { ...emptyZone(), id: 'fenmarch' }, classId: 'warrior' });
+  }
+
+  it('runs the same rules at a coarser step', () => {
+    // The whole safety of catch-up rests on this: `tickTerritory` and
+    // `tickDragons` are the live loop's own functions with a different step,
+    // not an offline path free to disagree with them. Two hours ticked in real
+    // time and two hours caught up must land on the same map.
+    const ticked = quiet();
+    ticked.advance(2 * HOUR);
+
+    const caught = quiet();
+    caught.catchUp(2 * HOUR);
+
+    for (const holding of HOLDINGS) {
+      expect(caught.controllerOf(holding.id), holding.name).toBe(ticked.controllerOf(holding.id));
+      // Drift accumulates in fractions, so the two paths land close rather
+      // than identical — a 30s step versus a 50ms one over two hours.
+      expect(Math.abs(caught.controlOf(holding.id) - ticked.controlOf(holding.id))).toBeLessThan(
+        0.02,
+      );
+    }
+  });
+
+  it('moves ground that nobody fought over', () => {
+    const world = fresh();
+    const before = Object.fromEntries(HOLDINGS.map((h) => [h.id, world.controllerOf(h.id)]));
+
+    const report = world.catchUp(3 * DAY);
+
+    expect(report.fronts.length, 'three days changed nothing').toBeGreaterThan(0);
+    for (const front of report.fronts) {
+      expect(front.from).toBe(before[front.holdingId]);
+      expect(world.controllerOf(front.holdingId)).toBe(front.to);
+      expect(front.to).not.toBe(front.from);
+    }
+    // Towns are never contested, however long you stay away — a player who
+    // comes back to find the shop gone has been punished for leaving.
+    const traderGround = HOLDINGS.filter((h) => h.drift === 0);
+    for (const holding of traderGround) {
+      expect(report.fronts.some((f) => f.holdingId === holding.id)).toBe(false);
+    }
+  });
+
+  it('reports the net change, not the transcript', () => {
+    // A fortnight is hundreds of flips. What comes back is what is different
+    // now, because a log opening with forty lines has buried the one that
+    // mattered.
+    const world = fresh();
+    const report = world.catchUp(14 * DAY);
+    const ids = report.fronts.map((f) => f.holdingId);
+    expect(new Set(ids).size, 'a holding was reported twice').toBe(ids.length);
+    for (const front of report.fronts) {
+      expect(world.controllerOf(front.holdingId)).toBe(front.to);
+    }
+  });
+
+  it('does not fight the war for you', () => {
+    // Only the world layers run. A mob that fought a hundred battles in an
+    // empty room is a random number generator with extra steps.
+    const world = fresh();
+    const player = world.player;
+    const mobs = [...world.entities.values()].filter((e) => e.kind === 'mob');
+    const health = new Map(mobs.map((m) => [m.id, m.health]));
+    const where = { ...player.pos };
+    player.health = 10;
+    player.xp = 3;
+
+    world.catchUp(5 * DAY);
+
+    expect(player.health, 'the player healed up while logged out').toBe(10);
+    expect(player.xp).toBe(3);
+    expect(player.pos).toEqual(where);
+    // A dragon landing on a holding clears its garrison, which is the world
+    // layer doing its job; everything still standing must be untouched.
+    for (const mob of mobs) {
+      if (!world.entity(mob.id)) continue;
+      expect(mob.health, mob.name).toBe(health.get(mob.id));
+    }
+  });
+
+  it('says nothing at all about a short absence', () => {
+    // Lunch is not an absence. A card that opens on "nothing happened" teaches
+    // the player to dismiss the one that will matter.
+    const report = fresh().catchUp(4 * 60000);
+    expect(report.fronts).toHaveLength(0);
+    expect(report.dragons).toHaveLength(0);
+  });
+
+  it('caps an absence rather than simulating a year', () => {
+    const world = fresh();
+    const report = world.catchUp(400 * DAY);
+    expect(report.cappedAt).not.toBeNull();
+    expect(report.awayMs).toBe(report.cappedAt);
+    // And the cap is past convergence, so a year and a fortnight agree.
+    const fortnight = fresh();
+    fortnight.catchUp(14 * DAY);
+    for (const holding of HOLDINGS) {
+      expect(world.controllerOf(holding.id), holding.name).toBe(fortnight.controllerOf(holding.id));
+    }
+    expect(fresh().catchUp(14 * DAY).cappedAt).toBeNull();
+  });
+
+  it('keeps every dragon on its round', () => {
+    // A step coarser than the shortest phase would let one hunt and roost
+    // between two samples, taking ground nobody ever saw it on.
+    const world = fresh();
+    world.catchUp(2 * DAY);
+    for (const def of DRAGONS) {
+      const state = world.dragonState(def.id);
+      expect(['dormant', 'hunting', 'roosting'], def.name).toContain(state.phase);
+      expect(state.remainingMs).toBeGreaterThan(0);
+      expect(state.stop).toBeLessThanOrEqual(def.territory.length);
+      if (state.phase === 'roosting') {
+        expect(def.territory).toContain(state.holdingId);
+        // A front under a dragon is stopped, whoever was holding it.
+        expect(world.isSuppressed(state.holdingId!)).toBe(true);
+      }
+    }
+    const printed = DRAGONS.map((d) => `${d.name.split(',')[0]} ${world.dragonState(d.id).phase}`);
+    console.log(`  after two days away: ${printed.join(', ')}`);
+  });
+
+  it('is deterministic, and does not touch the rng', () => {
+    // Catch-up runs on elapsed time alone. If it drew from the Rng, the same
+    // absence would produce a different world each load — and worse, the next
+    // fight you picked would roll differently for having been away.
+    const a = fresh();
+    const b = fresh();
+    const rngBefore = a.rng.state;
+    a.catchUp(6 * DAY);
+    b.catchUp(6 * DAY);
+    expect(a.rng.state).toBe(rngBefore);
+    expect(a.serialize()).toBe(b.serialize());
+  });
+
+  it('leaves a save that reloads into the world it caught up to', () => {
+    const world = fresh();
+    world.catchUp(4 * DAY);
+    const restored = World.deserialize(world.serialize(), getZone('fenmarch'));
+    for (const holding of HOLDINGS) {
+      expect(restored.controllerOf(holding.id)).toBe(world.controllerOf(holding.id));
+    }
+    for (const def of DRAGONS) {
+      expect(restored.dragonState(def.id)).toEqual(world.dragonState(def.id));
+    }
+  });
+});

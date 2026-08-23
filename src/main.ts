@@ -34,7 +34,8 @@ async function boot(): Promise<void> {
 
   // Resume a save if there is one; otherwise pick a class before building the
   // world, since class decides starting attributes, weapon and skill bar.
-  let loaded = fresh ? null : loadSavedWorld();
+  const restored = fresh ? null : loadSavedWorld();
+  let loaded = restored?.world ?? null;
   if (!loaded) {
     const forced = params.get('class');
     const classId =
@@ -59,6 +60,14 @@ async function boot(): Promise<void> {
 
   hud.log('You wake at the standing stones on the edge of the Fenmarch.', 'log-good');
   hud.log('Click a beast to attack. Press T to toggle auto-attack.', 'log-loot');
+
+  // Run the hours since the save was written. Reading the clock is the *host's*
+  // job — `sim/` never looks at one — so the elapsed span goes in as a plain
+  // number, which is exactly the shape a server would use to tell a
+  // reconnecting client what it missed.
+  if (restored) {
+    hud.showAwayReport(world.catchUp(Date.now() - restored.savedAt));
+  }
 
   let accumulator = 0;
   let lastFrame = performance.now();
@@ -166,10 +175,32 @@ async function boot(): Promise<void> {
   requestAnimationFrame(frame);
 }
 
-function loadSavedWorld(): World | null {
+/**
+ * A save, plus when it was written.
+ *
+ * The timestamp lives out here rather than in `World.serialize` because the sim
+ * is not allowed to know what time it is. The host stamps it, the host works
+ * out the gap, and the sim is handed a duration.
+ */
+interface SavedGame {
+  world: World;
+  savedAt: number;
+}
+
+function loadSavedWorld(): SavedGame | null {
   try {
-    const json = localStorage.getItem(SAVE_KEY);
-    if (json) return World.deserialize(json, FENMARCH);
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const envelope = JSON.parse(raw) as { savedAt?: number; world?: string };
+    const json = typeof envelope.world === 'string' ? envelope.world : raw;
+    return {
+      world: World.deserialize(json, FENMARCH),
+      // An unstamped save is one written before the world moved on its own.
+      // Treat it as having been written just now: inventing an absence and
+      // handing the player a changed map they were never away from is worse
+      // than skipping the catch-up once.
+      savedAt: envelope.savedAt ?? Date.now(),
+    };
   } catch (err) {
     // A corrupt or outdated save must never be a hard failure — start over.
     console.warn('Could not load save, starting fresh:', err);
@@ -183,7 +214,10 @@ function newWorld(classId: ClassId): World {
 
 function save(world: World): void {
   try {
-    localStorage.setItem(SAVE_KEY, world.serialize());
+    localStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({ savedAt: Date.now(), world: world.serialize() }),
+    );
   } catch (err) {
     console.warn('Save failed:', err);
   }

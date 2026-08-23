@@ -105,8 +105,10 @@ export class InputController {
         this.hud.toggleInventory();
         break;
       case 'Escape':
-        // Close the shop first — Esc should back out one layer at a time.
-        if (this.hud.vendorOpen) this.hud.closeVendor();
+        // Back out one layer at a time. The away report is the outermost thing
+        // on screen when it is up, so it goes first.
+        if (this.hud.awayReportOpen) this.hud.hideAwayReport();
+        else if (this.hud.vendorOpen) this.hud.closeVendor();
         else this.emit({ t: 'target', id: null });
         break;
     }

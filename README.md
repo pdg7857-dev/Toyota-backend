@@ -53,6 +53,11 @@ Factions remember what you did. The consequence that matters most: a faction
 that has come to terms with you **stops attacking you**, and one you have
 wronged notices you from half again as far off.
 
+And it keeps moving with the game closed. Come back after a week and the game
+opens on **what changed while you were away** — the ground that fell, and any
+dragon that is out right now. Walk away long enough and the map goes back to
+what it wants to be; pushing against that is what your kills are for.
+
 ## The old things
 
 Four dragons, one per zone, and they are not bosses. A dragon lives in world
@@ -252,13 +257,15 @@ with difficulty and are the reliable income. Equipment stays rare at every tier
 - Two quest chains per zone — a story chain that walks you through its bands
   and an armour line that outfits you — with kill, collect and travel
   objectives, chained by prerequisite, and class-matched rewards
+- A world that carries on with the game closed: territory drifts and dragons
+  keep their rounds against the clock, and returning opens on what changed
 - Levelling to 100, spendable attribute points, skill unlocks
 - Death and respawn, save/load via full world serialization
 
 ## Development
 
 ```bash
-npm run verify     # typecheck + 213 unit and balance tests
+npm run verify     # typecheck + 222 unit and balance tests
 npm run smoke      # plays the game in real Chromium, writes screenshots/
 ```
 

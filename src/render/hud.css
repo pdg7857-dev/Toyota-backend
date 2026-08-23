@@ -886,3 +886,45 @@ canvas { display: block; }
 }
 
 .log-dragon { color: #ff9a6a; font-weight: 600; }
+
+/* --- While you were away ------------------------------------------------ */
+/*
+ * The one panel that opens by itself, and only when the world actually moved.
+ * Centred and dark so it reads before anything else on screen: this is the
+ * game telling you the map is not the one you left.
+ */
+#away-report {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 380px;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: none;
+  background: rgba(12, 14, 18, 0.94);
+  border-color: rgba(190, 168, 110, 0.5);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.7);
+}
+
+#away-report h3 { display: flex; justify-content: space-between; gap: 10px; }
+#away-close { cursor: pointer; color: var(--muted); }
+#away-close:hover { color: #fff; }
+
+.away-row {
+  padding: 7px 0;
+  border-top: 1px solid rgba(190, 168, 110, 0.18);
+}
+.away-row:first-child { border-top: none; }
+.away-what { font-size: 13px; color: #e8e0cc; }
+.away-who { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.away-row.dragon .away-what { color: #ff9a5a; font-weight: 600; }
+
+.away-note {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(190, 168, 110, 0.18);
+  font-size: 11px;
+  font-style: italic;
+  color: var(--muted);
+}
