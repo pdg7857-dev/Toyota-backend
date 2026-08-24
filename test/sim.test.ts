@@ -15,6 +15,7 @@ import {
   deriveMobStats,
   expectedDefense,
   goldForKill,
+  roamRadiusFor,
   xpToNext,
 } from '../src/sim/formulas.js';
 import { FENMARCH, PLAYABLE_CLASSES, ZONES, getZone } from '../src/content/zone.js';
@@ -3230,5 +3231,93 @@ describe('star variants', () => {
     // on one seed and ★4 on the next is measuring the seed.
     const world = new World({ seed: 502, zone: duelZone('bog_wolf'), classId: 'warrior' });
     expect(getMob(theMob(world).defId!).id).toBe('bog_wolf');
+  });
+});
+
+describe('camps mill about', () => {
+  /** A field of creatures far enough from the player that nothing aggros. */
+  function grazingZone(mobId: string, count: number) {
+    const spawns = [];
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2;
+      spawns.push({ mobId, pos: { x: Math.cos(a) * 70, z: Math.sin(a) * 70 } });
+    }
+    return {
+      id: 'test-graze',
+      name: 'Test Graze',
+      halfSize: 200,
+      playerStart: { x: 0, z: 0 },
+      spawns,
+      vendors: [],
+      exits: [],
+      levelRange: [1, 100] as [number, number],
+      rareSpawns: false,
+      adventurers: false,
+      starVariants: false,
+    };
+  }
+
+  function tickFor(world: World, ms: number): void {
+    for (let t = 0; t < ms; t += TICK_MS) world.tick();
+  }
+
+  it('lets an idle creature wander, and never off its own ground', () => {
+    const world = new World({ seed: 71, zone: grazingZone('bog_wolf', 12), classId: 'warrior' });
+    const mobs = [...world.entities.values()].filter((e) => e.kind === 'mob');
+    expect(mobs.length).toBe(12);
+    const limit = roamRadiusFor(getMob(mobs[0]!.defId!).leashRadius);
+
+    tickFor(world, 90000);
+
+    let moved = 0;
+    for (const mob of mobs) {
+      const home = mob.spawnPos!;
+      const d = Math.hypot(mob.pos.x - home.x, mob.pos.z - home.z);
+      // Leash is measured from the spawn mark, so anything wandered is chase
+      // distance already spent. Past the cap a camp starts pulling itself home
+      // the instant it aggros.
+      expect(d, `${mob.name} strayed ${d.toFixed(1)}u from its mark`).toBeLessThanOrEqual(limit + 0.3);
+      if (d > 0.5) moved++;
+    }
+    expect(moved, 'a camp stood perfectly still for a minute and a half').toBeGreaterThan(6);
+  });
+
+  it('never draws from the stream the fight rolls on', () => {
+    // The whole reason a wander is hashed from (id, step) rather than taken
+    // from `World.rng`: a camp grazing in the background must not shift a
+    // single number in a seeded fight. If this ever fails, every balance
+    // figure in the suite quietly became a measurement of the scenery.
+    const world = new World({ seed: 404, zone: grazingZone('moor_hare', 8), classId: 'warrior' });
+    const before = world.rng.state;
+    tickFor(world, 60000);
+    const wandered = [...world.entities.values()].some(
+      (e) => e.kind === 'mob' && Math.hypot(e.pos.x - e.spawnPos!.x, e.pos.z - e.spawnPos!.z) > 0.5,
+    );
+    expect(wandered, 'nothing moved, so this test proved nothing').toBe(true);
+    expect(world.rng.state, 'roaming spent the combat random stream').toBe(before);
+  });
+
+  it('keeps a boss standing on its arena', () => {
+    // A telegraph is a flat circle drawn on ground that was levelled for it.
+    // A boss that ambled ten metres would draw one down a hillside.
+    const world = new World({ seed: 12, zone: grazingZone('old_scar', 1), classId: 'warrior' });
+    const boss = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+    const home = { ...boss.pos };
+    tickFor(world, 60000);
+    expect(Math.hypot(boss.pos.x - home.x, boss.pos.z - home.z)).toBe(0);
+  });
+
+  it('keeps a garrison standing on the ground it holds', () => {
+    // A guard post is the visible half of the territory layer. A watch that
+    // wanders is not watching anything.
+    const world = new World({ seed: 9, zone: getZone('fenmarch'), classId: 'warrior' });
+    const posts = [...world.entities.values()].filter((e) => e.kind === 'mob' && e.holding);
+    expect(posts.length).toBeGreaterThan(0);
+    const homes = posts.map((p) => ({ ...p.pos }));
+    tickFor(world, 40000);
+    posts.forEach((post, i) => {
+      if (post.dead || post.aiState !== 'idle') return;
+      expect(Math.hypot(post.pos.x - homes[i]!.x, post.pos.z - homes[i]!.z)).toBe(0);
+    });
   });
 });

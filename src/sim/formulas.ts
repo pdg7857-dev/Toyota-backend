@@ -416,6 +416,45 @@ export interface DeriveInput {
 export const BASE_MOVE_SPEED = 5.2;
 
 /**
+ * How far an idle creature wanders from where it spawned.
+ *
+ * A camp used to be eight animals standing on eight marks, which is legible
+ * and completely dead: you learn a camp's shape once and every visit after
+ * that is the same eight pulls from the same eight angles. Letting them amble
+ * costs nothing and changes the fight — the one you wanted is sometimes on the
+ * far side, and the pull you thought was clean sometimes is not.
+ *
+ * It has to stay small for three reasons, and each of them is load-bearing:
+ *
+ *  - A roaming mob still leashes to its **spawn point**, so anything it
+ *    wanders is chase distance it no longer has. Roam radius is capped against
+ *    `leashRadius` for that reason.
+ *  - Aggro is measured from where a creature *is*, so a camp that wanders is a
+ *    camp whose aggro footprint is this much wider. Boss arenas and shopfronts
+ *    are cleared against `aggroRadius + ROAM_RADIUS`, and a test enforces it —
+ *    otherwise "the camp is far enough away" quietly stops being true.
+ *  - Bosses do not roam at all. A telegraph is a flat circle drawn on levelled
+ *    ground; a boss that ambled ten metres off its arena would draw one down a
+ *    hillside.
+ */
+export const ROAM_RADIUS = 9;
+
+/** Never wander more than this share of the leash — see above. */
+export const ROAM_LEASH_SHARE = 0.4;
+
+/** An amble, not a patrol. A creature that roams at running speed reads as fleeing. */
+export const ROAM_SPEED = 0.34;
+
+/** How long a creature stands about between wanders. */
+export const ROAM_PAUSE_MIN_MS = 2500;
+export const ROAM_PAUSE_MAX_MS = 11000;
+
+/** How far this creature may wander, given what it is allowed to chase. */
+export function roamRadiusFor(leashRadius: number): number {
+  return Math.min(ROAM_RADIUS, leashRadius * ROAM_LEASH_SHARE);
+}
+
+/**
  * Turn attributes + gear into the numbers combat actually reads.
  *
  * Deliberately linear and readable. Tuning happens by changing coefficients

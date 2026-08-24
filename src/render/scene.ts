@@ -4,6 +4,8 @@ import { isBoss } from '../sim/types.js';
 import { HeightField, getTheme } from '../content/terrain.js';
 import type { Clearing, PropSpec, ZoneTheme } from '../content/terrain.js';
 import type { ZoneDef } from '../content/zone.js';
+import { holdingStructure, structuresFor, type StructureDef, type StructureKind } from '../content/structures.js';
+import type { Vec2 } from '../sim/types.js';
 
 /**
  * How much ground the moving terrain tile covers, and at what resolution.
@@ -77,6 +79,8 @@ export class SceneRig {
   private clearingList: Clearing[] = [];
   /** Cell key -> the scenery standing in it. Built and dropped as you walk. */
   private cells = new Map<string, THREE.Group>();
+  /** This zone's landmarks. Placed once on load, built and dropped per cell. */
+  private structures: StructureDef[] = [];
   /** Where the ground tile is currently centred, snapped to the vertex grid. */
   private tileAt = { x: Infinity, z: Infinity };
   private motesAt = { x: Infinity, z: Infinity };
@@ -157,6 +161,7 @@ export class SceneRig {
     this.sun.shadow.camera.updateProjectionMatrix();
 
     this.zone = zone;
+    this.structures = this.siteStructures(zone);
     this.clearingList = this.clearings(zone);
     this.height = new HeightField(theme.terrain, this.clearingList);
 
@@ -202,6 +207,7 @@ export class SceneRig {
     this.scene.add(this.zoneRoot);
     this.motes = null;
     this.water = null;
+    this.structures = [];
     this.cells.clear();
     this.tileAt = { x: Infinity, z: Infinity };
     this.motesAt = { x: Infinity, z: Infinity };
@@ -287,7 +293,7 @@ export class SceneRig {
     }
     pos.needsUpdate = true;
     geo.computeVertexNormals();
-    tintGround(geo, this.theme);
+    tintGround(geo, this.theme, cx, cz);
     this.ground.position.set(cx, 0, cz);
     if (this.water) {
       this.water.position.x = cx;
@@ -303,6 +309,11 @@ export class SceneRig {
    */
   private clearings(zone: ZoneDef): Clearing[] {
     const out: Clearing[] = [{ x: zone.playerStart.x, z: zone.playerStart.z, r: 11 }];
+    // Landmarks are levelled with the ground under them, the same as arenas
+    // and shopfronts. A watchtower on a slope has one corner buried and one in
+    // the air, which is the single most obvious way for a building to look
+    // like placeholder geometry.
+    for (const st of this.structures) out.push({ x: st.pos.x, z: st.pos.z, r: st.clearing });
     for (const spawn of zone.spawns) {
       const def = getMob(spawn.mobId);
       if (!isBoss(def.stars)) continue;
@@ -350,7 +361,7 @@ export class SceneRig {
     }
   }
 
-  /** Everything standing in one cell: scenery, and the zone wall if it edges one. */
+  /** Everything standing in one cell: scenery, landmarks, and the zone wall. */
   private buildCell(cx: number, cz: number): THREE.Group {
     const group = new THREE.Group();
     const x0 = cx * CELL_SIZE;
@@ -359,9 +370,61 @@ export class SceneRig {
     // Cells entirely outside the wall hold nothing but the wall itself.
     const inside = x0 + CELL_SIZE > -limit && x0 < limit && z0 + CELL_SIZE > -limit && z0 < limit;
 
-    if (inside) this.addCellScatter(group, x0, z0);
+    if (inside) {
+      this.addCellScatter(group, x0, z0);
+      this.addCellStructures(group, x0, z0);
+    }
     this.addCellBoundary(group, x0, z0);
     return group;
+  }
+
+  /**
+   * Where this zone's landmarks stand.
+   *
+   * Anchored ones first — a tower on every guard post, a ruin over every boss,
+   * a farmstead at every shopfront — then the rest fill the empty country. The
+   * anchors are what make a landmark information rather than decoration: you
+   * see a tower on the ridge and you know there is a front over there.
+   */
+  private siteStructures(zone: ZoneDef): StructureDef[] {
+    const anchors: Array<{ pos: Vec2; kind: StructureKind; scale?: number }> = [];
+    const keepClear: Vec2[] = [];
+    const seenHoldings = new Set<string>();
+
+    for (const spawn of zone.spawns) {
+      keepClear.push(spawn.pos);
+      const def = getMob(spawn.mobId);
+      if (isBoss(def.stars)) {
+        anchors.push({ pos: { x: spawn.pos.x, z: spawn.pos.z - 26 }, kind: 'ruin', scale: 1.3 });
+      } else if (spawn.holding && !seenHoldings.has(spawn.holding)) {
+        seenHoldings.add(spawn.holding);
+        anchors.push({
+          pos: { x: spawn.pos.x + 22, z: spawn.pos.z - 18 },
+          kind: holdingStructure(zone.id),
+          scale: 1.15,
+        });
+      }
+    }
+    for (const vendor of zone.vendors ?? []) {
+      anchors.push({ pos: { x: vendor.pos.x + 17, z: vendor.pos.z + 5 }, kind: 'farmstead' });
+      keepClear.push(vendor.pos);
+    }
+    keepClear.push(zone.playerStart);
+    for (const exit of zone.exits ?? []) keepClear.push(exit.pos);
+
+    return structuresFor(zone.id, zone.theme, anchors, zone.halfSize, keepClear, 26);
+  }
+
+  private addCellStructures(group: THREE.Group, x0: number, z0: number): void {
+    for (const st of this.structures) {
+      if (st.pos.x < x0 || st.pos.x >= x0 + CELL_SIZE) continue;
+      if (st.pos.z < z0 || st.pos.z >= z0 + CELL_SIZE) continue;
+      const built = buildStructure(st, this.theme);
+      built.position.set(st.pos.x, this.height.at(st.pos.x, st.pos.z), st.pos.z);
+      built.rotation.y = st.facing;
+      built.scale.setScalar(st.scale);
+      group.add(built);
+    }
   }
 
   private addCellScatter(group: THREE.Group, x0: number, z0: number): void {
@@ -525,6 +588,185 @@ function disposeTree(root: THREE.Object3D): void {
  * Build one scatter prop. Placeholder geometry, same as the entity capsules —
  * the point is silhouette and colour, which is what reads at camera distance.
  */
+/**
+ * Build one landmark.
+ *
+ * Placeholder geometry like everything else, but built to read at distance
+ * rather than close up: a landmark's whole job is being recognisable from four
+ * hundred metres through fog, so these are about silhouette and almost nothing
+ * else. Stone takes the theme's boundary colour, so a ruin in Caer Dubh is
+ * violet rock and a ruin in the Fenmarch is grey, without a second table.
+ */
+function buildStructure(def: StructureDef, theme: ZoneTheme): THREE.Object3D {
+  const group = new THREE.Group();
+  const stone = new THREE.MeshStandardMaterial({ color: theme.boundary, roughness: 0.95 });
+  const dark = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(theme.boundary).multiplyScalar(0.62),
+    roughness: 1,
+  });
+  const timber = new THREE.MeshStandardMaterial({ color: 0x4a3a28, roughness: 1 });
+  const thatch = new THREE.MeshStandardMaterial({ color: 0x8a7a4a, roughness: 1 });
+
+  const block = (
+    w: number,
+    h: number,
+    d: number,
+    x: number,
+    y: number,
+    z: number,
+    mat: THREE.Material = stone,
+  ): THREE.Mesh => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    group.add(m);
+    return m;
+  };
+
+  switch (def.kind) {
+    case 'watchtower': {
+      // Square, tapering, with a broken top: tall enough to see over a ridge,
+      // and unmistakable in silhouette against fog.
+      block(6.4, 3.2, 6.4, 0, 1.6, 0);
+      block(5.4, 4.6, 5.4, 0, 5.5, 0);
+      block(4.6, 3.8, 4.6, 0, 9.7, 0);
+      // A parapet with one corner fallen in, so it never reads as a chess rook.
+      for (const [dx, dz, h] of [
+        [-2, -2, 1.4],
+        [2, -2, 1.4],
+        [-2, 2, 0.5],
+        [2, 2, 1.2],
+      ] as Array<[number, number, number]>) {
+        block(1.1, h, 1.1, dx, 11.6 + h / 2, dz, dark);
+      }
+      break;
+    }
+    case 'ruin': {
+      // Three standing walls and a fallen one. The gap is the point: a ruin
+      // with four walls is a building.
+      block(11, 4.4, 0.9, 0, 2.2, -5);
+      block(0.9, 3.6, 10, -5.5, 1.8, 0);
+      block(0.9, 2.4, 6, 5.5, 1.2, -2);
+      block(7, 0.7, 0.8, 1.5, 0.35, 5, dark);
+      for (const [x, z] of [
+        [-3, 4],
+        [3.5, 3],
+        [-1, 6],
+      ] as Array<[number, number]>) {
+        const rubble = new THREE.Mesh(new THREE.DodecahedronGeometry(0.8, 0), dark);
+        rubble.position.set(x, 0.35, z);
+        rubble.rotation.set(0.4, x, 0.7);
+        rubble.castShadow = true;
+        group.add(rubble);
+      }
+      break;
+    }
+    case 'stoneCircle': {
+      // Nine stones, one fallen. Read from above it is a ring; read from the
+      // ground it is a horizon full of uprights, which is the better view.
+      const n = 9;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2;
+        const r = 9;
+        if (i === 5) {
+          const fallen = block(1.2, 0.8, 4.4, Math.cos(a) * r, 0.4, Math.sin(a) * r, dark);
+          fallen.rotation.y = a;
+          continue;
+        }
+        const h = 3.6 + ((i * 37) % 10) / 6;
+        const s = block(1.1, h, 0.7, Math.cos(a) * r, h / 2, Math.sin(a) * r);
+        s.rotation.y = a;
+        s.rotation.z = (((i * 13) % 7) - 3) * 0.02;
+      }
+      break;
+    }
+    case 'wreck': {
+      // A hull on its side, ribs showing. Only ever sited near water.
+      const hull = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 1.6, 13, 7, 1, true), timber);
+      hull.rotation.set(Math.PI / 2, 0, 0.5);
+      hull.position.y = 1.8;
+      hull.castShadow = true;
+      group.add(hull);
+      for (let i = 0; i < 5; i++) {
+        const rib = block(0.35, 3.4, 0.35, -4 + i * 2.1, 1.9, 0.6, timber);
+        rib.rotation.z = 0.5 + i * 0.06;
+      }
+      block(0.5, 7, 0.5, 1.5, 3, -0.5, timber).rotation.z = 0.9;
+      break;
+    }
+    case 'farmstead': {
+      // A longhouse and a wall. Somebody lives here, which is why it is the
+      // structure that stands next to a trader.
+      block(9, 3.2, 5.5, 0, 1.6, 0, timber);
+      const roof = new THREE.Mesh(new THREE.ConeGeometry(5.6, 3, 4), thatch);
+      roof.position.y = 4.7;
+      roof.rotation.y = Math.PI / 4;
+      roof.scale.set(1, 1, 0.62);
+      roof.castShadow = true;
+      group.add(roof);
+      for (let i = 0; i < 7; i++) block(1.5, 0.9, 0.6, -5 + i * 1.7, 0.45, 6, dark);
+      break;
+    }
+    case 'cairn': {
+      // The cheapest landmark there is, and the most useful: a pile of stones
+      // at a junction, which is exactly what they were for.
+      for (let i = 0; i < 7; i++) {
+        const r = 1.5 * (1 - i / 8);
+        const s = new THREE.Mesh(new THREE.DodecahedronGeometry(r, 0), i % 2 ? dark : stone);
+        s.position.set(Math.sin(i * 2.4) * 0.3, 0.3 + i * 0.55, Math.cos(i * 2.4) * 0.3);
+        s.rotation.set(i, i * 1.7, i * 0.6);
+        s.castShadow = true;
+        group.add(s);
+      }
+      break;
+    }
+    case 'camp': {
+      // Tents and a fire. This is what a holding looks like when the people
+      // holding it are outlaws rather than an army.
+      for (const [x, z] of [
+        [-3.5, -2],
+        [3, -3],
+        [0, 3.5],
+      ] as Array<[number, number]>) {
+        const tent = new THREE.Mesh(new THREE.ConeGeometry(2.1, 2.6, 4), timber);
+        tent.position.set(x, 1.3, z);
+        tent.rotation.y = x + z;
+        tent.castShadow = true;
+        group.add(tent);
+      }
+      const fire = new THREE.Mesh(
+        new THREE.IcosahedronGeometry(0.7, 0),
+        new THREE.MeshStandardMaterial({
+          color: 0xff8a3a,
+          emissive: new THREE.Color(0xff6a20),
+          emissiveIntensity: 1.4,
+          roughness: 0.4,
+        }),
+      );
+      fire.position.y = 0.5;
+      group.add(fire);
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        block(0.9, 0.5, 0.9, Math.cos(a) * 1.6, 0.25, Math.sin(a) * 1.6, dark);
+      }
+      break;
+    }
+    case 'bridge': {
+      // A crossing that goes nowhere any more, which is most of what a bridge
+      // in a drowned wood is.
+      block(4.4, 0.8, 15, 0, 2.4, 0, timber);
+      for (const z of [-5.5, 0, 5.5]) {
+        block(1, 4.8, 1, -1.9, 1.2, z, stone);
+        block(1, 4.8, 1, 1.9, 1.2, z, stone);
+      }
+      for (const z of [-6.5, -2, 3, 6.5]) block(0.35, 1.4, 0.35, -2.1, 3.5, z, timber);
+      break;
+    }
+  }
+  return group;
+}
+
 function buildProp(spec: PropSpec): THREE.Object3D {
   const solid = (color: number, glow = 0): THREE.MeshStandardMaterial =>
     new THREE.MeshStandardMaterial({
@@ -650,12 +892,24 @@ function buildProp(spec: PropSpec): THREE.Object3D {
  * Height feeds into it too — hilltops read dry, hollows read wet — which is the
  * cheapest way to make displaced ground look like it was shaped by water.
  */
-function tintGround(geo: THREE.BufferGeometry, theme: ZoneTheme): void {
+function tintGround(
+  geo: THREE.BufferGeometry,
+  theme: ZoneTheme,
+  /**
+   * Where the tile currently sits. Vertex positions are tile-LOCAL, and the
+   * tile slides under the player — so tinting from them painted the same
+   * pattern of dry ground and wet hollows around wherever you happened to be
+   * standing. On screen that is a dark halo that follows the character across
+   * the entire zone, which is exactly how every screenshot of this game looked
+   * until somebody went and stood in it.
+   */
+  originX: number,
+  originZ: number,
+): void {
   const pos = geo.attributes.position!;
   const colors = new Float32Array(pos.count * 3);
   const dry = new THREE.Color(theme.ground.dry);
   const damp = new THREE.Color(theme.ground.damp);
-  const jitter = mulberry(90210);
   const tmp = new THREE.Color();
   // Normalised against the FULL relief, not the rolling hills alone. With
   // mountains forty metres up and lake beds thirteen down, dividing by the hill
@@ -666,8 +920,8 @@ function tintGround(geo: THREE.BufferGeometry, theme: ZoneTheme): void {
   const amp = Math.max(0.5, t.amplitude + (t.mountains?.amplitude ?? 0) * (t.mountains?.mask ?? 0));
 
   for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
+    const x = pos.getX(i) + originX;
+    const z = pos.getZ(i) + originZ;
     const n =
       Math.sin(x * 0.06) * 0.5 +
       Math.cos(z * 0.045) * 0.5 +
@@ -676,12 +930,22 @@ function tintGround(geo: THREE.BufferGeometry, theme: ZoneTheme): void {
     const low = -pos.getY(i) / amp; // below zero = hollow = damp
     const mix = Math.max(0, Math.min(1, 0.5 + n * 0.32 + low * 0.55));
     tmp.copy(dry).lerp(damp, mix);
-    const v = 0.94 + jitter() * 0.12;
+    // Jitter is hashed from the world position for the same reason: a
+    // per-index sequence is a fixed speckle pattern nailed to the tile.
+    const v = 0.94 + hashUnit(x, z) * 0.12;
     colors[i * 3] = tmp.r * v;
     colors[i * 3 + 1] = tmp.g * v;
     colors[i * 3 + 2] = tmp.b * v;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
+
+/** A number in [0, 1) from a world position. Same point, same value, forever. */
+function hashUnit(x: number, z: number): number {
+  let h = Math.imul(Math.round(x * 8) ^ 0x9e3779b9, 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13) ^ Math.round(z * 8), 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
 }
 
 /** Stable string hash, so a zone's scatter is the same on every load. */

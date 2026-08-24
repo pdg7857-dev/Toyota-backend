@@ -56,10 +56,12 @@ input / HUD click ──> Command ──> World.submit()
 | `src/content/mounts.ts` | The herds, and what riding each one is worth. |
 | `src/content/luxury.ts` | The one shop that is not a safety net. |
 | `src/content/adventurers.ts` | Who else is out there, and what they say. |
+| `src/content/structures.ts` | The things somebody built, and where they stand. |
 | `src/render/` | three.js, DOM, input. Nothing gameplay-authoritative. |
 | `src/render/scene.ts` | Builds a zone from its theme. Knows *how*, not *which*. |
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
 | `tools/smoke.mjs` | Boots the real game in Chromium, plays it, screenshots it. |
+| `tools/look.mjs` | Stands the camera somewhere and takes a picture. See below. |
 
 Adding a mob, item or skill should mean editing `src/content/` only.
 
@@ -492,6 +494,62 @@ A telegraphed hit unseats you; ordinary swings never do. That is the same
 three-way rule `castBreak` uses, for the same reason: if chip damage threw you,
 nobody would ever ride into a fight and the mount would stop existing the moment
 combat started.
+
+## Landmarks, and camps that move
+
+Two things arrived together because they answer the same complaint: three
+kilometres of ground with nothing in it, populated by animals standing on
+marks.
+
+**Landmarks** (`content/structures.ts`) are renderer-only, like terrain. Three
+rules:
+
+- **A structure means something.** A watchtower stands on a holding, a ruin
+  marks a boss's ground, a farmstead is where a trader set up. Seeing one from
+  four hundred metres is information, not dressing — you know there is a front
+  over there.
+- **They are unique enough to navigate by.** Deterministic per zone and never
+  within 260 units of each other. A landmark you can confuse with another
+  landmark is an anti-landmark.
+- **They are levelled with the ground under them**, the same as boss arenas and
+  shopfronts, for the same reason: a tower on a slope has one corner buried and
+  one in the air.
+
+Which kinds a zone gets is a table entry (`ZONE_KINDS`), so the Fenmarch has
+farmsteads and cairns because people live there, and Caer Dubh has ruins
+because whatever lived there is gone. Stone takes the theme's boundary colour,
+so a ruin is grey on the moor and violet in the otherworld without a second
+table.
+
+**Roaming**: an idle creature ambles about within `ROAM_RADIUS` of where it
+spawned, at a third of its running speed. Bosses, dragons, summons and
+garrisons never do — a boss that wandered would draw its telegraph down a
+hillside, and a watch that wanders is not watching anything.
+
+The important part is where the randomness comes from. A wander destination is
+**hashed from (entity id, wander count)**, never drawn from `World.rng`. The
+obvious alternative was a `roaming: false` flag on every test arena, the way
+`rareSpawns` and `adventurers` work; this way there is no fourth switch to
+forget, and a camp grazing in the background provably cannot move a number in a
+seeded fight — a test asserts the Rng state is untouched across a minute of it.
+
+The cost is real and lands in one place: aggro is measured from where a
+creature *is*, so every clearance in the game — boss arenas, shopfronts, the
+arrival point — is now `aggroRadius + roam + margin`, and the tests say so.
+
+## Looking at it
+
+`npm run smoke` proves the game runs. `npm run look` is the other half: it
+stands the camera in front of each of a zone's landmarks and takes a picture,
+or at any coordinate you name.
+
+It exists because the bug it found on its first run was invisible to every
+other check — the ground's dry/damp tint was sampled in **tile-local**
+coordinates, and the ground tile follows the player. The pattern of dry rises
+and wet hollows was therefore nailed to the camera: a dark halo that walked
+across the entire zone with the character, in every screenshot this project has
+ever taken. No assertion could have caught that. Somebody had to go and stand
+in it.
 
 ## Other adventurers
 

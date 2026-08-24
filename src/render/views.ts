@@ -4,6 +4,7 @@ import { CLASSES } from '../content/zone.js';
 import { getMount } from '../content/mounts.js';
 import { getMob } from '../content/mobs.js';
 import { getVendor } from '../content/vendors.js';
+import { TICK_MS } from '../sim/formulas.js';
 import type { Entity, EntityId } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 
@@ -122,7 +123,9 @@ export class EntityView {
     this.nextFacing = entity.facing;
     const dx = this.next.x - this.prev.x;
     const dz = this.next.z - this.prev.z;
-    this.anim.setMoving(dx * dx + dz * dz > 0.0004);
+    // One tick's ground covered, expressed as a speed: the gait is chosen from
+    // how fast the thing is actually going, not from whether it moved at all.
+    this.anim.setMoving(Math.hypot(dx, dz) / (TICK_MS / 1000));
   }
 
   onDamaged(): void {

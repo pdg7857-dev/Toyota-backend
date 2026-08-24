@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export type AnimState = 'idle' | 'run' | 'attack' | 'cast' | 'hit' | 'death';
+export type AnimState = 'idle' | 'walk' | 'run' | 'attack' | 'cast' | 'hit' | 'death';
 
 interface StateSpec {
   /** How long a one-shot state plays before falling back to idle/run. */
@@ -13,12 +13,17 @@ interface StateSpec {
 
 const STATES: Record<AnimState, StateSpec> = {
   idle: { durationMs: 0, oneShot: false, blendMs: 200 },
+  walk: { durationMs: 0, oneShot: false, blendMs: 180 },
   run: { durationMs: 0, oneShot: false, blendMs: 150 },
   attack: { durationMs: 420, oneShot: true, blendMs: 60 },
   cast: { durationMs: 0, oneShot: false, blendMs: 120 },
   hit: { durationMs: 220, oneShot: true, blendMs: 40 },
   death: { durationMs: 900, oneShot: true, blendMs: 100 },
 };
+
+/** Below this it is standing still; above WALK_ABOVE it is running. */
+const STILL = 0.35;
+const WALK_ABOVE = 2.4;
 
 /**
  * Animation state machine.
@@ -33,7 +38,7 @@ const STATES: Record<AnimState, StateSpec> = {
 export class AnimStateMachine {
   private state: AnimState = 'idle';
   private elapsedMs = 0;
-  private locomotion: 'idle' | 'run' = 'idle';
+  private locomotion: 'idle' | 'walk' | 'run' = 'idle';
   private phase = 0;
 
   // Populated once real models exist. Kept here so the seam is obvious.
@@ -53,9 +58,16 @@ export class AnimStateMachine {
     return this.state;
   }
 
-  /** Locomotion is continuous and yields to any one-shot currently playing. */
-  setMoving(moving: boolean): void {
-    this.locomotion = moving ? 'run' : 'idle';
+  /**
+   * Locomotion is continuous and yields to any one-shot currently playing.
+   *
+   * Takes a speed rather than a boolean because a creature grazing across its
+   * camp and one running you down are the same movement to a threshold test,
+   * and a wolf sprinting in a slow circle around a bush reads as broken.
+   */
+  setMoving(unitsPerSecond: number): void {
+    this.locomotion =
+      unitsPerSecond < STILL ? 'idle' : unitsPerSecond < WALK_ABOVE ? 'walk' : 'run';
     if (!STATES[this.state].oneShot && this.state !== 'cast' && this.state !== 'death') {
       this.state = this.locomotion;
     }
@@ -96,6 +108,13 @@ export class AnimStateMachine {
     this.root.position.y = 0;
 
     switch (this.state) {
+      case 'walk': {
+        // Same gait as the run, at a third the rate and half the lean.
+        const bob = Math.abs(Math.sin(this.phase * 3.4)) * 0.05;
+        this.root.position.y = bob;
+        this.root.rotation.x = Math.sin(this.phase * 3.4) * 0.025;
+        break;
+      }
       case 'run': {
         const bob = Math.abs(Math.sin(this.phase * 9)) * 0.12;
         this.root.position.y = bob;

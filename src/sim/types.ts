@@ -605,6 +605,21 @@ export interface Entity {
   /** Set on the entity a dragon is currently being represented by. */
   dragonId?: string;
   aiState?: 'idle' | 'chasing' | 'attacking' | 'returning' | 'dead';
+  /**
+   * Where an idle creature is ambling to, null while it is standing about.
+   *
+   * Deliberately **not** drawn from `World.rng`: the destination is hashed from
+   * the entity's id and how many times it has wandered, so a camp full of
+   * animals milling around cannot shift a single number in a seeded fight. The
+   * alternative — a `roaming: false` flag on every test arena, the way
+   * `rareSpawns` and `adventurers` work — would have been a fourth switch to
+   * forget, and this way there is nothing to forget.
+   */
+  roamGoal?: Vec2 | null;
+  /** Milliseconds left standing still before choosing somewhere new. */
+  roamWaitMs?: number;
+  /** How many times it has wandered; the second half of the hash. */
+  roamStep?: number;
   threat?: Record<EntityId, number>;
   abilityCooldowns?: Record<string, number>;
   /** Abilities locked out by a player interrupt, keyed to remaining ms. */

@@ -17,6 +17,7 @@ import {
   baseMobXp,
   deriveMobStats,
   goldForKill,
+  roamRadiusFor,
   xpForKill,
   xpToNext,
 } from '../src/sim/formulas.js';
@@ -114,6 +115,19 @@ import { skillBarFor, skillsForClass, skillsTaughtBy } from '../src/content/skil
  */
 
 const TRIALS = 100;
+
+/**
+ * How far this spawn's occupant can amble off its mark.
+ *
+ * Every clearance in this file is really a statement about aggro, and aggro is
+ * measured from where a creature *is*. Once camps wander, "eighteen units from
+ * the shop" stops meaning anything unless the wander is in the sum.
+ */
+function roamOf(spawn: { mobId: string; holding?: string }): number {
+  const def = MOBS[spawn.mobId]!;
+  if (def.stars >= BOSS_STARS || def.dragon || spawn.holding !== undefined) return 0;
+  return roamRadiusFor(def.leashRadius);
+}
 
 interface Encounter {
   name: string;
@@ -362,7 +376,7 @@ describe('star ratings mean something', () => {
         // Guards for THIS boss are part of the encounter by design.
         if (other.guardOf === boss.mobId) continue;
         const d = Math.hypot(boss.pos.x - other.pos.x, boss.pos.z - other.pos.z);
-        const needed = MELEE_STANDOFF + otherDef.aggroRadius + MARGIN;
+        const needed = MELEE_STANDOFF + otherDef.aggroRadius + roamOf(other) + MARGIN;
         if (d < needed) {
           throw new Error(
             `${otherDef.name} spawns ${d.toFixed(1)}u from ${MOBS[boss.mobId]!.name}; ` +
@@ -1542,7 +1556,7 @@ describe('the vendor economy', () => {
       for (const spawn of FENMARCH.spawns) {
         const def = MOBS[spawn.mobId]!;
         const d = Math.hypot(placement.pos.x - spawn.pos.x, placement.pos.z - spawn.pos.z);
-        const needed = def.aggroRadius + 4;
+        const needed = def.aggroRadius + roamOf(spawn) + 4;
         if (d < needed) {
           throw new Error(
             `${VENDORS[placement.vendorId]!.name} stands ${d.toFixed(1)}u from a ` +
@@ -1649,7 +1663,7 @@ describe('the whole 1-100 progression', () => {
           if (other === boss || def.stars >= BOSS_STARS) continue;
           if (other.guardOf === boss.mobId) continue;
           const d = Math.hypot(boss.pos.x - other.pos.x, boss.pos.z - other.pos.z);
-          const needed = 3.5 + def.aggroRadius + 4;
+          const needed = 3.5 + def.aggroRadius + roamOf(other) + 4;
           if (d < needed) {
             throw new Error(
               `${zone.id}: ${def.name} is ${d.toFixed(1)}u from ${MOBS[boss.mobId]!.name}, needs ${needed.toFixed(1)}u`,
@@ -1667,7 +1681,7 @@ describe('the whole 1-100 progression', () => {
         for (const spawn of zone.spawns) {
           const def = MOBS[spawn.mobId]!;
           const d = Math.hypot(landmark.pos.x - spawn.pos.x, landmark.pos.z - spawn.pos.z);
-          if (d < def.aggroRadius + 4) {
+          if (d < def.aggroRadius + roamOf(spawn) + 4) {
             throw new Error(
               `${zone.id}: ${landmark.what} is ${d.toFixed(1)}u from a ${def.name}`,
             );

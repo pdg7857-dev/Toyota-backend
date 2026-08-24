@@ -37,6 +37,10 @@ import {
   goldForKill,
   castBreakChance,
   resolveAttack,
+  ROAM_PAUSE_MAX_MS,
+  ROAM_PAUSE_MIN_MS,
+  ROAM_SPEED,
+  roamRadiusFor,
   scaledDefenseBonus,
   threatFromDamage,
   xpForKill,
@@ -147,6 +151,21 @@ function neededFor(objective: QuestObjective): number {
 /** Minutes of world time, in ticks-friendly milliseconds. */
 function minutes(n: number): number {
   return n * 60000;
+}
+
+/**
+ * A number in [0, 1) from two integers, with no state anywhere.
+ *
+ * This is what keeps a camp full of wandering animals out of the combat RNG —
+ * see `Entity.roamGoal`. Every creature's amble is a pure function of its id
+ * and how many times it has already ambled, so the stream a fight draws from
+ * is identical whether the zone is populated or empty.
+ */
+function roamHash(a: number, b: number): number {
+  let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13) ^ b, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
 }
 
 /** Time since last damage dealt/taken that still counts as "in combat". */
@@ -1505,8 +1524,11 @@ export class World {
             e.targetId = player.id;
             e.threat![player.id] = 1;
             e.aiState = 'chasing';
+            e.roamGoal = null;
             this.events.push({ t: 'aggro', mobId: e.id, targetId: player.id });
+            break;
           }
+          this.tickRoam(e, def);
           break;
         }
         case 'chasing':
@@ -1536,8 +1558,53 @@ export class World {
     }
   }
 
+  /**
+   * Can this creature amble about, or does it stand where it was put?
+   *
+   * Four exclusions, each for a different reason:
+   *  - **Bosses and dragons.** Their ground is levelled flat so a telegraph
+   *    circle reads; wandering off it draws one down a hill.
+   *  - **Summons.** Adds exist for the length of a fight and arrive already
+   *    chasing. One that strolled off would be a bug wearing a feature.
+   *  - **Garrisons.** A guard post is the visible half of the territory layer.
+   *    A watch that wanders is not watching anything.
+   */
+  private canRoam(mob: Entity, def: MobDef): boolean {
+    if (isBoss(def.stars) || def.dragon) return false;
+    if (mob.summonedBy !== undefined) return false;
+    if (mob.holding !== undefined) return false;
+    return true;
+  }
+
+  /**
+   * Pick somewhere to amble to, after standing about for a while.
+   *
+   * The destination is hashed from (entity id, wander count) rather than drawn
+   * from `this.rng` — see `Entity.roamGoal`. Deterministic either way; this way
+   * a populated zone and an empty test arena roll the same combat numbers.
+   */
+  private tickRoam(mob: Entity, def: MobDef): void {
+    if (!this.canRoam(mob, def)) return;
+    if (mob.roamGoal) return;
+    mob.roamWaitMs = (mob.roamWaitMs ?? ROAM_PAUSE_MIN_MS) - TICK_MS;
+    if (mob.roamWaitMs > 0) return;
+
+    const step = (mob.roamStep ?? 0) + 1;
+    mob.roamStep = step;
+    const angle = roamHash(mob.id, step) * Math.PI * 2;
+    // sqrt so destinations are spread evenly over the disc rather than
+    // clustering at the spawn mark, which is the whole thing we are leaving.
+    const radius = Math.sqrt(roamHash(mob.id, step + 7919)) * roamRadiusFor(def.leashRadius);
+    const spawn = mob.spawnPos!;
+    mob.roamGoal = {
+      x: spawn.x + Math.sin(angle) * radius,
+      z: spawn.z + Math.cos(angle) * radius,
+    };
+  }
+
   /** Send a mob home, drop its threat, and clean up anything it called in. */
   private leashMob(mob: Entity): void {
+    mob.roamGoal = null;
     mob.aiState = 'returning';
     mob.targetId = null;
     mob.threat = {};
@@ -1767,6 +1834,7 @@ export class World {
 
         let goal: Vec2 | null = null;
         let stopAt = 0;
+        let speed = stats.moveSpeed;
         if (e.aiState === 'chasing') {
           const target = this.entities.get(e.targetId ?? -1);
           if (target) {
@@ -1777,16 +1845,26 @@ export class World {
         } else if (e.aiState === 'returning') {
           goal = e.spawnPos!;
           stopAt = 0.2;
+        } else if (e.aiState === 'idle' && e.roamGoal) {
+          goal = e.roamGoal;
+          stopAt = 0.2;
+          speed = stats.moveSpeed * ROAM_SPEED;
         }
         if (goal) {
           const dx = goal.x - e.pos.x;
           const dz = goal.z - e.pos.z;
           const d = Math.hypot(dx, dz);
           if (d > stopAt) {
-            const step = Math.min(stats.moveSpeed * dt, d - stopAt);
+            const step = Math.min(speed * dt, d - stopAt);
             e.pos.x += (dx / d) * step;
             e.pos.z += (dz / d) * step;
             e.facing = Math.atan2(dx, dz);
+          } else if (goal === e.roamGoal) {
+            // Arrived. Stand about for a while before picking somewhere else,
+            // so a camp reads as animals grazing rather than a patrol route.
+            e.roamGoal = null;
+            const spread = ROAM_PAUSE_MAX_MS - ROAM_PAUSE_MIN_MS;
+            e.roamWaitMs = ROAM_PAUSE_MIN_MS + roamHash(e.id, (e.roamStep ?? 0) + 104729) * spread;
           }
         }
       }
@@ -1896,6 +1974,8 @@ export class World {
       e.health = stats.maxHealth;
       e.energy = stats.maxEnergy;
       e.pos = { ...e.spawnPos! };
+      e.roamGoal = null;
+      e.roamWaitMs = 0;
       e.targetId = null;
       e.threat = {};
       e.effects = [];
