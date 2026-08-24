@@ -734,6 +734,48 @@ async function main() {
       garrisonAfter,
     };
   });
+  // Day, night and weather. Checked against the lights the renderer actually
+  // ended up with, because the only failure that matters here is "night went
+  // too dark to play in" and no structural assertion can see that.
+  const skies = [];
+  for (const [name, frac] of [
+    ['noon', 0.5],
+    ['dusk', 0.74],
+    ['midnight', 0.02],
+  ]) {
+    await page.evaluate(
+      ({ frac, day }) => {
+        window.__game.world.worldTimeMs = day * frac;
+      },
+      { frac, day: 24 * 60 * 1000 },
+    );
+    await wait(700);
+    await page.screenshot({ path: join(OUT, `19-sky-${name}.png`) });
+    skies.push(
+      await page.evaluate((label) => {
+        const g = window.__game;
+        const light = g.world.daylight();
+        // Reading pixels back off the canvas was the obvious check and does not
+        // work: the drawing buffer is not preserved, so every sample came back
+        // pure black, noon included.
+        const sky = g.rig.scene.background;
+        return {
+          label,
+          phase: light.phase,
+          light: +light.light.toFixed(2),
+          clock: `${String(light.hour).padStart(2, '0')}:${String(light.minute).padStart(2, '0')}`,
+          weather: g.world.weather().kind,
+          sun: +g.rig.sun.intensity.toFixed(2),
+          ambient: +g.rig.hemi.intensity.toFixed(2),
+          skyLum: +(sky.r * 0.3 + sky.g * 0.59 + sky.b * 0.11).toFixed(3),
+        };
+      }, name),
+    );
+  }
+  const clockShown = await page.evaluate(
+    () => document.querySelector('#minimap-clock')?.textContent ?? '',
+  );
+
   // Dying, and buying it back.
   const death = await page.evaluate(async () => {
     const g = window.__game;
@@ -742,22 +784,34 @@ async function main() {
     player.xp = 500;
     player.xpDebt = 0;
     player.health = 1;
-    // Any live creature will finish the job at one point of health. Filtering
-    // for a ★3 made this depend on which zone the run happened to be standing
-    // in, which is how it started failing on alternate runs.
-    const killer = [...g.world.entities.values()].find(
-      (e) => e.kind === 'mob' && !e.dead && !g.mobOf(e.defId).horse,
-    );
+    // Stop swinging back, and get off the horse. The run arrives here with
+    // auto-attack on from an earlier fight, and the first attempt at this
+    // reported "the player refuses to die" while quietly killing its killer.
+    g.world.submit(player.id, { t: 'autoAttack', on: false });
+    g.world.submit(player.id, { t: 'mount', mountId: null });
+
+    // The highest-level creature in the zone, not the first one. Accuracy is
+    // level-gap only, so a level-1 hare swinging at a level-30 character
+    // essentially never lands — which reads as death being broken.
+    const killer = [...g.world.entities.values()]
+      .filter((e) => e.kind === 'mob' && !e.dead && !g.mobOf(e.defId).horse)
+      .sort((a, b) => b.level - a.level)[0];
     if (!killer) return { ok: false, why: 'nothing alive nearby' };
     killer.pos = { x: player.pos.x + 1, z: player.pos.z };
+    // Move its home with it. A mob teleported a kilometre from its spawn point
+    // leashes on the very next tick and walks back — exactly right of the game,
+    // and it looked like "the player refuses to die".
+    killer.spawnPos = { ...killer.pos };
     killer.aiState = 'chasing';
     killer.targetId = player.id;
     killer.threat = { [player.id]: 100 };
     killer.autoAttack = true;
     g.world.submit(player.id, { t: 'target', id: killer.id });
     const until = Date.now() + 12000;
+    const killerMax = g.world.statsOf(killer).maxHealth;
     while (!player.dead && Date.now() < until) {
       player.health = 1;
+      killer.health = killerMax;
       await new Promise((r) => setTimeout(r, 100));
     }
     return {
@@ -1020,6 +1074,10 @@ async function main() {
     ['it carried something', (wyrmDead.carried ?? []).length > 0],
     ['a front changed hands', realm.ok],
     ['the new holder garrisons the ground', realm.garrisonAfter !== realm.garrisonBefore],
+    ['the sun crosses the sky', skies[0].light > skies[2].light + 0.2],
+    ['and the world actually gets darker', skies[0].sun > skies[2].sun * 2 && skies[0].skyLum > skies[2].skyLum * 2],
+    ['night keeps enough ambient to see by', skies[2].ambient >= skies[0].ambient * 0.45],
+    ['the clock is on screen', /\d\d:\d\d/.test(clockShown)],
     ['dying opens a debt instead of taking a level', death.ok && death.owed > 0 && death.level === 30 && death.xp === 500],
     ['the death screen says what it cost', /experience owed/i.test(deathUi.cost) && deathUi.shown],
     ['the debt is drawn on the xp bar', deathUi.debtBar > 0],
@@ -1054,6 +1112,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('map:', JSON.stringify(mapState), 'closed:', mapClosed);
+  console.log('sky:', skies.map((x) => JSON.stringify(x)).join(' '), '| clock:', clockShown);
   console.log('death:', JSON.stringify(death), JSON.stringify(deathUi), JSON.stringify(reclaimed));
   console.log('armour:', JSON.stringify(armour), '| bounty:', JSON.stringify(bounty));
   console.log('rare:', JSON.stringify({ ...rareCheck, ...rareLoot }), '| rare plates:', rarePlate);
