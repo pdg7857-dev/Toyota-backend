@@ -289,7 +289,34 @@ export class HeightField {
     const water = this.spec.waterLevel;
     return water !== undefined && this.at(x, z) < water;
   }
+
+  /**
+   * The height something *standing* here should be drawn at.
+   *
+   * The sim is flat and stays flat — nothing in `sim/` samples a height, and a
+   * test enforces it — so a creature chased across a tarn keeps walking in a
+   * straight line through it. What it must not do is walk along the *bottom*,
+   * which is what drawing it at ground height does: a wolf strolling four
+   * metres under the surface of a lake is the single most broken-looking thing
+   * a flat simulation can produce.
+   *
+   * Wading is the renderer's answer, and it is entirely the renderer's
+   * business: draw it at the water line, a little sunk. It costs nothing, it
+   * needs no agreement from the sim, and it turns the one visible consequence
+   * of flat movement into something that reads as deliberate.
+   */
+  standHeight(x: number, z: number): number {
+    const ground = this.at(x, z);
+    const water = this.spec.waterLevel;
+    if (water === undefined || ground >= water) return ground;
+    // Deeper water does not mean a deeper wade — past a certain point things
+    // are swimming, and swimming is level with the surface.
+    return water - Math.min(WADE_DEPTH, water - ground) * 0.45;
+  }
 }
+
+/** How far into the water a wading creature sits, at most. */
+const WADE_DEPTH = 1.1;
 
 /** How far above the water line anything walkable is levelled to. */
 export const SHORE_CLEARANCE = 1.6;

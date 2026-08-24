@@ -246,6 +246,17 @@ Distance decides volume: your own fight is always audible, somebody else's
 fades with distance and is silent past seventy metres. `N` mutes, `[` and `]`
 set the level, and it remembers.
 
+## Where the hit lands
+
+Every blow leaves a mark on the thing it hit, sized by how much of that
+creature's health it just took — so a scratch and a near-death blow do not look
+the same, on a hare or on a dragon. A crit throws spokes rather than simply
+being bigger, and the colour is the school of damage, matching the number that
+floats up.
+
+The camera shakes when *you* take one, and not when anybody else does. Six
+hundred creatures are alive out there and most of them are busy.
+
 ## Dying
 
 Death used to cost the walk back and nothing else, which in a game where a ★4
@@ -355,6 +366,10 @@ and level — which is what makes gear read as composure rather than just a
 bigger health bar. A damage-over-time tick never breaks it, because nobody
 would ever attribute a silently disabled cast bar to the bleed they are
 standing in.
+
+**Creatures wade.** Walk something into one of the lochs and it stands in the
+water rather than on the bottom of it. Nothing is slowed or stopped by water —
+it is a matter of where a creature is drawn, not where it can go.
 
 **The backpack is drag-and-drop.** Press `I`, drag an item onto the slot it
 belongs in. Every item shows what it does and what it would replace.

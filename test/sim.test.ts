@@ -3635,3 +3635,42 @@ describe('art can be dropped in', () => {
     expect(clipFor('idle', useless, { idle: 'Nope' })).toBe('Take 001');
   });
 });
+
+describe('the renderer answers for the flat sim', () => {
+  it('wades a creature rather than walking it along the lake bed', () => {
+    // The sim is flat and stays flat: nothing in `sim/` samples a height, and
+    // a test above enforces it. A creature chased across a tarn therefore
+    // walks straight through it — which is fine, and would look fine, except
+    // that drawing it at ground height puts it four metres under the surface.
+    //
+    // Wading is entirely the renderer's business, and this is the check that
+    // it happens: same answer as the ground on dry land, water line in a lake.
+    const theme = getTheme('plains');
+    const water = theme.terrain.waterLevel!;
+    const field = new HeightField(theme.terrain, []);
+
+    let foundLake = false;
+    let foundLand = false;
+    for (let x = -1400; x <= 1400 && !(foundLake && foundLand); x += 37) {
+      for (let z = -1400; z <= 1400; z += 37) {
+        const ground = field.at(x, z);
+        const stand = field.standHeight(x, z);
+        if (ground < water - 2) {
+          foundLake = true;
+          // Never on the bottom, and never floating over the surface.
+          expect(stand, `standing under ${(water - stand).toFixed(1)}m of water`).toBeGreaterThan(
+            ground,
+          );
+          expect(stand).toBeLessThanOrEqual(water);
+          expect(water - stand, 'wading too deep to read as wading').toBeLessThan(0.8);
+        } else if (ground > water + 3) {
+          foundLand = true;
+          // On dry ground it must not move anything at all.
+          expect(stand).toBe(ground);
+        }
+      }
+    }
+    expect(foundLake, 'no lake in the Fenmarch to test against').toBe(true);
+    expect(foundLand).toBe(true);
+  });
+});

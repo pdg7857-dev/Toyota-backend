@@ -56,9 +56,10 @@ async function boot(): Promise<void> {
   const views = new ViewManager(
     rig.scene,
     world,
-    (x, z) => rig.heightAt(x, z),
+    (x, z) => rig.standAt(x, z),
     // The fog is the horizon, and the weather moves it.
     () => ((rig.scene.fog as { far?: number } | null)?.far ?? 500) * 1.08,
+    rig.camera,
   );
   const emit = (cmd: Command): void => {
     world.submit(world.playerId, cmd);
@@ -67,7 +68,7 @@ async function boot(): Promise<void> {
     container,
     world,
     emit,
-    (x, z) => rig.heightAt(x, z),
+    (x, z) => rig.standAt(x, z),
     () => rig.yaw,
   );
   // The map reads the rig through thunks rather than being handed the zone's
@@ -155,7 +156,7 @@ async function boot(): Promise<void> {
     rig.update(dtMs);
 
     const playerView = views.get(world.playerId);
-    if (playerView) rig.updateCamera(playerView.group.position);
+    if (playerView) rig.updateCamera(playerView.group.position, views.takeShake(dtMs));
 
     // The sky follows the world clock, which is sim state — so it survives a
     // save and a fortnight's catch-up without the renderer holding a clock of
@@ -212,6 +213,9 @@ async function boot(): Promise<void> {
           break;
         case 'damage':
           views.get(ev.targetId)?.onDamaged();
+          // And a flash where it landed. The floating number says how much;
+          // this says where, how hard, and with what.
+          views.addImpact(ev.targetId, ev.amount, ev.crit, ev.damageType);
           break;
         case 'death':
           views.get(ev.entityId)?.anim.request('death');

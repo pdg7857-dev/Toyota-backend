@@ -272,6 +272,17 @@ export class SceneRig {
   }
 
   /**
+   * Where something standing here should be drawn.
+   *
+   * The same as `heightAt` on dry land, and the water line in a lake — see
+   * `HeightField.standHeight`. Views and nameplates use this; the ground mesh
+   * itself uses `heightAt`, because the lake bed is still the lake bed.
+   */
+  standAt(x: number, z: number): number {
+    return this.height.standHeight(x, z);
+  }
+
+  /**
    * The ground: one displaced, vertex-tinted tile that follows the player.
    *
    * Resolution is per-metre rather than per-zone, which is the whole reason a
@@ -636,7 +647,7 @@ export class SceneRig {
   }
 
   /** Orbit the camera around a focus point. */
-  updateCamera(focus: THREE.Vector3): void {
+  updateCamera(focus: THREE.Vector3, shake = 0): void {
     this.lastFocus.copy(focus);
     const p = Math.max(0.15, Math.min(1.35, this.pitch));
     const horiz = Math.cos(p) * this.distance;
@@ -646,6 +657,16 @@ export class SceneRig {
     // standing over as well as above the player.
     const y = Math.max(focus.y + Math.sin(p) * this.distance, this.heightAt(x, z) + 1.5);
     this.camera.position.set(x, y, z);
+    if (shake > 0) {
+      // Hashed off the frame clock rather than Math.random: a shake driven by
+      // an unseeded random is a shake that judders differently every run, and
+      // this is the kind of thing that has to look the same in a bug report as
+      // it did when somebody filed it.
+      const t = performance.now();
+      this.camera.position.x += Math.sin(t * 0.083) * shake;
+      this.camera.position.y += Math.sin(t * 0.117 + 1.7) * shake * 0.7;
+      this.camera.position.z += Math.sin(t * 0.101 + 3.1) * shake;
+    }
     this.camera.lookAt(focus.x, focus.y + 1.0, focus.z);
   }
 

@@ -1032,6 +1032,60 @@ an `OfflineAudioContext` and returns real peak and RMS, which is how `smoke`
 can assert that a crit is louder than an ordinary hit and that a fight across
 the zone makes no sound at all.
 
+## Where a hit lands
+
+Combat used to resolve entirely in the log: a number floated up, a health bar
+moved, and nothing happened *at the point of contact*. The sim already knew
+everything needed to say more — who hit whom, for how much, whether it crit and
+what school of damage it was — and none of it reached the screen.
+
+So every `damage` event now leaves a mark on the victim (`ImpactBurst` in
+`render/views.ts`), and three things about the mark are read off the event:
+
+- **Size is the share of health taken, not the raw number.** 400 damage is a
+  scratch on Donnchadh and an execution on a Moor Hare, and a burst sized off
+  the raw figure says the same thing about both. Clamped at both ends: a
+  one-shot on a level-1 creature should not fill the screen.
+- **A crit is a different shape**, not just a bigger one — it throws spokes.
+  Scale alone is ambiguous next to a big ordinary hit, and the crit is the
+  moment worth reading at a glance.
+- **Colour is the damage school**, on the same palette as the floating numbers,
+  so the two agree about what just happened.
+
+The camera shakes only for **your own** beating. Six hundred creatures are
+alive in a zone and most of them are fighting something; a camera that shook
+for all of it would shake constantly and mean nothing. This is the same rule
+`EARSHOT` applies to sound, for the same reason.
+
+**Effects are clamped to a third of their life per frame.** A 300ms burst on a
+machine running at 4fps was advanced past its whole life in one step and
+therefore never drew — which is precisely the machine that most needs the hit
+feedback, and precisely the case no assertion about the sim could see.
+
+Bursts are structural in `smoke`, not visual: a flash that exists for four
+frames cannot be caught in a screenshot, and the failure worth guarding is "no
+impact was created at all". It probes with damage as a *fraction of the
+victim's* health for the reason above — a fixed pair of numbers measured
+whichever creature the run happened to leave alive.
+
+## Creatures wade
+
+The sim is flat by rule — positions are (x, z) and nothing in `sim/` samples a
+height — so a creature that walks into a lake has no idea it did. The renderer
+placed it at the ground height, which is the lake *bed*, so wildlife padded
+along the bottom of every pond in the game with its head under the water.
+
+`HeightField.standHeight` is the answer and it stays renderer-only, like the
+rest of terrain: on dry land it is exactly `at()`, and in water it returns the
+surface less up to `WADE_DEPTH`, so a creature sits in the water rather than
+under it. Views and nameplates read `SceneRig.standAt`; the ground mesh still
+reads `heightAt`, because the lake bed is still the lake bed.
+
+It is deliberately not pathfinding. Nothing is stopped from entering water and
+nothing is slowed by it — that would be gameplay, it would have to live in
+`sim/`, and it would need a heightmap both sides agree on. This is the cheap
+half: the creature is *drawn* where a creature would actually be.
+
 ## What a frame costs
 
 Balance is measured rather than guessed here, and performance is no different —

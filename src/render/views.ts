@@ -8,7 +8,7 @@ import { getVendor } from '../content/vendors.js';
 import { TICK_MS } from '../sim/formulas.js';
 import { clipFor, modelFor, setModelOverride, type ModelDef, type ModelState } from '../content/models.js';
 import { ModelLibrary } from './models.js';
-import type { Entity, EntityId } from '../sim/types.js';
+import type { DamageType, Entity, EntityId } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 
 /**
@@ -26,6 +26,20 @@ import type { World } from '../sim/world.js';
  * would be ceremony around a map.
  */
 const MODELS_LIBRARY = new ModelLibrary();
+
+/**
+ * What a school of damage looks like when it lands.
+ *
+ * The same four the sim already distinguishes. Worth colouring because it is
+ * free information: a Mage's frost bolt and a wolf's teeth arriving on the same
+ * frame are two different events, and the log is too slow to say so.
+ */
+const DAMAGE_COLOURS: Record<DamageType, number> = {
+  physical: 0xffd9a0,
+  fire: 0xff7a33,
+  frost: 0x8fd8ff,
+  nature: 0x9de06a,
+};
 
 export class EntityView {
   readonly group = new THREE.Group();
@@ -62,6 +76,9 @@ export class EntityView {
    * combat game should make you ask.
    */
   private modelMaterials: THREE.MeshStandardMaterial[] = [];
+  /** How long this body has been dying, for the fade. */
+  private dyingMs = 0;
+  private fading = false;
   /** The model currently on, so trying another one replaces rather than stacks. */
   private dressed: THREE.Object3D | null = null;
   /** Height this body was authored at, for re-fitting a swapped model. */
@@ -300,12 +317,37 @@ export class EntityView {
     this.selectionRing.visible = selected;
 
     if (this.flash > 0) {
-      this.flash -= dtMs / 1000;
+      // Clamped for the same reason the impact burst is: on a slow machine a
+      // single frame is longer than the flash, and an unclamped subtraction
+      // means the hit reaction never renders once.
+      this.flash -= Math.min(dtMs, 60) / 1000;
       this.material.color.setHex(0xff5555);
       for (const m of this.modelMaterials) m.emissive.setHex(0x882222);
     } else {
       this.material.color.setHex(baseColor);
       for (const m of this.modelMaterials) m.emissive.setHex(0x000000);
+    }
+
+    // Dying is a topple and then a fade, not a topple and then a disappearance.
+    // A corpse that vanishes between two frames is the moment a fight stops
+    // feeling like it happened.
+    const dying = this.anim.current === 'death';
+    if (dying !== this.fading) {
+      this.fading = dying;
+      this.material.transparent = dying;
+      for (const m of this.modelMaterials) m.transparent = dying;
+    }
+    if (dying) {
+      this.dyingMs += dtMs;
+      // Holds solid for the topple, then goes over the last third of it.
+      const t = Math.max(0, Math.min(1, (this.dyingMs - 700) / 900));
+      const alpha = 1 - t * 0.75;
+      this.material.opacity = alpha;
+      for (const m of this.modelMaterials) m.opacity = alpha;
+    } else if (this.dyingMs !== 0) {
+      this.dyingMs = 0;
+      this.material.opacity = 1;
+      for (const m of this.modelMaterials) m.opacity = 1;
     }
     if (this.marker) {
       this.marker.rotation.y += dtMs * 0.0022;
@@ -334,6 +376,105 @@ function lerpAngle(a: number, b: number, t: number): number {
  * to see the radius and judge whether they are clear of it. It fills from the
  * centre outwards over the cast so the remaining time is readable at a glance.
  */
+/**
+ * The flash where a hit lands.
+ *
+ * Combat's only feedback used to be a number floating up and the target
+ * briefly turning red — which tells you a hit *happened* somewhere on that
+ * creature, and nothing about where, how hard, or with what. In a game where
+ * the whole loop is hitting things, that is the thing worth spending frames on.
+ *
+ * Deliberately built from two shapes rather than a particle system: a flat
+ * expanding ring reads as impact from any camera angle, and a handful of
+ * radiating spokes reads as force. A cloud of billboarded sprites costs more
+ * and — at this art level, against capsules — looks like a bug.
+ */
+class ImpactBurst {
+  readonly group = new THREE.Group();
+  private readonly ring: THREE.Mesh;
+  private readonly spokes: THREE.LineSegments | null;
+  private elapsed = 0;
+  private readonly life: number;
+
+  constructor(
+    at: THREE.Vector3,
+    /** Bigger for a bigger hit — scaled off damage, not off the creature. */
+    readonly scale: number,
+    colour: number,
+    crit: boolean,
+  ) {
+    this.life = crit ? 340 : 200;
+    this.group.position.copy(at);
+
+    const ringGeo = new THREE.RingGeometry(0.3, 0.44, 18);
+    this.ring = new THREE.Mesh(
+      ringGeo,
+      new THREE.MeshBasicMaterial({
+        color: colour,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    this.group.add(this.ring);
+
+    if (crit) {
+      // Spokes only on a crit. A burst that always has them stops meaning
+      // anything, and "did that crit" is the one question the flash can answer
+      // faster than the floating number can.
+      const spokeCount = 7;
+      const pos = new Float32Array(spokeCount * 6);
+      for (let i = 0; i < spokeCount; i++) {
+        const a = (i / spokeCount) * Math.PI * 2 + 0.3;
+        const inner = 0.35;
+        const outer = 0.95;
+        pos[i * 6] = Math.cos(a) * inner;
+        pos[i * 6 + 1] = Math.sin(a) * inner;
+        pos[i * 6 + 3] = Math.cos(a) * outer;
+        pos[i * 6 + 4] = Math.sin(a) * outer;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      this.spokes = new THREE.LineSegments(
+        geo,
+        new THREE.LineBasicMaterial({ color: 0xfff0c0, transparent: true, opacity: 1, depthWrite: false }),
+      );
+      this.group.add(this.spokes);
+    } else {
+      this.spokes = null;
+    }
+  }
+
+  /** Faces the camera, so a flat ring reads as impact from anywhere. */
+  update(dtMs: number, camera: THREE.Camera): boolean {
+    // Never advance more than a third of the effect's life in one frame.
+    //
+    // A frame can be 250ms on a machine drawing four of them a second, and a
+    // 300ms flash timed against real elapsed time is then *skipped entirely* —
+    // the player sees nothing at all, which is worse than seeing it slowly.
+    // Every short effect in this renderer wants this: they are there to be
+    // seen, and a frame is the smallest unit of being seen.
+    this.elapsed += Math.min(dtMs, this.life / 3);
+    const t = Math.min(1, this.elapsed / this.life);
+    // Fast out, slow stop: a burst that expands linearly reads as a bubble.
+    const eased = 1 - Math.pow(1 - t, 3);
+    this.group.scale.setScalar(this.scale * (0.4 + eased * 1.3));
+    this.group.quaternion.copy(camera.quaternion);
+    const fade = 1 - t;
+    (this.ring.material as THREE.MeshBasicMaterial).opacity = fade * 0.95;
+    if (this.spokes) (this.spokes.material as THREE.LineBasicMaterial).opacity = fade;
+    return t < 1;
+  }
+
+  dispose(): void {
+    this.ring.geometry.dispose();
+    (this.ring.material as THREE.Material).dispose();
+    this.spokes?.geometry.dispose();
+    if (this.spokes) (this.spokes.material as THREE.Material).dispose();
+  }
+}
+
 /**
  * Dangerous ground, drawn as a slowly churning stain rather than a red circle.
  *
@@ -529,6 +670,15 @@ export class ViewManager {
   private views = new Map<EntityId, EntityView>();
   private telegraphs: TelegraphRing[] = [];
   private hazardPatches: HazardPatch[] = [];
+  private bursts: ImpactBurst[] = [];
+  /**
+   * Camera shake left to spend, in world units.
+   *
+   * The renderer's share of "that hit hard". Deliberately tiny and short: a
+   * shake big enough to notice consciously is a shake that makes a telegraph
+   * harder to read, and this game asks you to read telegraphs.
+   */
+  private shake = 0;
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -541,6 +691,8 @@ export class ViewManager {
      * creatures nobody can see.
      */
     private readonly visibleRange: () => number = () => 500,
+    /** Needed only so an impact flash can face the viewer. */
+    private readonly camera: THREE.Camera = new THREE.PerspectiveCamera(),
   ) {}
 
   /** Draw the danger zone for a winding-up AoE. */
@@ -574,6 +726,43 @@ export class ViewManager {
 
   removeHazard(id: number): void {
     for (const patch of this.hazardPatches) if (patch.id === id) patch.expire();
+  }
+
+  /**
+   * Flash where a hit landed.
+   *
+   * Sited on the *target*, at roughly chest height, rather than at the
+   * attacker: the interesting fact is what got hit.
+   */
+  addImpact(targetId: EntityId, amount: number, crit: boolean, damageType: DamageType): void {
+    const view = this.views.get(targetId);
+    if (!view || !view.group.visible) return;
+    const entity = this.world.entity(targetId);
+    const height = entity?.kind === 'mob' ? getMob(entity.defId!).view.height : 1.8;
+
+    const at = view.group.position.clone();
+    at.y += height * 0.6;
+    // Scaled off how big the hit was as a share of the victim's health, so a
+    // scratch and a near-death blow do not look the same. Clamped, because a
+    // one-shot on a level-1 hare should not fill the screen.
+    const max = entity ? this.world.statsOf(entity).maxHealth : amount;
+    const weight = Math.max(0.35, Math.min(1.4, (amount / Math.max(1, max)) * 4));
+    const burst = new ImpactBurst(at, weight * (crit ? 1.5 : 1), DAMAGE_COLOURS[damageType], crit);
+    this.bursts.push(burst);
+    this.scene.add(burst.group);
+
+    // Only the player's own beatings shake the camera. Everything else in the
+    // zone is somebody else's fight.
+    if (targetId === this.world.playerId) this.shake = Math.min(0.5, this.shake + weight * 0.18);
+    else if (crit) this.shake = Math.min(0.25, this.shake + 0.09);
+  }
+
+  /** How far the camera should be nudged this frame, and it decays fast. */
+  takeShake(dtMs: number): number {
+    if (this.shake <= 0.0005) return 0;
+    const amount = this.shake;
+    this.shake = Math.max(0, this.shake - dtMs * 0.006);
+    return amount;
   }
 
   get all(): IterableIterator<EntityView> {
@@ -624,6 +813,12 @@ export class ViewManager {
       view.dispose();
     }
     this.views.clear();
+    for (const burst of this.bursts) {
+      this.scene.remove(burst.group);
+      burst.dispose();
+    }
+    this.bursts = [];
+    this.shake = 0;
     for (const patch of this.hazardPatches) {
       this.scene.remove(patch.group);
       patch.dispose();
@@ -714,6 +909,12 @@ export class ViewManager {
       }
     }
     this.updateTelegraphs(dtMs);
+    this.bursts = this.bursts.filter((burst) => {
+      if (burst.update(dtMs, this.camera)) return true;
+      this.scene.remove(burst.group);
+      burst.dispose();
+      return false;
+    });
     this.hazardPatches = this.hazardPatches.filter((patch) => {
       if (patch.update(dtMs)) return true;
       this.scene.remove(patch.group);

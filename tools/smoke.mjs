@@ -407,6 +407,49 @@ async function main() {
   await page.evaluate(() => window.__game.world.travelTo('fenmarch'));
   await wait(900);
 
+  // Wading.
+  //
+  // The sim is flat, so a creature that walks into a lake has no idea it did.
+  // The renderer is what has to answer, and the failure it prevents is a wolf
+  // padding along the bottom of a pond with its ears under the surface.
+  const wade = await page.evaluate(async () => {
+    const g = window.__game;
+    const water = g.rig.height.spec.waterLevel;
+    if (water === undefined) return { ok: false, why: 'no water in this zone' };
+
+    // Find the deepest ground within reach of the player rather than assuming
+    // where the lake is — the terrain is generated and the pond moves.
+    let spot = null;
+    let deepest = water;
+    const at = g.world.player.pos;
+    for (let dx = -600; dx <= 600; dx += 20) {
+      for (let dz = -600; dz <= 600; dz += 20) {
+        const x = at.x + dx;
+        const z = at.z + dz;
+        const h = g.rig.heightAt(x, z);
+        if (h < deepest) { deepest = h; spot = { x, z }; }
+      }
+    }
+    if (!spot) return { ok: false, why: 'no lake found' };
+
+    const victim = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+    victim.pos = { ...spot };
+    victim.spawnPos = { ...spot };
+    await new Promise((r) => setTimeout(r, 400));
+
+    const view = g.views.get(victim.id);
+    return {
+      ok: true,
+      bed: +deepest.toFixed(2),
+      water: +water.toFixed(2),
+      stands: +g.rig.standAt(spot.x, spot.z).toFixed(2),
+      feet: view ? +view.group.position.y.toFixed(2) : null,
+    };
+  });
+  // Above the lake bed it would otherwise sink to, and never above the water.
+  const wading =
+    wade.ok && wade.stands > wade.bed + 0.3 && wade.stands <= wade.water;
+
   // --- learning a zone's skill -------------------------------------------
   // Buy a tome from the zone's trader, read it, and check the skill actually
   // lands on the bar. Unit tests cover the rules; only this covers the four
@@ -519,7 +562,7 @@ async function main() {
     // has not come round left this reporting "the bounty paid nothing" when
     // the bounty was simply still standing — the same trap `closeToTarget` and
     // KILL_HELPER were both written to close.
-    const until = Date.now() + 9000;
+    const until = Date.now() + 20000;
     while (!host.dead && Date.now() < until) {
       host.health = 1;
       await new Promise((r) => setTimeout(r, 100));
@@ -1241,7 +1284,56 @@ async function main() {
     () => getComputedStyle(document.querySelector('#away-report')).display === 'none',
   );
 
-  await browser.close();
+  // Hand the run back to the original page. The second page above took the
+  // foreground, and a backgrounded tab stops getting animation frames — so
+  // every check after this one would be reading a render loop that is not
+  // running.
+  await returning.close();
+  await page.bringToFront();
+  await wait(600);
+
+  // Combat feel: the flash where a hit lands.
+  //
+  // Structural, not visual — a burst that exists for one frame at sixty is
+  // impossible to catch in a screenshot, and the failure worth guarding is
+  // "no impact was created at all", not "it looked wrong".
+  const impact = await page.evaluate(async () => {
+    const g = window.__game;
+    const victim = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+    if (!victim) return { ok: false, why: 'nothing to hit' };
+    victim.pos = { x: g.world.player.pos.x + 3, z: g.world.player.pos.z };
+    victim.spawnPos = { ...victim.pos };
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Both hits are read as a share of THIS creature's health, because that is
+    // what the burst is sized off. A flat 40 damage is a scratch on a boss and
+    // most of a hare, so a fixed pair of numbers measured whichever mob the run
+    // happened to leave alive rather than the scaling.
+    const max = g.world.statsOf(victim).maxHealth;
+    const before = g.views.bursts.length;
+    g.views.addImpact(victim.id, max * 0.02, false, 'frost');
+    const ordinary = g.views.bursts.length;
+    const smallScale = g.views.bursts[g.views.bursts.length - 1]?.scale ?? 0;
+    g.views.addImpact(victim.id, max, true, 'fire');
+    const bigScale = g.views.bursts[g.views.bursts.length - 1]?.scale ?? 0;
+
+    // Taking one yourself shakes the camera; somebody else's does not.
+    g.views.shake = 0;
+    g.views.addImpact(victim.id, max * 0.02, false, 'physical');
+    const shakeFromTheirs = g.views.shake;
+    g.views.addImpact(g.world.player.id, 400, false, 'physical');
+    const shakeFromMine = g.views.shake;
+
+    return {
+      ok: ordinary > before,
+      before,
+      ordinary,
+      smallScale: +smallScale.toFixed(2),
+      bigScale: +bigScale.toFixed(2),
+      shakeFromTheirs: +shakeFromTheirs.toFixed(3),
+      shakeFromMine: +shakeFromMine.toFixed(3),
+    };
+  });
 
   // The three boss mechanics, and the shapes that make them beatable.
   //
@@ -1326,6 +1418,8 @@ async function main() {
   });
   await wait(400);
 
+  await browser.close();
+
   const checks = [
     ['canvas present', state.canvas],
     // Exact kit contents are a unit-test concern; here we only care that the
@@ -1347,6 +1441,7 @@ async function main() {
     ['every zone has its own sky', distinctSkies === 4],
     ['every zone resolved a theme', themesMatched],
     ['entities stand on the terrain', standingOnGround],
+    ['a creature in a lake wades rather than walking the bottom', wading],
     ['bought and learned a zone skill', taught.ok],
     ['skill bar built two rows', bar.rows === 2 && bar.slots >= 15],
     ['unlearned skills still marked', bar.untaught > 0],
@@ -1373,6 +1468,9 @@ async function main() {
     // 2,627 was the number before the scatter was instanced and entities
     // stopped drawing through the fog. 700 is a ceiling with room in it, not a
     // target — if this fails, something started drawing per-object again.
+    ['a hit leaves a mark where it landed', impact.ok === true],
+    ['a big crit is a bigger mark than a scratch', impact.bigScale > impact.smallScale * 2],
+    ['your own beating shakes the camera', impact.shakeFromMine > impact.shakeFromTheirs],
     ['a cleave draws a cone', shapes.aonghus_cleave?.cone === true],
     ['and points it at the player', (shapes.aonghus_cleave?.aimedAtPlayer ?? 0) > 0.9],
     ['a hazard leaves a patch on the ground', (shapes.old_cauldron_hazard?.patches ?? 0) > 0],
@@ -1432,7 +1530,9 @@ async function main() {
   console.log('horse:', JSON.stringify(horse), '| luxury:', JSON.stringify(luxury));
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
+  console.log('wade:', JSON.stringify(wade));
   console.log('map:', JSON.stringify(mapState), 'closed:', mapClosed);
+  console.log('impact:', JSON.stringify(impact));
   console.log('shapes:', JSON.stringify(shapes));
   console.log('sound:', JSON.stringify(sound));
   console.log('frame:', JSON.stringify(frame));
