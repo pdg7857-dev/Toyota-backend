@@ -1292,6 +1292,45 @@ async function main() {
   await page.bringToFront();
   await wait(600);
 
+  // Bodies.
+  //
+  // Structural, like the impact burst: whether a wolf reads as a wolf is a
+  // question for `tools/bestiary.mjs` and a person's eyes. What this guards is
+  // the thing that cannot be seen in a screenshot of one creature — that a
+  // creature is still ONE draw call after growing four legs and a head, and
+  // that the figures the player is close to actually have limbs that move.
+  const bodies = await page.evaluate(async () => {
+    const g = window.__game;
+    const meshes = (view) => {
+      let n = 0;
+      view.group.traverse((o) => { if (o.isMesh && o.visible && o !== view.selectionRing) n++; });
+      return n;
+    };
+    const mob = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+    const mobView = g.views.get(mob.id);
+    const meView = g.views.get(g.world.player.id);
+
+    // A limb has to actually be driven, not merely exist. Walk for a moment
+    // and see whether anything on the player changed angle.
+    const leg = [...meView.joints.values()][0];
+    const before = leg ? leg.rotation.x : 0;
+    g.world.submit(g.world.player.id, { t: 'move', dir: { x: 0, z: 1 } });
+    await new Promise((r) => setTimeout(r, 500));
+    const after = leg ? leg.rotation.x : 0;
+    g.world.submit(g.world.player.id, { t: 'move', dir: { x: 0, z: 0 } });
+
+    return {
+      mob: g.mobOf(mob.defId).name,
+      plan: g.bodyPlanFor(mob.defId).id,
+      mobMeshes: meshes(mobView),
+      mobTriangles: mobView.mesh.geometry.index
+        ? mobView.mesh.geometry.index.count / 3
+        : mobView.mesh.geometry.attributes.position.count / 3,
+      myJoints: meView.joints.size,
+      limbMoved: Math.abs(after - before) > 0.02,
+    };
+  });
+
   // Combat feel: the flash where a hit lands.
   //
   // Structural, not visual — a burst that exists for one frame at sixty is
@@ -1442,6 +1481,13 @@ async function main() {
     ['every zone resolved a theme', themesMatched],
     ['entities stand on the terrain', standingOnGround],
     ['a creature in a lake wades rather than walking the bottom', wading],
+    ['a creature is shaped like the creature it is', bodies.plan !== 'blob'],
+    // The whole point of merging. Six hundred creatures a zone can afford one
+    // draw call each and not six, and a plan that quietly stops merging is
+    // invisible until the frame budget check fails somewhere else entirely.
+    ['and is still one mesh after growing legs', bodies.mobMeshes === 1],
+    ['the figures you stand next to have joints', bodies.myJoints >= 4],
+    ['and their limbs actually move', bodies.limbMoved],
     ['bought and learned a zone skill', taught.ok],
     ['skill bar built two rows', bar.rows === 2 && bar.slots >= 15],
     ['unlearned skills still marked', bar.untaught > 0],
@@ -1531,6 +1577,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('wade:', JSON.stringify(wade));
+  console.log('bodies:', JSON.stringify(bodies));
   console.log('map:', JSON.stringify(mapState), 'closed:', mapClosed);
   console.log('impact:', JSON.stringify(impact));
   console.log('shapes:', JSON.stringify(shapes));

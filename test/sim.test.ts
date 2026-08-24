@@ -44,6 +44,7 @@ import {
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { grindMobFor, killsForLevel } from './pace.js';
 import { MODELS, clipFor } from '../src/content/models.js';
+import { BODY_PLANS, bodyPlanFor, bodyPlanForClass } from '../src/content/bodies.js';
 import {
   DAY_LENGTH_MS,
   NIGHT_FLOOR,
@@ -3672,5 +3673,124 @@ describe('the renderer answers for the flat sim', () => {
     }
     expect(foundLake, 'no lake in the Fenmarch to test against').toBe(true);
     expect(foundLand).toBe(true);
+  });
+});
+
+describe('every creature has a shape', () => {
+  /**
+   * The whole bestiary was a capsule. A wolf, a stag, an outlaw, a heron and a
+   * dragon were the same object in five colours, so the only way to tell what
+   * was walking at you was to read its nameplate — and a nameplate is the most
+   * expensive way a 3D game can answer a question a silhouette answers free.
+   *
+   * These tests are the half a screenshot cannot do. `tools/bestiary.mjs` is
+   * the other half, and it found the two bugs that mattered: a head placed
+   * inside its own ribcage, and a rare spawn resolving to a capsule while
+   * standing in a camp of the creature it is meant to be a bigger version of.
+   */
+  it('resolves one for every creature that spawns in a zone', () => {
+    const missing: string[] = [];
+    const table = new Map<string, string[]>();
+    for (const zone of Object.values(ZONES)) {
+      for (const spawn of zone.spawns) {
+        const def = getMob(spawn.mobId);
+        const plan = bodyPlanFor(def);
+        if (plan.id === 'blob') missing.push(`${zone.id}: ${def.name} (${def.id})`);
+        const row = table.get(plan.id) ?? [];
+        if (!row.includes(def.name)) row.push(def.name);
+        table.set(plan.id, row);
+      }
+    }
+    // Printed rather than only asserted: two creatures landing on a plan that
+    // is obviously wrong for one of them is the failure this catches, and no
+    // assertion can spot it.
+    console.log('\n  body plans');
+    for (const [planId, names] of [...table].sort()) {
+      console.log(`    ${planId.padEnd(9)} ${names.slice(0, 5).join(', ')}${names.length > 5 ? ` +${names.length - 5}` : ''}`);
+    }
+    expect(missing, `creatures with no shape: ${missing.join('; ')}`).toEqual([]);
+  });
+
+  it('gives the four dragons the only shape with wings on it', () => {
+    // Dragons never appear in a zone's spawn list — they live in world state —
+    // so the walk above cannot see them, and the one creature in the game that
+    // most has to look like itself would have gone out as a capsule.
+    for (const def of DRAGONS) {
+      const plan = bodyPlanFor(getMob(dragonMobId(def)));
+      expect(plan.id, `${def.name} is not shaped like a dragon`).toBe('wyrm');
+    }
+    const wings = BODY_PLANS.wyrm.parts.filter((p) => p.mirror === 'wingL');
+    expect(wings.length, 'a wyrm with no wings is a big lizard').toBeGreaterThan(0);
+  });
+
+  it('gives a rare spawn the shape of the creature it replaces', () => {
+    // A named rare is the same animal as the camp mob, one star up. Its own id
+    // says nothing about what it looks like, so resolving on the id alone put
+    // `Mirefang the Bog Wolf` on screen as a capsule standing among wolves.
+    for (const spec of RARES) {
+      const rare = getMob(rareMobId(spec));
+      const host = getMob(spec.hostMobId);
+      expect(bodyPlanFor(rare).id, `${rare.name} does not look like a ${host.name}`)
+        .toBe(bodyPlanFor(host).id);
+    }
+  });
+
+  it('keeps every part inside the creature it belongs to', () => {
+    // Everything is authored in units of the creature's own height, so a plan
+    // that strays far outside that box is a typo — a decimal point in the
+    // wrong place is a tail three creatures long, and it renders as a spear
+    // through whatever is standing behind it.
+    for (const plan of Object.values(BODY_PLANS)) {
+      for (const part of plan.parts) {
+        const reach = Math.max(...part.size.map(Math.abs)) + Math.max(...part.at.map(Math.abs));
+        expect(reach, `${plan.id} has a part reaching ${reach.toFixed(2)} of its own height`)
+          .toBeLessThan(2.6);
+        expect(part.at[1], `${plan.id} has a part below the ground`).toBeGreaterThan(-0.2);
+      }
+    }
+  });
+
+  it('mirrors what it mirrors, and only off the centre line', () => {
+    // A plan cannot grow a left ear without a right one, which is the mistake
+    // that is obvious in a screenshot and invisible in a diff. The reverse is
+    // the one that is invisible in both: a mirrored part sitting ON the centre
+    // line is two copies of itself in the same place, z-fighting.
+    for (const plan of Object.values(BODY_PLANS)) {
+      for (const part of plan.parts) {
+        if (!part.mirror) continue;
+        expect(Math.abs(part.at[0]), `${plan.id} mirrors a part standing on the centre line`)
+          .toBeGreaterThan(0.02);
+        expect(part.joint, `${plan.id} mirrors a part with no joint of its own`).toBeDefined();
+      }
+    }
+  });
+
+  it('stands every plan on the ground and gives it a described silhouette', () => {
+    for (const plan of Object.values(BODY_PLANS)) {
+      expect(plan.parts.length, `${plan.id} is empty`).toBeGreaterThan(0);
+      expect(plan.reads.length, `${plan.id} does not say what it reads as`).toBeGreaterThan(10);
+      // The pivot is where the body leans and how far it drops when it dies.
+      // Above its own height means a creature that topples into the sky.
+      expect(plan.pivot).toBeGreaterThan(0);
+      expect(plan.pivot).toBeLessThan(1);
+      const lowest = Math.min(...plan.parts.map((p) => p.at[1] - p.size[1] / 2));
+      expect(lowest, `${plan.id} floats ${lowest.toFixed(2)} above its own feet`).toBeLessThan(0.12);
+    }
+  });
+
+  it('puts a weapon in every hand, and a different shape on each class', () => {
+    const seen = new Map<string, string>();
+    for (const cls of PLAYABLE_CLASSES) {
+      const plan = bodyPlanForClass(cls.id);
+      seen.set(cls.id, plan.id);
+      // Two legs and two arms, or the gait has nothing to move.
+      const joints = new Set(plan.parts.flatMap((p) => [p.joint, p.mirror].filter(Boolean)));
+      expect(joints.has('legL') && joints.has('legR'), `${cls.id} has no legs`).toBe(true);
+      expect(joints.has('armL') && joints.has('armR'), `${cls.id} has no arms`).toBe(true);
+    }
+    console.log(`\n  classes  ${[...seen].map(([c, p]) => `${c}=${p}`).join('  ')}`);
+    // Not one shape for all five: what somebody is carrying is the only thing
+    // that says which class an adventurer across the camp is playing.
+    expect(new Set(seen.values()).size).toBeGreaterThan(2);
   });
 });

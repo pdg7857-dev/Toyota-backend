@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Joint } from '../content/bodies.js';
 
 export type AnimState = 'idle' | 'walk' | 'run' | 'attack' | 'cast' | 'hit' | 'death';
 
@@ -49,7 +50,24 @@ export class AnimStateMachine {
   constructor(
     private readonly root: THREE.Object3D,
     private readonly baseHeight: number,
-  ) {}
+    /**
+     * Limbs that can move on their own. Empty for an ordinary creature, whose
+     * whole body is one welded geometry — see `render/body.ts` for why.
+     */
+    private readonly joints: ReadonlyMap<Joint, THREE.Object3D> = new Map(),
+    /** How much of the body's height is legs, from its `BodyPlan`. */
+    private readonly legFraction = 0.5,
+  ) {
+    for (const [joint, limb] of this.joints) this.rest.set(joint, limb.rotation.clone());
+  }
+
+  /** Where each limb hangs when nothing is driving it. */
+  private readonly rest = new Map<Joint, THREE.Euler>();
+
+  /** How much of the gait the trunk itself carries. See `applyPlaceholder`. */
+  private get trunkGait(): number {
+    return this.joints.size > 0 ? 0.35 : 1;
+  }
 
   /**
    * Hand it a model and the clips for each state.
@@ -71,9 +89,11 @@ export class AnimStateMachine {
       this.actions.set(state, action);
     }
     // Reset the procedural transforms: they are baked into the body node and
-    // would otherwise sit under the animation as a permanent lean.
+    // would otherwise sit under the animation as a permanent lean. The
+    // placeholder's own limbs go with it — real art brings its own.
     this.root.rotation.set(0, 0, 0);
     this.root.position.y = 0;
+    for (const limb of this.joints.values()) limb.visible = false;
     this.play(this.state);
   }
 
@@ -134,6 +154,7 @@ export class AnimStateMachine {
       return;
     }
     this.applyPlaceholder();
+    if (this.joints.size > 0) this.applyLimbs();
   }
 
   /** Procedural stand-in for real clips: bob, lunge, stagger, topple. */
@@ -145,16 +166,18 @@ export class AnimStateMachine {
 
     switch (this.state) {
       case 'walk': {
-        // Same gait as the run, at a third the rate and half the lean.
-        const bob = Math.abs(Math.sin(this.phase * 3.4)) * 0.05;
+        // Same gait as the run, at a third the rate and half the lean. Damped
+        // right down on a body with real legs: the limbs are already carrying
+        // the gait, and both at full strength reads as a bounce.
+        const bob = Math.abs(Math.sin(this.phase * 3.4)) * 0.05 * this.trunkGait;
         this.root.position.y = bob;
-        this.root.rotation.x = Math.sin(this.phase * 3.4) * 0.025;
+        this.root.rotation.x = Math.sin(this.phase * 3.4) * 0.025 * this.trunkGait;
         break;
       }
       case 'run': {
-        const bob = Math.abs(Math.sin(this.phase * 9)) * 0.12;
+        const bob = Math.abs(Math.sin(this.phase * 9)) * 0.12 * this.trunkGait;
         this.root.position.y = bob;
-        this.root.rotation.x = Math.sin(this.phase * 9) * 0.06;
+        this.root.rotation.x = Math.sin(this.phase * 9) * 0.06 * this.trunkGait;
         break;
       }
       case 'idle': {
@@ -179,12 +202,88 @@ export class AnimStateMachine {
       }
       case 'death': {
         const p = Math.min(1, t / (STATES.death.durationMs / 1000));
-        // Ease-out topple onto the side, sinking slightly into the ground.
+        // Ease-out topple onto the side, coming down by however much of the
+        // body was legs. A stag on long legs has further to fall than an adder
+        // that was already lying on the ground, and a single constant made one
+        // of those two hang in the air and the other sink through the hill.
         const eased = 1 - Math.pow(1 - p, 3);
         this.root.rotation.z = eased * (Math.PI / 2);
-        this.root.position.y = -eased * this.baseHeight * 0.35;
+        this.root.position.y = -eased * this.baseHeight * this.legFraction * 0.8;
         break;
       }
+    }
+  }
+
+  /**
+   * The gait.
+   *
+   * Two-legged and four-legged bodies walk from the same numbers: a phase, a
+   * swing amplitude, and which limbs are out of step with which. Legs on
+   * opposite corners move together — that is a trot, it is what every animal
+   * in this game does, and it is the difference between a wolf running and a
+   * wolf shuffling.
+   */
+  private applyLimbs(): void {
+    const rate = this.state === 'run' ? 9 : this.state === 'walk' ? 3.4 : 1.6;
+    const swing =
+      this.state === 'run' ? 0.85 : this.state === 'walk' ? 0.4 : this.state === 'idle' ? 0.03 : 0.12;
+    const p = this.phase * rate;
+    const a = Math.sin(p) * swing;
+    const b = Math.sin(p + Math.PI) * swing;
+
+    // A one-shot overrides the arms without touching the legs, so a figure can
+    // swing at something while still moving its feet.
+    const oneShot = this.state === 'attack' || this.state === 'hit';
+    const t = this.elapsedMs / Math.max(1, STATES[this.state].durationMs);
+    const strike =
+      this.state === 'attack'
+        ? (t < 0.35 ? -t * 2.6 : 1.6 - (t - 0.35) * 3.4)
+        : this.state === 'hit'
+          ? Math.sin(Math.min(1, t) * Math.PI) * 0.7
+          : 0;
+
+    for (const [joint, limb] of this.joints) {
+      const rest = this.rest.get(joint);
+      if (!rest) continue;
+      let x = rest.x;
+      let z = rest.z;
+      switch (joint) {
+        // Diagonal pairs. A biped's two legs are simply the front pair.
+        case 'legL':
+        case 'legFL':
+        case 'legBR':
+          x = rest.x + a;
+          break;
+        case 'legR':
+        case 'legFR':
+        case 'legBL':
+          x = rest.x + b;
+          break;
+        // Arms counter-swing against the legs, which is most of what makes a
+        // walk read as a walk rather than a slide.
+        case 'armL':
+          x = rest.x + (oneShot ? strike * 0.3 : b * 0.75);
+          break;
+        case 'armR':
+          x = rest.x + (oneShot ? strike : a * 0.75);
+          break;
+        case 'wingL':
+          z = rest.z - Math.abs(a) * 0.9;
+          break;
+        case 'wingR':
+          z = rest.z + Math.abs(a) * 0.9;
+          break;
+        case 'tail':
+          // A tail follows the body a beat late rather than keeping time with
+          // it, which is the whole reason it reads as slack rather than rigid.
+          x = rest.x + Math.sin(p - 0.9) * swing * 0.35;
+          break;
+        case 'head':
+          x = rest.x + (this.state === 'cast' ? Math.sin(this.phase * 12) * 0.06 : a * 0.12);
+          break;
+      }
+      limb.rotation.x = x;
+      limb.rotation.z = z;
     }
   }
 

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+
+import { BODY_PLANS, bodyPlanFor, bodyPlanForClass, type Joint } from '../content/bodies.js';
+import { jointedBody, mergeBody } from './body.js';
 import { AnimStateMachine } from './anim.js';
 import { CLASSES } from '../content/zone.js';
 import { getMount } from '../content/mounts.js';
@@ -87,6 +89,11 @@ export class EntityView {
   get hasModel(): boolean {
     return this.dressed !== null;
   }
+  /**
+   * Limbs that move on their own, for the few bodies built with joints.
+   * Empty for an ordinary creature, whose body is one welded geometry.
+   */
+  private readonly joints = new Map<Joint, THREE.Mesh>();
   /** Overhead "interact with me" marker; vendors only. */
   private marker: THREE.Mesh | null = null;
   /** The horse under the player, when they are riding one. */
@@ -111,32 +118,50 @@ export class EntityView {
           : { color: CLASSES[entity.classId ?? 'warrior'].color, height: 1.8, radius: 0.42 };
 
     this.builtHeight = view.height;
-    // Body and facing wedge merged into one geometry, not two meshes.
-    //
-    // With six hundred creatures in a zone that difference is 191 draw calls a
-    // frame against 382 — and the wedge exists only because a capsule has no
-    // readable front, so it was never a separate thing conceptually either.
-    const capsule = new THREE.CapsuleGeometry(
-      view.radius,
-      Math.max(0.1, view.height - view.radius * 2),
-      4,
-      12,
-    );
-    capsule.translate(0, view.height / 2, 0);
-    const noseGeo = new THREE.ConeGeometry(view.radius * 0.42, view.radius * 1.5, 8);
-    noseGeo.rotateX(Math.PI / 2);
-    noseGeo.translate(0, view.height * 0.62, view.radius * 1.05);
-    const geo = mergeGeometries([capsule, noseGeo]) ?? capsule;
-    if (geo !== capsule) {
-      capsule.dispose();
-      noseGeo.dispose();
+
+    // What this creature is shaped like. `content/bodies.ts` says; this file
+    // only decides how much of that shape is allowed to move.
+    const plan =
+      entity.kind === 'mob'
+        ? bodyPlanFor(getMob(entity.defId!))
+        : entity.kind === 'vendor'
+          ? BODY_PLANS.person
+          : bodyPlanForClass(entity.classId ?? 'warrior');
+
+    // Vertex colours carry the per-part shading — a tusk reads as bone, a
+    // blade as steel — and the material colour multiplies them, so the damage
+    // flash still reddens the whole body with one assignment.
+    this.material = new THREE.MeshStandardMaterial({
+      color: view.color,
+      roughness: 0.7,
+      metalness: 0.05,
+      vertexColors: true,
+    });
+
+    // Six hundred creatures a zone can only afford one draw call each, so an
+    // ordinary creature's whole body is welded into a single geometry and its
+    // legs cannot move on their own. The handful of figures the player is
+    // actually close to get real joints — a running figure with rigid legs is
+    // a mannequin on a conveyor belt, and the player is looking at theirs the
+    // entire game.
+    const articulate = entity.kind !== 'mob';
+    if (articulate) {
+      const built = jointedBody(plan, view.height, view.radius);
+      this.mesh = new THREE.Mesh(built.trunk, this.material);
+      this.mesh.castShadow = true;
+      this.body.add(this.mesh);
+      for (const part of built.parts) {
+        const limb = new THREE.Mesh(part.geometry, this.material);
+        limb.castShadow = true;
+        limb.position.copy(part.pivot);
+        this.body.add(limb);
+        this.joints.set(part.joint, limb);
+      }
+    } else {
+      this.mesh = new THREE.Mesh(mergeBody(plan, view.height, view.radius), this.material);
+      this.mesh.castShadow = true;
+      this.body.add(this.mesh);
     }
-
-    this.material = new THREE.MeshStandardMaterial({ color: view.color, roughness: 0.7, metalness: 0.05 });
-    this.mesh = new THREE.Mesh(geo, this.material);
-    this.mesh.castShadow = true;
-
-    this.body.add(this.mesh);
     this.group.add(this.body);
 
     const ringGeo = new THREE.RingGeometry(view.radius * 1.3, view.radius * 1.6, 24);
@@ -161,7 +186,7 @@ export class EntityView {
       this.group.add(this.marker);
     }
 
-    this.anim = new AnimStateMachine(this.body, view.height);
+    this.anim = new AnimStateMachine(this.body, view.height, this.joints, plan.pivot);
 
     // And if somebody has made art for this thing, put it on. Asynchronous on
     // purpose: the capsule is built and standing before the fetch even starts,
@@ -358,6 +383,7 @@ export class EntityView {
 
   dispose(): void {
     this.mesh.geometry.dispose();
+    for (const limb of this.joints.values()) limb.geometry.dispose();
     this.material.dispose();
   }
 }

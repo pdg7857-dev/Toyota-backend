@@ -62,9 +62,12 @@ input / HUD click ──> Command ──> World.submit()
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
 | `src/render/map.ts` | The minimap and the map. Both drawn from one relief bitmap. |
 | `src/render/audio.ts` | Every sound in the game, synthesised. No audio files. |
+| `src/content/bodies.ts` | What each creature is shaped like. Pure data. |
+| `src/render/body.ts` | Turns a body plan into geometry. Knows *how*, not *which*. |
 | `src/content/models.ts` | Which creatures have real art, and how it is fitted. |
 | `tools/smoke.mjs` | Boots the real game in Chromium, plays it, screenshots it. |
 | `tools/look.mjs` | Stands the camera somewhere and takes a picture. See below. |
+| `tools/bestiary.mjs` | Stands one of every creature in a row and photographs them. |
 
 Adding a mob, item or skill should mean editing `src/content/` only.
 
@@ -958,6 +961,64 @@ slam radius around every boss and fails if its arena is on a slope.
 Themes also carry a minimum light level, asserted by test. Caer Dubh was first
 authored at true dusk and shipped with the mobs as black shapes on a black
 hill — atmosphere is not worth a fight you cannot read.
+
+## Everything was a capsule
+
+A wolf, a stag, an outlaw, a heron and a dragon were the same object in five
+colours and five sizes. The only way to tell what was walking at you was to
+read its nameplate — and a nameplate is the most expensive way a 3D game can
+answer a question a silhouette answers for free.
+
+`content/bodies.ts` is **pure data**, exactly like `terrain.ts`: it describes a
+body in primitives, in units of the creature's own height, and knows nothing
+about three.js. `render/body.ts` is the engine. A new creature's shape is a
+table entry, not renderer work — the same split, for the same reason.
+
+Four things make it affordable at six hundred creatures a zone:
+
+- **A creature is still one draw call.** An ordinary creature's whole plan is
+  welded into a single geometry with the per-part shading baked into vertex
+  colours, so a wolf with a head, four legs and a tail costs exactly what the
+  capsule did. `smoke` asserts the mesh count, because a plan that quietly
+  stops merging shows up as a frame-budget failure somewhere else entirely.
+- **Only what you stand next to has joints.** The player, the traders and the
+  other adventurers are built limb by limb and their legs actually swing; a
+  running figure with rigid legs is a mannequin on a conveyor belt, and the
+  player is looking at theirs for the whole game. That is ten entities a zone,
+  not six hundred.
+- **The plans are generated from knobs, not typed part by part.** Every
+  four-legged creature in the game comes out of one function — the same reason
+  the late weapon ladders come out of one DPS budget. Fourteen hand-typed
+  plans is fourteen chances to put a head where a tail goes.
+- **Which creature is which is keyword-matched on the id**, because most of the
+  bestiary south of the Fenmarch is generated and a per-mob field would have to
+  be generated from the creature's name — which is the keyword table with an
+  extra step. A test walks every spawn in every zone and fails if one falls
+  through to the capsule.
+
+`view.radius` still does work: it was hand-tuned per creature back when it had
+to stand for the whole animal, so it survives as a *nudge* to girth rather than
+as the width itself. Taking it literally turned the Ardmoor goats into barrels.
+
+### Somebody has to look at the wolf
+
+`tools/bestiary.mjs` stands one of every creature in a zone in a row, at noon,
+with the aggro switched off, and photographs them. It is the third of the same
+job `smoke` and `look` do, and it earned its place immediately:
+
+- **A head inside its own ribcage.** `size[1]` on a capsule was being passed
+  straight to three.js, which takes the length *between* the caps — so every
+  body was two cap-radii longer than its plan said, and a goat's head, placed
+  at the end of a body that had quietly grown, sat entirely inside its chest.
+  Every assertion passed. The picture showed a goat with no head.
+- **A rare spawn as a capsule.** `Mirefang the Bog Wolf` resolved on its own
+  id, which says nothing about what it looks like, and stood in a camp of
+  wolves as a pill. `bodyPlanFor` takes the definition rather than the id now,
+  so `rareOf` is unwrapped where it cannot be forgotten.
+- **A snowman with an axe.** The first humanoid was authored by eye: a head a
+  fifth of its own height, shoulders half its width. A person is about seven
+  and a half heads tall and a quarter of their height across the shoulders,
+  and those two numbers are most of what makes a figure read as a person.
 
 ## Animation, and dropping real art in
 

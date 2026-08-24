@@ -246,6 +246,20 @@ Distance decides volume: your own fight is always audible, somebody else's
 fades with distance and is silent past seventy metres. `N` mutes, `[` and `]`
 set the level, and it remembers.
 
+## Things look like things
+
+A wolf has four legs, a low back and a brush of a tail. A stag has antlers and
+stands a head above it. An outlaw is a figure carrying a blade, a Blackshield
+is a helmed one carrying an axe, and a bowman has a longbow. A heron has a neck
+and a beak, an adder has neither, and a dragon has wings.
+
+None of which sounds like a feature until you know that all of it used to be
+the same capsule in different colours, and the only way to tell what was about
+to attack you was to read the nameplate.
+
+Your own character has arms and legs that move when you walk and swing when you
+fight, and what you are carrying says which class you are from across a camp.
+
 ## Where the hit lands
 
 Every blow leaves a mark on the thing it hit, sized by how much of that
