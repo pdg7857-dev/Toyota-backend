@@ -258,7 +258,10 @@ the same capsule in different colours, and the only way to tell what was about
 to attack you was to read the nameplate.
 
 Your own character has arms and legs that move when you walk and swing when you
-fight, and what you are carrying says which class you are from across a camp.
+fight — and **you are holding what you equipped**. Put on a spear and you carry
+a spear; a bow goes across the body, a bulwark on the off arm, a grimoire in
+the free hand. The metal is the item's quality, so you can see from across a
+camp whether somebody is carrying a rusted blade or a Sovereign one.
 
 ## Where the hit lands
 

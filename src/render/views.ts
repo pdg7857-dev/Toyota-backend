@@ -1,11 +1,24 @@
 import * as THREE from 'three';
 
-import { BODY_PLANS, bodyPlanFor, bodyPlanForClass, type Joint } from '../content/bodies.js';
-import { jointedBody, mergeBody } from './body.js';
+import {
+  BODY_PLANS,
+  QUALITY_METAL,
+  bodyPlanFor,
+  bodyPlanForClass,
+  offhandLookFor,
+  offhandParts,
+  weaponLookFor,
+  weaponParts,
+  type BodyPart,
+  type BodyPlan,
+  type Joint,
+} from '../content/bodies.js';
+import { heldGeometry, jointedBody, mergeBody } from './body.js';
 import { AnimStateMachine } from './anim.js';
 import { CLASSES } from '../content/zone.js';
 import { getMount } from '../content/mounts.js';
 import { getMob } from '../content/mobs.js';
+import { getItem } from '../content/items.js';
 import { getVendor } from '../content/vendors.js';
 import { TICK_MS } from '../sim/formulas.js';
 import { clipFor, modelFor, setModelOverride, type ModelDef, type ModelState } from '../content/models.js';
@@ -93,7 +106,12 @@ export class EntityView {
    * Limbs that move on their own, for the few bodies built with joints.
    * Empty for an ordinary creature, whose body is one welded geometry.
    */
-  private readonly joints = new Map<Joint, THREE.Mesh>();
+  readonly joints = new Map<Joint, THREE.Mesh>();
+  /** What this body is shaped like — kept for re-gripping a new weapon. */
+  private readonly plan: BodyPlan;
+  /** What is in the hands right now, so an unchanged loadout rebuilds nothing. */
+  private gearKey = '';
+  private held: THREE.Mesh[] = [];
   /** Overhead "interact with me" marker; vendors only. */
   private marker: THREE.Mesh | null = null;
   /** The horse under the player, when they are riding one. */
@@ -145,6 +163,7 @@ export class EntityView {
     // a mannequin on a conveyor belt, and the player is looking at theirs the
     // entire game.
     const articulate = entity.kind !== 'mob';
+    this.plan = plan;
     if (articulate) {
       const built = jointedBody(plan, view.height, view.radius);
       this.mesh = new THREE.Mesh(built.trunk, this.material);
@@ -157,8 +176,14 @@ export class EntityView {
         this.body.add(limb);
         this.joints.set(part.joint, limb);
       }
+      // Whatever they are carrying right now, hung off the arm that swings it.
+      this.setGear(entity);
     } else {
-      this.mesh = new THREE.Mesh(mergeBody(plan, view.height, view.radius), this.material);
+      // An ordinary creature's weapon is welded in with the rest of it: a camp
+      // of outlaws is six hundred draw calls' worth of reasons not to give
+      // each of them a sword of their own.
+      const carried = plan.carries ? weaponParts(plan.carries) : [];
+      this.mesh = new THREE.Mesh(mergeBody(plan, view.height, view.radius, carried), this.material);
       this.mesh.castShadow = true;
       this.body.add(this.mesh);
     }
@@ -381,9 +406,86 @@ export class EntityView {
     this.anim.update(dtMs);
   }
 
+  /**
+   * Put what they are actually carrying in their hands.
+   *
+   * Every other piece of gear in this game is a number in a panel. A weapon is
+   * the one you are looking at for the whole game, and a character who picks
+   * up a spear and goes on swinging the same abstract blade is a character
+   * whose equipment screen might as well be a spreadsheet.
+   *
+   * Cheap to call every frame: it hashes the loadout and does nothing at all
+   * unless something actually changed.
+   */
+  setGear(entity: Entity): void {
+    if (!this.plan.hand || this.joints.size === 0) return;
+    const mainId = entity.equipment?.weapon;
+    const offId = entity.equipment?.offhand;
+    const key = `${mainId ?? ''}|${offId ?? ''}`;
+    if (key === this.gearKey) return;
+    this.gearKey = key;
+
+    for (const mesh of this.held) {
+      mesh.parent?.remove(mesh);
+      mesh.geometry.dispose();
+      (mesh.material as THREE.Material).dispose();
+    }
+    this.held = [];
+
+    const main = mainId ? getItem(mainId) : undefined;
+    const off = offId ? getItem(offId) : undefined;
+    const look = weaponLookFor(main?.name, entity.classId);
+    // A bow is held across the body in the hand that is not drawing it, which
+    // is the off hand — the same hand a shield goes in, so it takes priority.
+    const bow = look === 'bow';
+    this.grip(weaponParts(look), bow ? 'off' : 'main', main?.quality ?? 'common');
+    if (!bow) {
+      this.grip(offhandParts(offhandLookFor(off?.name)), 'off', off?.quality ?? 'common');
+    }
+  }
+
+  /** Hang one weapon off the arm that swings it. */
+  private grip(parts: BodyPart[], hand: 'main' | 'off', quality: string): void {
+    const geo = heldGeometry(parts, this.builtHeight);
+    if (!geo || !this.plan.hand) return;
+    const limb = this.joints.get(hand === 'main' ? 'armR' : 'armL');
+    if (!limb) {
+      geo.dispose();
+      return;
+    }
+    // Its own material, tinted by the item's quality: this is the one place
+    // where the difference between a rusted blade and a Sovereign one is
+    // visible from across a camp rather than only in a tooltip.
+    const mesh = new THREE.Mesh(
+      geo,
+      new THREE.MeshStandardMaterial({
+        color: QUALITY_METAL[quality] ?? QUALITY_METAL.common,
+        roughness: 0.45,
+        metalness: 0.35,
+        vertexColors: true,
+      }),
+    );
+    mesh.castShadow = true;
+    // The grip is in the creature's own space; the limb it hangs from has
+    // already been re-origined onto its own hinge.
+    const grip = this.plan.hand[hand];
+    mesh.position.set(
+      grip[0] * this.builtHeight - limb.position.x,
+      grip[1] * this.builtHeight - limb.position.y,
+      grip[2] * this.builtHeight - limb.position.z,
+    );
+    mesh.userData.entityId = this.id;
+    limb.add(mesh);
+    this.held.push(mesh);
+  }
+
   dispose(): void {
     this.mesh.geometry.dispose();
     for (const limb of this.joints.values()) limb.geometry.dispose();
+    for (const mesh of this.held) {
+      mesh.geometry.dispose();
+      (mesh.material as THREE.Material).dispose();
+    }
     this.material.dispose();
   }
 }
@@ -926,6 +1028,7 @@ export class ViewManager {
             ? getVendor(entity.vendorId!).view.color
             : CLASSES[entity.classId ?? 'warrior'].color;
       if (entity.kind === 'player') view.setMount(entity.mounted ?? null);
+      view.setGear(entity);
       view.update(alpha, dtMs, entity.id === targetId, baseColor);
       // Corpses stay visible but sink out of the way until they respawn.
       view.group.visible = !entity.dead || entity.kind === 'mob';

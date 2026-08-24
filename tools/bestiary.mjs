@@ -134,6 +134,30 @@ for (const zone of ZONES) {
   console.log(`${zone}: ${shot.names.join(', ')}`);
 }
 
+// What is in your hands. Every weapon shape, one after another, on the figure
+// that is on screen for the whole game.
+const gearLooks = await page.evaluate(async () => {
+  const g = window.__game;
+  if (g.world.zone.id !== 'fenmarch') g.world.travelTo('fenmarch');
+  await new Promise((r) => setTimeout(r, 1200));
+  for (const def of g.allMobs()) def.aggroRadius = 0;
+  g.world.worldTimeMs = g.dayLengthMs * 0.5;
+  g.rig.distance = 5;
+  g.rig.pitch = 0.22;
+  g.rig.yaw = Math.PI * 0.8;
+  g.rig.stream(g.world.player.pos.x, g.world.player.pos.z, true);
+  return g.weaponLooks();
+});
+for (const look of gearLooks) {
+  await page.evaluate((weapon) => {
+    const g = window.__game;
+    g.world.player.equipment = { ...g.world.player.equipment, weapon };
+  }, look.itemId);
+  await wait(700);
+  await page.screenshot({ path: join(OUT, `gear-${look.look}.png`) });
+}
+console.log(`gear: ${gearLooks.map((l) => l.look).join(', ')}`);
+
 // The dragon, which never stands in a spawn list and so is never in a lineup.
 await page.evaluate(async () => {
   const g = window.__game;

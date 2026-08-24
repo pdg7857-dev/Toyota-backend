@@ -1000,6 +1000,46 @@ Four things make it affordable at six hundred creatures a zone:
 to stand for the whole animal, so it survives as a *nudge* to girth rather than
 as the width itself. Taking it literally turned the Ardmoor goats into barrels.
 
+### What is in your hands
+
+Every other piece of gear in this game is a number in a panel. A weapon is the
+one you look at for the whole game, and a character who picks up a spear and
+goes on swinging the same abstract blade has an equipment screen that might as
+well be a spreadsheet.
+
+So a weapon is **not part of a `BodyPlan`** — a plan is baked into geometry
+once, and what somebody is carrying changes while they are standing there. A
+plan names two grip points instead, and `EntityView.setGear` hangs the right
+object off the arm that swings it. It hashes the loadout, so calling it every
+frame for every entity costs nothing until something actually changes.
+
+Eight shapes: blade, greatsword, axe, mace, spear, dagger, bow, staff. Which
+one an item is comes from **its own name**, for the same reason the creature
+shapes do — five of the eight weapon ladders are generated, so a per-item field
+would have to be generated from the name, which is the keyword table with an
+extra step. The class is the fallback and it does real work, because weapons
+are class-locked: a Mage's `Blackstone Focus` and a Priest's `Chieftain's
+Reliquary` name no object anybody would recognise, and knowing the class is
+enough to know one is a staff.
+
+The held weapon carries **its own material, tinted by the item's quality**.
+That is the one place gear becomes visible without a wardrobe system: a rusted
+blade is dull iron and a Sovereign one is bright, and you can tell across a
+camp which somebody is carrying. It is also what finally makes Ceallach's
+offhands visible — a bulwark, a second blade and a grimoire are three
+different characters and now they look like it.
+
+A creature that is not articulated still carries something: `mergeBody` welds
+its plan's default weapon in with everything else, so a camp of outlaws has
+blades and costs no more draw calls than it did.
+
+The printed table in `npm test` is what makes this maintainable, and it earned
+that immediately: seventy-eight weapons had piled into `blade`, and the class
+fallback plus a dozen more words cut it to twenty. It also caught `Mirefang
+Bow` coming out as a dagger — a rare spawn's epithet is a made-up word glued
+onto a real one, and `fang` is longer than `bow`. Whole words are matched
+before fragments now; `Fenblade`, which is one word, still finds its blade.
+
 ### Somebody has to look at the wolf
 
 `tools/bestiary.mjs` stands one of every creature in a zone in a row, at noon,

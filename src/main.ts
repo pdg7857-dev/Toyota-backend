@@ -1,9 +1,9 @@
 import { World } from './sim/world.js';
 import { TICK_MS, xpToNext } from './sim/formulas.js';
 import { CLASSES, FENMARCH } from './content/zone.js';
-import { canEquip, getItem } from './content/items.js';
+import { ITEMS, canEquip, getItem } from './content/items.js';
 import { MOBS, getMob } from './content/mobs.js';
-import { bodyPlanFor } from './content/bodies.js';
+import { bodyPlanFor, weaponLookFor } from './content/bodies.js';
 import { DAY_LENGTH_MS } from './content/daylight.js';
 import { getQuest } from './content/quests.js';
 import { getHolding } from './content/factions.js';
@@ -249,6 +249,21 @@ async function boot(): Promise<void> {
     bodyPlanFor: (mobId: string) => bodyPlanFor(getMob(mobId)),
     dayLengthMs: DAY_LENGTH_MS,
     allMobs: () => Object.values(MOBS),
+    allItems: () => ITEMS,
+    weaponLookFor,
+    /**
+     * One item per weapon silhouette, for `tools/bestiary.mjs`. A shape nobody
+     * ever looks at is a shape nobody notices is wrong.
+     */
+    weaponLooks: () => {
+      const seen = new Map<string, string>();
+      for (const item of Object.values(ITEMS)) {
+        if (item.slot !== 'weapon') continue;
+        const look = weaponLookFor(item.name, item.classes?.[0]);
+        if (!seen.has(look)) seen.set(look, item.id);
+      }
+      return [...seen].map(([look, itemId]) => ({ look, itemId }));
+    },
     questOf: (questId: string) => getQuest(questId),
     holdingOf: (holdingId: string) => getHolding(holdingId),
     dragons: () => DRAGONS,

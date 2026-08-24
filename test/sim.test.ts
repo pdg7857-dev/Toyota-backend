@@ -44,7 +44,16 @@ import {
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { grindMobFor, killsForLevel } from './pace.js';
 import { MODELS, clipFor } from '../src/content/models.js';
-import { BODY_PLANS, bodyPlanFor, bodyPlanForClass } from '../src/content/bodies.js';
+import {
+  BODY_PLANS,
+  QUALITY_METAL,
+  bodyPlanFor,
+  bodyPlanForClass,
+  offhandLookFor,
+  offhandParts,
+  weaponLookFor,
+  weaponParts,
+} from '../src/content/bodies.js';
 import {
   DAY_LENGTH_MS,
   NIGHT_FLOOR,
@@ -3709,6 +3718,74 @@ describe('every creature has a shape', () => {
       console.log(`    ${planId.padEnd(9)} ${names.slice(0, 5).join(', ')}${names.length > 5 ? ` +${names.length - 5}` : ''}`);
     }
     expect(missing, `creatures with no shape: ${missing.join('; ')}`).toEqual([]);
+  });
+
+  it('puts what you are actually carrying in your hands', () => {
+    // Every other piece of gear in this game is a number in a panel. A weapon
+    // is the one you are looking at all game, and a character who picks up a
+    // spear and goes on swinging the same abstract blade has an equipment
+    // screen that might as well be a spreadsheet.
+    const table = new Map<string, string[]>();
+    for (const item of Object.values(ITEMS)) {
+      if (item.slot !== 'weapon') continue;
+      const look = weaponLookFor(item.name, item.classes?.[0]);
+      expect(weaponParts(look).length, `${item.name} resolves a shape with nothing in it`)
+        .toBeGreaterThan(0);
+      const row = table.get(look) ?? [];
+      row.push(item.name);
+      table.set(look, row);
+    }
+    console.log('\n  weapon shapes');
+    for (const [look, names] of [...table].sort()) {
+      console.log(`    ${look.padEnd(11)} ${names.length.toString().padStart(3)}  ${names.slice(0, 4).join(', ')}`);
+    }
+    // Not one shape for every weapon in the game. If a ladder ever lands on a
+    // single look, "my new sword" and "my old sword" become the same picture.
+    expect(table.size).toBeGreaterThan(4);
+  });
+
+  it('reads a whole word before a fragment of one', () => {
+    // A rare spawn's epithet is a made-up word glued onto a real one, and it
+    // collides: `Mirefang Bow` matched `fang` before `bow` and the Ranger's
+    // signature longbow came out as a knife.
+    expect(weaponLookFor('Mirefang Bow', 'ranger')).toBe('bow');
+    expect(weaponLookFor('Mirefang Rod', 'mage')).toBe('staff');
+    expect(weaponLookFor('Mirefang Dirk', 'rogue')).toBe('dagger');
+    // And a single made-up word still finds the real one inside it.
+    expect(weaponLookFor('Fenblade', 'warrior')).toBe('blade');
+  });
+
+  it('gives every class a weapon even when its name says nothing', () => {
+    for (const cls of PLAYABLE_CLASSES) {
+      const look = weaponLookFor(undefined, cls.id);
+      expect(look, `${cls.id} falls back to nothing`).not.toBe('none');
+      expect(weaponParts(look).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('makes the three offhands three different objects', () => {
+    // The offhand is the most build choice in the game — a blade, a bulwark or
+    // a grimoire is three characters — which is exactly why it is the slot
+    // that most has to be visible.
+    const looks = new Set<string>();
+    for (const item of Object.values(ITEMS)) {
+      if (item.slot !== 'offhand') continue;
+      const look = offhandLookFor(item.name);
+      expect(look, `${item.name} is carried as nothing`).not.toBe('none');
+      expect(offhandParts(look).length).toBeGreaterThan(0);
+      looks.add(look);
+    }
+    expect(looks.size, `offhands all look alike: ${[...looks]}`).toBe(3);
+  });
+
+  it('has a metal for every quality an item can be', () => {
+    // A missing entry is a weapon that silently falls back to common — which
+    // reads as "my epic looks like my starter blade", the exact opposite of
+    // what this is for.
+    for (const item of Object.values(ITEMS)) {
+      expect(QUALITY_METAL[item.quality], `no metal for ${item.quality}`).toBeDefined();
+    }
+    expect(new Set(Object.values(QUALITY_METAL)).size).toBe(Object.keys(QUALITY_METAL).length);
   });
 
   it('gives the four dragons the only shape with wings on it', () => {

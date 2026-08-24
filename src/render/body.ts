@@ -109,10 +109,50 @@ export function girthOf(height: number, radius: number): number {
   return Math.max(0.85, Math.min(1.25, 1 + (ratio - 1) * 0.35));
 }
 
+/**
+ * A weapon, gripped at a point and returned as one geometry.
+ *
+ * Separate from the body because what somebody is carrying changes while they
+ * are standing there. On an articulated figure this becomes its own mesh with
+ * its own material, hung off the arm; on an ordinary creature `mergeBody`
+ * welds it in with everything else.
+ */
+export function heldGeometry(parts: BodyPart[], height: number): THREE.BufferGeometry | null {
+  if (parts.length === 0) return null;
+  const pieces: THREE.BufferGeometry[] = [];
+  for (const part of parts) {
+    // Girth is a fact about a creature's body, not about its sword.
+    const geo = partGeometry(part, height, 1);
+    place(geo, part, height, 1, false);
+    tint(geo, part.tone ?? 1);
+    pieces.push(geo);
+  }
+  const merged = mergeGeometries(pieces) ?? pieces[0]!;
+  if (merged !== pieces[0]) for (const p of pieces) p.dispose();
+  merged.computeVertexNormals();
+  return merged;
+}
+
 /** The whole plan as one geometry. Nothing on it can move independently. */
-export function mergeBody(plan: BodyPlan, height: number, radius: number): THREE.BufferGeometry {
+export function mergeBody(
+  plan: BodyPlan,
+  height: number,
+  radius: number,
+  /** Weapon parts to weld into the main hand, for a creature with no joints. */
+  held: BodyPart[] = [],
+): THREE.BufferGeometry {
   const girth = girthOf(height, radius);
   const pieces: THREE.BufferGeometry[] = [];
+  if (plan.hand && held.length > 0) {
+    const grip = plan.hand.main;
+    for (const part of held) {
+      const geo = partGeometry(part, height, 1);
+      place(geo, part, height, 1, false);
+      geo.translate(grip[0] * height, grip[1] * height, grip[2] * height);
+      tint(geo, part.tone ?? 1);
+      pieces.push(geo);
+    }
+  }
   for (const { part, flip } of expand(plan)) {
     const geo = partGeometry(part, height, girth);
     if (flip) geo.scale(-1, 1, 1);

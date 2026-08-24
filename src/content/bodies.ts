@@ -77,6 +77,16 @@ export interface BodyPlan {
   /** What it should read as at forty metres. Printed by the test that walks them. */
   reads: string;
   /**
+   * Where a weapon is gripped, in height units — main hand and off hand.
+   *
+   * Present only on plans that have hands. Weapons are deliberately *not* part
+   * of the plan: what somebody is carrying changes while they are standing
+   * there, and a plan is baked into geometry once.
+   */
+  hand?: { main: [number, number, number]; off: [number, number, number] };
+  /** What this creature carries when nothing says otherwise. */
+  carries?: WeaponLook;
+  /**
    * How much of the creature's height is taken up by legs.
    *
    * The renderer needs this to know where a body pivots when it leans, and it
@@ -260,8 +270,6 @@ interface HumanoidKnobs {
   head: number;
   /** A helmet or hood rather than a bare head. */
   helm?: boolean;
-  /** Something in its hands. */
-  weapon?: 'blade' | 'axe' | 'bow' | 'staff' | 'none';
 }
 
 /**
@@ -274,7 +282,7 @@ interface HumanoidKnobs {
  * shoulders, and those two numbers are most of what makes a silhouette read as
  * a person at all.
  */
-function humanoid(k: HumanoidKnobs): BodyPart[] {
+function humanoid(k: HumanoidKnobs): { parts: BodyPart[]; hand: BodyPlan['hand'] } {
   const parts: BodyPart[] = [];
   const hip = k.hip;
   const chest = hip + 0.2;
@@ -324,57 +332,246 @@ function humanoid(k: HumanoidKnobs): BodyPart[] {
     mirror: 'armL',
   });
 
-  // And what is in the hands — the only thing that says which of five classes
-  // this is, and the thing the animation swings.
-  const weapon = k.weapon ?? 'blade';
   const handY = shoulder - 0.36;
-  if (weapon === 'blade' || weapon === 'axe') {
-    parts.push({
-      shape: 'box',
-      size: [0.022, weapon === 'axe' ? 0.3 : 0.4, 0.05],
-      at: [k.half * 1.35, handY + 0.16, 0.08],
-      rot: [-0.45, 0, 0.16],
-      tone: 2.1,
-      joint: 'armR',
-    });
-    if (weapon === 'axe') {
-      parts.push({
-        shape: 'box',
-        size: [0.028, 0.11, 0.14],
-        at: [k.half * 1.35, handY + 0.3, 0.16],
-        rot: [-0.45, 0, 0.16],
-        tone: 2.4,
-        joint: 'armR',
-      });
-    }
-  } else if (weapon === 'bow') {
-    parts.push({
-      shape: 'box',
-      size: [0.02, 0.46, 0.03],
-      at: [-k.half * 1.35, handY + 0.1, 0.06],
-      rot: [0, 0, 0.1],
-      tone: 0.55,
-      joint: 'armL',
-    });
-  } else if (weapon === 'staff') {
-    parts.push({
-      shape: 'capsule',
-      size: [0.014, 0.62, 0],
-      at: [k.half * 1.35, handY + 0.22, 0.06],
-      rot: [-0.1, 0, 0.08],
-      tone: 0.55,
-      joint: 'armR',
-    });
-  }
-  return parts;
+  return { parts, hand: { main: [k.half * 1.35, handY, 0.06], off: [-k.half * 1.35, handY, 0.06] } };
 }
+
+/* ------------------------------------------------------------------ */
+/* What is in the hands                                                */
+/*                                                                     */
+/* Deliberately not part of a `BodyPlan`. A plan is baked into geometry */
+/* once, and what somebody is carrying changes while they are standing  */
+/* there — you buy a spear and you are holding a spear. So a weapon is  */
+/* its own small set of parts, gripped at a point the plan names.       */
+/* ------------------------------------------------------------------ */
+
+export type WeaponLook =
+  | 'blade'
+  | 'greatsword'
+  | 'axe'
+  | 'mace'
+  | 'spear'
+  | 'dagger'
+  | 'bow'
+  | 'staff'
+  | 'none';
+
+export type OffhandLook = 'blade' | 'bulwark' | 'grimoire' | 'none';
+
+/**
+ * What a weapon looks like, from its name.
+ *
+ * Matched on the item's own name rather than a field, for the same reason the
+ * creature shapes are: five of the eight weapon ladders are *generated*, so a
+ * per-item field would have to be generated from the name — which is this
+ * table with an extra step.
+ *
+ * The class is the fallback and it does real work, because weapons are
+ * class-locked: a Mage's `Blackstone Focus` and a Priest's `Chieftain's
+ * Reliquary` name no object anybody would recognise, and the class is enough
+ * to know one is a staff and the other is not. The printed table in the test
+ * is what caught them sitting in the `blade` bucket with seventy-six others.
+ */
+const WEAPON_WORDS: [string, WeaponLook][] = [
+  ['greatsword', 'greatsword'],
+  ['claymore', 'greatsword'],
+  ['longsword', 'greatsword'],
+  ['warblade', 'greatsword'],
+  ['sword', 'blade'],
+  ['blade', 'blade'],
+  ['sabre', 'blade'],
+  ['saber', 'blade'],
+  ['falchion', 'blade'],
+  ['axe', 'axe'],
+  ['cleaver', 'axe'],
+  ['hatchet', 'axe'],
+  ['mace', 'mace'],
+  ['hammer', 'mace'],
+  ['maul', 'mace'],
+  ['club', 'mace'],
+  ['cudgel', 'mace'],
+  ['flail', 'mace'],
+  ['reliquary', 'mace'],
+  ['scepter', 'mace'],
+  ['sceptre', 'mace'],
+  ['spear', 'spear'],
+  ['pike', 'spear'],
+  ['lance', 'spear'],
+  ['glaive', 'spear'],
+  ['halberd', 'spear'],
+  ['dagger', 'dagger'],
+  ['knife', 'dagger'],
+  ['dirk', 'dagger'],
+  ['shiv', 'dagger'],
+  ['stiletto', 'dagger'],
+  ['kris', 'dagger'],
+  ['fang', 'dagger'],
+  ['bow', 'bow'],
+  ['recurve', 'bow'],
+  ['sling', 'bow'],
+  ['stave', 'staff'],
+  ['staff', 'staff'],
+  ['rod', 'staff'],
+  ['wand', 'staff'],
+  ['branch', 'staff'],
+  ['crook', 'staff'],
+  ['crozier', 'staff'],
+  ['focus', 'staff'],
+  ['talisman', 'staff'],
+  ['heartwood', 'staff'],
+];
+
+const WEAPON_SORTED = [...WEAPON_WORDS].sort((a, b) => b[0].length - a[0].length);
+
+/** What this class carries when its weapon's name says nothing useful. */
+const CLASS_WEAPON: Record<string, WeaponLook> = {
+  warrior: 'axe',
+  priest: 'mace',
+  ranger: 'bow',
+  rogue: 'dagger',
+  mage: 'staff',
+};
+
+export function weaponLookFor(name: string | undefined, classId: string | undefined): WeaponLook {
+  if (name) {
+    const key = name.toLowerCase();
+    // Whole words first, then anywhere in the name.
+    //
+    // `Mirefang Bow` is a bow. Matching anywhere and taking the longest word
+    // made it a dagger, because a rare spawn's epithet is a made-up word glued
+    // onto a real one and `fang` is longer than `bow`. A whole word beats a
+    // fragment; `Fenblade`, which is one word, still finds its blade on the
+    // second pass.
+    const words = key.split(/[^a-z]+/).filter(Boolean);
+    for (const [word, look] of WEAPON_SORTED) {
+      if (words.includes(word)) return look;
+    }
+    for (const [word, look] of WEAPON_SORTED) {
+      if (key.includes(word)) return look;
+    }
+  }
+  return CLASS_WEAPON[classId ?? ''] ?? 'blade';
+}
+
+/**
+ * The offhand is the one slot in the game that is a build decision, so it is
+ * the one that most has to be visible: a bulwark, a second blade and a
+ * grimoire are three different characters and they should not look alike.
+ */
+export function offhandLookFor(name: string | undefined): OffhandLook {
+  if (!name) return 'none';
+  const key = name.toLowerCase();
+  if (key.includes('bulwark') || key.includes('shield') || key.includes('targe')) return 'bulwark';
+  if (key.includes('grimoire') || key.includes('tome') || key.includes('codex')) return 'grimoire';
+  return 'blade';
+}
+
+/**
+ * The weapon itself, in height units, gripped at the origin.
+ *
+ * `tone` is left at 1 throughout: a held weapon gets its own material, tinted
+ * by the item's quality, so a rusted blade and a Sovereign one are visibly
+ * different objects rather than the same object in the body's colour.
+ */
+export function weaponParts(look: WeaponLook): BodyPart[] {
+  switch (look) {
+    case 'blade':
+      return [
+        { shape: 'box', size: [0.022, 0.36, 0.05], at: [0, 0.14, 0.02], rot: [-0.35, 0, 0] },
+        { shape: 'box', size: [0.07, 0.02, 0.03], at: [0, -0.02, 0], tone: 0.5 },
+      ];
+    case 'greatsword':
+      return [
+        { shape: 'box', size: [0.03, 0.62, 0.06], at: [0, 0.3, 0.04], rot: [-0.3, 0, 0] },
+        { shape: 'box', size: [0.11, 0.025, 0.035], at: [0, -0.01, 0], tone: 0.5 },
+      ];
+    case 'axe':
+      return [
+        { shape: 'capsule', size: [0.014, 0.34, 0], at: [0, 0.14, 0.02], rot: [-0.35, 0, 0], tone: 0.45 },
+        { shape: 'box', size: [0.03, 0.12, 0.15], at: [0, 0.28, 0.09], rot: [-0.35, 0, 0] },
+      ];
+    case 'mace':
+      return [
+        { shape: 'capsule', size: [0.014, 0.3, 0], at: [0, 0.12, 0.02], rot: [-0.35, 0, 0], tone: 0.45 },
+        { shape: 'sphere', size: [0.055, 1, 1], at: [0, 0.28, 0.08] },
+      ];
+    case 'spear':
+      return [
+        { shape: 'capsule', size: [0.013, 0.9, 0], at: [0, 0.24, 0.06], rot: [-0.2, 0, 0], tone: 0.45 },
+        { shape: 'cone', size: [0.032, 0.16, 0], at: [0, 0.68, 0.15], rot: [-0.2, 0, 0] },
+      ];
+    case 'dagger':
+      return [
+        { shape: 'box', size: [0.018, 0.18, 0.035], at: [0, 0.08, 0.01], rot: [-0.35, 0, 0] },
+        { shape: 'box', size: [0.05, 0.015, 0.025], at: [0, -0.01, 0], tone: 0.5 },
+      ];
+    case 'bow':
+      // Held across the body in the off hand, so it reads as a bow rather than
+      // as a stick: the string is what makes the shape, and it is one box.
+      return [
+        { shape: 'box', size: [0.018, 0.52, 0.03], at: [0, 0.1, 0.02], rot: [0, 0, 0.1], tone: 0.5 },
+        { shape: 'box', size: [0.006, 0.5, 0.006], at: [0, 0.1, -0.05], rot: [0, 0, 0.1], tone: 1.6 },
+      ];
+    case 'staff':
+      return [
+        { shape: 'capsule', size: [0.014, 0.78, 0], at: [0, 0.24, 0.02], rot: [-0.08, 0, 0], tone: 0.5 },
+        { shape: 'sphere', size: [0.04, 1.1, 1.1], at: [0, 0.62, 0.05], tone: 1.8 },
+      ];
+    case 'none':
+      return [];
+  }
+}
+
+export function offhandParts(look: OffhandLook): BodyPart[] {
+  switch (look) {
+    case 'bulwark':
+      return [
+        { shape: 'box', size: [0.03, 0.34, 0.28], at: [-0.04, 0.06, 0.02], rot: [0, 0, 0.08] },
+        { shape: 'sphere', size: [0.05, 0.7, 0.7], at: [-0.06, 0.06, 0.02], tone: 1.5 },
+      ];
+    case 'grimoire':
+      return [
+        { shape: 'box', size: [0.05, 0.18, 0.14], at: [-0.03, 0.04, 0.03], rot: [0, 0, 0.25] },
+        { shape: 'box', size: [0.02, 0.16, 0.12], at: [-0.06, 0.04, 0.03], rot: [0, 0, 0.25], tone: 1.8 },
+      ];
+    case 'blade':
+      return [
+        { shape: 'box', size: [0.02, 0.28, 0.045], at: [0, 0.11, 0.02], rot: [-0.35, 0, 0] },
+        { shape: 'box', size: [0.06, 0.018, 0.028], at: [0, -0.02, 0], tone: 0.5 },
+      ];
+    case 'none':
+      return [];
+  }
+}
+
+/**
+ * What a held weapon is made of, by the item's quality.
+ *
+ * The one place gear becomes visible without a wardrobe system: a rusted blade
+ * is dull iron and a Sovereign one is bright, and you can see across a camp
+ * which of the two somebody is carrying.
+ */
+export const QUALITY_METAL: Record<string, number> = {
+  common: 0x8b8b86,
+  uncommon: 0x9fb08a,
+  rare: 0x8fa8d8,
+  epic: 0xd9b25c,
+};
 
 /* ------------------------------------------------------------------ */
 /* The plans                                                           */
 /* ------------------------------------------------------------------ */
 
-function plan(id: string, reads: string, pivot: number, parts: BodyPart[]): BodyPlan {
-  return { id, reads, pivot, parts };
+function plan(
+  id: string,
+  reads: string,
+  pivot: number,
+  built: BodyPart[] | { parts: BodyPart[]; hand: BodyPlan['hand'] },
+  carries?: WeaponLook,
+): BodyPlan {
+  const parts = Array.isArray(built) ? built : built.parts;
+  const hand = Array.isArray(built) ? undefined : built.hand;
+  return { id, reads, pivot, parts, hand, carries };
 }
 
 const PLANS = {
@@ -391,16 +588,16 @@ const PLANS = {
   ]),
 
   person: plan('person', 'someone on two legs, carrying something', 0.55,
-    humanoid({ half: 0.115, depth: 0.11, hip: 0.5, head: 0.066, weapon: 'blade' })),
+    humanoid({ half: 0.115, depth: 0.11, hip: 0.5, head: 0.066 }), 'blade'),
 
   archer: plan('archer', 'a lighter figure with a longbow', 0.55,
-    humanoid({ half: 0.105, depth: 0.1, hip: 0.51, head: 0.064, weapon: 'bow' })),
+    humanoid({ half: 0.105, depth: 0.1, hip: 0.51, head: 0.064 }), 'bow'),
 
   warrior: plan('warrior', 'a helmed, heavy-shouldered figure with an axe', 0.55,
-    humanoid({ half: 0.135, depth: 0.13, hip: 0.48, head: 0.068, helm: true, weapon: 'axe' })),
+    humanoid({ half: 0.135, depth: 0.13, hip: 0.48, head: 0.068, helm: true }), 'axe'),
 
   caster: plan('caster', 'a hooded figure leaning on a staff', 0.55,
-    humanoid({ half: 0.105, depth: 0.105, hip: 0.5, head: 0.065, helm: true, weapon: 'staff' })),
+    humanoid({ half: 0.105, depth: 0.105, hip: 0.5, head: 0.065, helm: true }), 'staff'),
 
   wolf: plan('wolf', 'low, long-backed, pricked ears, brush of a tail', 0.62,
     quadruped({ body: 1.15, girth: 0.17, back: 0.66, shin: 0.06, neck: [0.28, 0.06], head: 0.15, tail: 0.5, ears: 0.16 })),

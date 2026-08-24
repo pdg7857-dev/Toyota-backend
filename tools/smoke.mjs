@@ -1331,6 +1331,64 @@ async function main() {
     };
   });
 
+  // What is in your hands is what you equipped.
+  const gear = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const meView = () => g.views.get(me.id);
+    const held = () => {
+      let n = 0;
+      for (const j of ['armR', 'armL']) {
+        for (const child of meView().joints.get(j)?.children ?? []) if (child.isMesh) n++;
+      }
+      return n;
+    };
+    // Triangle count off the held meshes: two weapons of different shapes
+    // cannot come out the same size, and comparing shapes any other way means
+    // reaching into geometry this check has no business knowing about.
+    const tris = () => {
+      let n = 0;
+      for (const j of ['armR', 'armL']) {
+        for (const c of meView().joints.get(j)?.children ?? []) {
+          if (!c.isMesh) continue;
+          n += c.geometry.index
+            ? c.geometry.index.count / 3
+            : c.geometry.attributes.position.count / 3;
+        }
+      }
+      return n;
+    };
+
+    // Two weapons this character can actually hold whose names say two
+    // different objects — not two ids, two shapes.
+    const usable = Object.values(g.allItems()).filter((i) => i.slot === 'weapon' && g.canUse(i.id));
+    const byLook = new Map();
+    for (const i of usable) {
+      const look = g.weaponLookFor(i.name, me.classId);
+      if (!byLook.has(look)) byLook.set(look, i);
+    }
+    const picks = [...byLook.values()];
+    if (picks.length < 2) return { ok: false, why: `only ${picks.length} shapes available` };
+
+    const before = held();
+    me.equipment = { ...me.equipment, weapon: picks[0].id };
+    await new Promise((r) => setTimeout(r, 300));
+    const first = tris();
+    me.equipment = { ...me.equipment, weapon: picks[1].id };
+    await new Promise((r) => setTimeout(r, 300));
+    const second = tris();
+
+    return {
+      ok: true,
+      before,
+      after: held(),
+      shapes: picks.length,
+      first: picks[0].name,
+      second: picks[1].name,
+      changed: first !== second,
+    };
+  });
+
   // Combat feel: the flash where a hit lands.
   //
   // Structural, not visual — a burst that exists for one frame at sixty is
@@ -1488,6 +1546,8 @@ async function main() {
     ['and is still one mesh after growing legs', bodies.mobMeshes === 1],
     ['the figures you stand next to have joints', bodies.myJoints >= 4],
     ['and their limbs actually move', bodies.limbMoved],
+    ['you are holding something', gear.ok && gear.after > 0],
+    ['and swapping weapons changes what it is', gear.changed === true],
     ['bought and learned a zone skill', taught.ok],
     ['skill bar built two rows', bar.rows === 2 && bar.slots >= 15],
     ['unlearned skills still marked', bar.untaught > 0],
@@ -1577,7 +1637,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('wade:', JSON.stringify(wade));
-  console.log('bodies:', JSON.stringify(bodies));
+  console.log('bodies:', JSON.stringify(bodies), '| gear:', JSON.stringify(gear));
   console.log('map:', JSON.stringify(mapState), 'closed:', mapClosed);
   console.log('impact:', JSON.stringify(impact));
   console.log('shapes:', JSON.stringify(shapes));
