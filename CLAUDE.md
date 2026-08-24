@@ -532,6 +532,35 @@ three-way rule `castBreak` uses, for the same reason: if chip damage threw you,
 nobody would ever ride into a fight and the mount would stop existing the moment
 combat started.
 
+## The country between the camps
+
+Three kilometres of ground laid out as camps on a road measured **45% of every
+zone more than 250 units — forty-eight seconds' walk — from any creature at
+all**, with the worst spot over a thousand units from anything. That is what
+"the world feels empty" actually was.
+
+The obvious fix is more camps, and it is the wrong one: a camp is a place you
+*go to*, and scattering more of them makes every part of the map the same part
+of the map. What open country wants is not more grinding spots, it is **life**
+— solitary creatures you meet on the way somewhere, worth fighting while
+travelling and useless to farm because there is one of them.
+
+So `withStrays` puts one creature in each cell of an 11×11 grid over the whole
+zone. A grid rather than a scatter, because the number that matters is the
+*worst* gap and a scatter's whole nature is to leave holes. What each stray
+*is* comes from the nearest ordinary camp, so difficulty still runs north to
+south out in the wilds. Cells a camp already covers are skipped — one more
+creature beside eight is a rounding error on a camp, not life.
+
+It runs on the **finished** zone rather than from inside `layout`, because the
+things a stray must not stand on — a boss arena, a shopfront, the arrival point
+— are added to the literal after the bands are. Done inside, the clearances
+held by luck, and a clearance that holds by luck breaks the next time somebody
+changes a constant.
+
+`npm test` prints how empty each zone is: now 109 units to the nearest creature
+on average, 291 at worst.
+
 ## Landmarks, and camps that move
 
 Two things arrived together because they answer the same complaint: three

@@ -1654,6 +1654,47 @@ describe('the whole 1-100 progression', () => {
     expect(zones[zones.length - 1]!.levelRange[1]).toBe(MAX_LEVEL);
   });
 
+  it('leaves no quarter of the map with nothing in it', () => {
+    // The complaint this answers is "the world feels empty", and it was real:
+    // 45% of the ground was more than 250 units — forty-eight seconds' walk —
+    // from any creature, and the worst spot in the Fenmarch was over a
+    // thousand units from anything at all.
+    //
+    // Printed rather than merely asserted, because "the map feels empty" is a
+    // feeling and this is the number under it. A bound alone would have said
+    // "fine" at 44%.
+    const rows: string[] = [];
+    for (const zone of Object.values(ZONES)) {
+      let sum = 0;
+      let worst = 0;
+      let samples = 0;
+      const step = zone.halfSize / 12;
+      for (let x = -zone.halfSize; x <= zone.halfSize; x += step) {
+        for (let z = -zone.halfSize; z <= zone.halfSize; z += step) {
+          let best = Infinity;
+          for (const sp of zone.spawns) {
+            best = Math.min(best, Math.hypot(sp.pos.x - x, sp.pos.z - z));
+          }
+          sum += best;
+          worst = Math.max(worst, best);
+          samples++;
+        }
+      }
+      const mean = sum / samples;
+      rows.push(
+        `  ${zone.id.padEnd(10)} ${String(zone.spawns.length).padStart(4)} creatures  ` +
+          `nearest one is ${mean.toFixed(0)}u away on average, ${worst.toFixed(0)}u at worst`,
+      );
+      // At walking speed these are about twenty seconds and about a minute.
+      expect(mean, `${zone.id} is empty country`).toBeLessThan(140);
+      expect(worst, `${zone.id} has a dead quarter`).toBeLessThan(330);
+      // And not so full that the wilds stop being wild — a solitary creature
+      // you meet while travelling is life; a wall of them is a camp.
+      expect(mean, `${zone.id} is wall-to-wall creatures`).toBeGreaterThan(55);
+    }
+    console.log('\nHOW EMPTY THE COUNTRY IS\n' + rows.join('\n'));
+  });
+
   it('keeps every zone laid out safely', () => {
     for (const zone of Object.values(ZONES)) {
       // Bosses clear of unrelated camps.

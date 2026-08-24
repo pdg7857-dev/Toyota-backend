@@ -1,4 +1,5 @@
-import type { Attributes, ClassId, Vec2 } from '../sim/types.js';
+import { BOSS_STARS, type Attributes, type ClassId, type Vec2 } from '../sim/types.js';
+import { MOBS } from './mobs.js';
 import { SHORE_CLEARANCE, getTheme, terrainHeight } from './terrain.js';
 
 /**
@@ -289,6 +290,104 @@ function layout(theme: string, bands: BandSpec[]): SpawnPoint[] {
   return out;
 }
 
+/**
+ * How many single creatures are scattered across the open country.
+ *
+ * The wilds measured 45% of the ground more than 250 units — forty-eight
+ * seconds' walk — from any creature at all, with the worst spot over a
+ * thousand units from anything. That is what "the map feels empty" actually
+ * was, and it is worth fixing.
+ *
+ * The obvious fix is more camps, and it is the wrong one: a camp is a place you
+ * *go to*, and scattering more of them makes every part of the map the same
+ * part of the map. What open country wants is not more grinding spots, it is
+ * **life** — solitary animals you meet on the way somewhere, that give you
+ * something to fight while travelling and are useless to farm because there is
+ * one of them.
+ */
+const STRAY_CELLS = 11;
+
+/** How far a stray keeps from anything that is not open country. */
+const STRAY_CLEARANCE = 60;
+
+/** Deterministic, so the country is the same country every time you walk it. */
+function strayHash(a: number, b: number): number {
+  let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13) ^ (b + 0x27d4eb2f), 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+
+/**
+ * Scatter single creatures across a finished zone's empty country.
+ *
+ * Applied to the **whole** zone rather than from inside `layout`, because the
+ * things a stray must not stand on — a boss arena, a shopfront, the arrival
+ * point — are added to the literal after the bands are. Doing it inside meant
+ * the clearances held by luck, and a clearance that holds by luck is one that
+ * breaks the next time somebody changes a constant.
+ *
+ * A grid rather than a scatter, because the number that matters is the *worst*
+ * gap and a Poisson scatter's whole nature is to leave holes — which is the
+ * problem being solved. One per cell caps how far you can be from anything at
+ * roughly a cell's diagonal, whatever the hash does inside it.
+ *
+ * What each stray *is* comes from the nearest ordinary camp, so difficulty
+ * still runs north to south out in the country and a stray is never something
+ * ten levels above the ground it is standing on.
+ */
+function withStrays(zone: ZoneDef): ZoneDef {
+  const cell = (zone.halfSize * 2) / STRAY_CELLS;
+  const clear: Vec2[] = [
+    zone.playerStart,
+    ...zone.vendors.map((v) => v.pos),
+    ...zone.exits.map((e) => e.pos),
+  ];
+  // Only ordinary camps are worth copying: a guard post belongs to its boss, a
+  // garrison belongs to its holding, and a herd of horses in the middle of
+  // nowhere is a herd, not a stray.
+  const sources = zone.spawns.filter((sp) => {
+    if (sp.guardOf || sp.holding) return false;
+    const def = MOBS[sp.mobId];
+    return !!def && def.stars < BOSS_STARS && !def.horse && !def.dragon;
+  });
+  if (sources.length === 0) return zone;
+
+  // Bosses and their arenas keep a wide berth of their own: a wandering animal
+  // inside a telegraph circle is exactly the unrelated pull the arena-isolation
+  // test exists to prevent.
+  const arenas = zone.spawns.filter((sp) => (MOBS[sp.mobId]?.stars ?? 0) >= BOSS_STARS);
+
+  const out: SpawnPoint[] = [];
+  for (let i = 0; i < STRAY_CELLS; i++) {
+    for (let j = 0; j < STRAY_CELLS; j++) {
+      const x = -zone.halfSize + (i + 0.2 + strayHash(i, j) * 0.6) * cell;
+      const z = -zone.halfSize + (j + 0.2 + strayHash(j, i) * 0.6) * cell;
+      const at = dryPlace(x, z, zone.theme);
+
+      // Skip cells a camp already covers: one more creature beside eight is
+      // not life, it is a rounding error on a camp.
+      if (zone.spawns.some((sp) => Math.hypot(sp.pos.x - at.x, sp.pos.z - at.z) < cell * 0.45)) {
+        continue;
+      }
+      if (clear.some((p) => Math.hypot(p.x - at.x, p.z - at.z) < STRAY_CLEARANCE)) continue;
+      if (arenas.some((sp) => Math.hypot(sp.pos.x - at.x, sp.pos.z - at.z) < 130)) continue;
+
+      let nearest = sources[0]!;
+      let bestGap = Infinity;
+      for (const sp of sources) {
+        const gap = Math.hypot(sp.pos.x - at.x, sp.pos.z - at.z);
+        if (gap < bestGap) {
+          bestGap = gap;
+          nearest = sp;
+        }
+      }
+      out.push({ mobId: nearest.mobId, pos: at });
+    }
+  }
+  return { ...zone, spawns: [...zone.spawns, ...out] };
+}
+
 /** A boss and the guards that belong to it, on levelled ground off the road. */
 function arena(bossId: string, guardId: string, at: number, theme: string, guards = 4): SpawnPoint[] {
   const z = ROAD_START + (ROAD_END - ROAD_START) * at;
@@ -309,7 +408,7 @@ function arena(bossId: string, guardId: string, at: number, theme: string, guard
  * so wandering is a choice about scenery and rares rather than a difficulty
  * cliff.
  */
-export const FENMARCH: ZoneDef = {
+export const FENMARCH: ZoneDef = withStrays({
   id: 'fenmarch',
   name: 'The Fenmarch',
   halfSize: ZONE_HALF,
@@ -350,13 +449,13 @@ export const FENMARCH: ZoneDef = {
   ],
   levelRange: [1, 25],
   theme: 'plains',
-};
+});
 
 // --------------------------------------------------------------------------
 // Zones 2-4. Same shape as the Fenmarch, from the same generator.
 // --------------------------------------------------------------------------
 
-export const ARDMOOR: ZoneDef = {
+export const ARDMOOR: ZoneDef = withStrays({
   id: 'ardmoor',
   name: 'Ardmoor',
   halfSize: ZONE_HALF,
@@ -385,9 +484,9 @@ export const ARDMOOR: ZoneDef = {
     { toZoneId: 'fenmarch', pos: { x: -640, z: ROAD_START + ARRIVAL_GAP + 60 }, label: 'The Hill Road to the Fenmarch', minLevel: 1 },
     { toZoneId: 'reach', pos: { x: 800, z: -700 }, label: 'The Drowned Causeway', minLevel: 38 },
   ],
-};
+});
 
-export const SUNKEN_REACH: ZoneDef = {
+export const SUNKEN_REACH: ZoneDef = withStrays({
   id: 'reach',
   name: 'The Sunken Wood',
   halfSize: ZONE_HALF,
@@ -416,9 +515,9 @@ export const SUNKEN_REACH: ZoneDef = {
     { toZoneId: 'ardmoor', pos: { x: -640, z: ROAD_START + ARRIVAL_GAP + 60 }, label: 'The Causeway to Ardmoor', minLevel: 1 },
     { toZoneId: 'caer_dubh', pos: { x: 800, z: -700 }, label: 'The Black Road to Caer Dubh', minLevel: 66 },
   ],
-};
+});
 
-export const CAER_DUBH: ZoneDef = {
+export const CAER_DUBH: ZoneDef = withStrays({
   id: 'caer_dubh',
   name: 'Caer Dubh',
   halfSize: ZONE_HALF,
@@ -446,7 +545,7 @@ export const CAER_DUBH: ZoneDef = {
   exits: [
     { toZoneId: 'reach', pos: { x: -640, z: ROAD_START + ARRIVAL_GAP + 60 }, label: 'The Black Road to the Sunken Wood', minLevel: 1 },
   ],
-};
+});
 
 
 /** Every zone, keyed by id. Save files store a zone id, not a zone. */
