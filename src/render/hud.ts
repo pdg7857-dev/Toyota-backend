@@ -29,6 +29,8 @@ import type {
   Command,
   Entity,
   EntityId,
+  EquipSlot,
+  ItemStack,
   QuestObjective,
   SimEvent,
 } from '../sim/types.js';
@@ -148,6 +150,8 @@ export class Hud {
   /** Hotkey order for this character's class, filled in at construction. */
   private skillOrder: string[] = [];
   private nameplates = new Map<EntityId, HTMLElement>();
+  /** The bag item currently being dragged, so a slot can say whether it fits. */
+  private dragItemId: string | null = null;
   /** The last thing each adventurer said, for the bubble over their head. */
   private chatter = new Map<EntityId, { text: string; at: number }>();
   private projected = new THREE.Vector3();
@@ -1565,46 +1569,30 @@ export class Hud {
     }
   }
 
+  /**
+   * The backpack: what you are wearing, and what you are carrying.
+   *
+   * A paper doll rather than a list, because equipment is spatial in a player's
+   * head — you do not think "my head slot", you think "the thing on my head".
+   * Drag a piece out of the bag onto its slot to wear it, drag it off to take
+   * it off, and every square shows the full stat block on hover. Clicking still
+   * works for anyone who would rather not drag.
+   */
   private renderInventory(): void {
     const player = this.world.player;
     const body = this.els.inventoryBody;
     body.innerHTML = '';
 
-    const equipped = Object.entries(player.equipment ?? {}).filter(([, id]) => id);
-    const head = document.createElement('div');
-    head.className = 'muted';
-    head.style.cssText = 'font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px';
-    head.textContent = 'Equipped';
-    body.appendChild(head);
-
-    if (equipped.length === 0) {
-      const none = document.createElement('div');
-      none.className = 'empty';
-      none.textContent = 'Nothing equipped';
-      body.appendChild(none);
-    }
-    for (const [slot, itemId] of equipped) {
-      const item = getItem(itemId!);
-      const row = document.createElement('div');
-      row.className = 'inv-row clickable';
-      row.innerHTML =
-        `<span style="color:${QUALITY_COLORS[item.quality]}">${item.name}</span>` +
-        `<span class="equipped">${slot} ✕</span>`;
-      row.title = 'Click to unequip';
-      row.addEventListener('click', () => {
-        this.emit({ t: 'unequip', slot: slot as never });
-        this.renderInventory();
-      });
-      body.appendChild(row);
-    }
+    body.appendChild(this.buildPaperDoll(player));
 
     const sep = document.createElement('div');
-    sep.className = 'muted';
-    sep.style.cssText =
-      'font-size:10px;text-transform:uppercase;letter-spacing:.5px;margin:9px 0 3px;' +
-      'border-top:1px solid rgba(190,168,110,.28);padding-top:7px';
-    sep.textContent = `Bags — ${player.gold ?? 0} gold`;
+    sep.className = 'bag-head';
+    sep.innerHTML = `<span>Bags</span><span class="v">${(player.gold ?? 0).toLocaleString()} gold</span>`;
     body.appendChild(sep);
+
+    const grid = document.createElement('div');
+    grid.className = 'bag-grid';
+    body.appendChild(grid);
 
     const inv = player.inventory ?? [];
     if (inv.length === 0) {
@@ -1614,66 +1602,161 @@ export class Hud {
       body.appendChild(none);
       return;
     }
-    for (const stack of inv) {
-      const item = getItem(stack.itemId);
-      const usable = canEquip(item, player.classId);
-      const row = document.createElement('div');
-      row.className = `inv-row${item.slot && usable ? ' clickable' : ''}${usable ? '' : ' unusable'}`;
+    for (const stack of inv) grid.appendChild(this.buildBagSlot(player, stack));
+  }
 
-      // Is anything you are carrying this for? A collection grind is a lot
-      // easier to read when the bag itself says 4/6.
-      const wanted = (player.quests ?? [])
-        .map((q) => ({ quest: getQuest(q.questId), progress: q }))
-        .flatMap(({ quest, progress }) =>
-          quest.objectives.map((o, i) => ({ o, have: progress.counts[i] ?? 0 })),
-        )
-        .find(({ o }) => o.kind === 'collect' && o.itemId === stack.itemId);
+  /**
+   * The character, with a square for every slot.
+   *
+   * Empty slots are labelled and stay visible: a paper doll with the empty
+   * squares hidden is a list again, and the gaps are half the information —
+   * "I have nothing on my legs" is exactly what a player opens this to find out.
+   */
+  private buildPaperDoll(player: Entity): HTMLElement {
+    const doll = document.createElement('div');
+    doll.className = 'doll';
 
-      const taught = item.teaches ? getSkill(item.teaches) : null;
-      const known = taught ? (player.learnedSkills ?? []).includes(taught.id) : false;
-      const learnable = !!taught && usable && !known && player.level >= taught.reqLevel;
-      if (learnable) row.classList.add('clickable');
+    const slots: Array<{ slot: EquipSlot; label: string }> = [
+      { slot: 'head', label: 'Head' },
+      { slot: 'chest', label: 'Chest' },
+      { slot: 'legs', label: 'Legs' },
+      { slot: 'weapon', label: 'Weapon' },
+      { slot: 'offhand', label: 'Offhand' },
+      { slot: 'ring', label: 'Ring' },
+      { slot: 'amulet', label: 'Amulet' },
+      { slot: 'bracelet', label: 'Bracelet' },
+    ];
 
-      // Right-hand tag: the slot, or why you can't use it, or its vendor value.
-      let tag: string;
-      if ((item.slot || taught) && !usable) {
-        tag = `<span class="locked-class">${item.classes?.join('/')} only</span>`;
-      } else if (taught) {
-        tag = known ? 'known' : learnable ? 'learn' : `Lv ${taught.reqLevel}`;
-      } else if (wanted && wanted.o.kind === 'collect') {
-        const enough = Math.min(wanted.have, wanted.o.count) >= wanted.o.count;
-        tag = `<span class="${enough ? 'quest-have' : 'quest-want'}">${Math.min(
-          wanted.have,
-          wanted.o.count,
-        )}/${wanted.o.count}</span>`;
-      } else if (item.slot) {
-        tag = item.slot;
-      } else {
-        tag = `${item.value}g`;
-      }
+    for (const { slot, label } of slots) {
+      const itemId = player.equipment?.[slot];
+      const cell = document.createElement('div');
+      cell.className = `doll-slot${itemId ? ' filled' : ''}`;
+      cell.dataset.slot = slot;
 
-      row.innerHTML =
-        `<span style="color:${QUALITY_COLORS[item.quality]}">${item.name}` +
-        `${stack.qty > 1 ? ` <span class="muted">x${stack.qty}</span>` : ''}</span>` +
-        `<span class="muted">${tag}</span>`;
-
-      if (learnable) {
-        row.title = `Click to learn — ${taught!.description}`;
-        row.addEventListener('click', () => {
-          this.emit({ t: 'learnSkill', itemId: stack.itemId });
-          this.renderInventory();
+      if (itemId) {
+        const item = getItem(itemId);
+        cell.style.borderColor = QUALITY_COLORS[item.quality];
+        cell.innerHTML =
+          `<div class="doll-label">${label}</div>` +
+          `<div class="doll-name" style="color:${QUALITY_COLORS[item.quality]}">${item.name}</div>`;
+        cell.title = describeItem(itemId);
+        cell.draggable = true;
+        cell.addEventListener('dragstart', (e) => {
+          e.dataTransfer?.setData('text/plain', `unequip:${slot}`);
+          cell.classList.add('dragging');
         });
-      } else if (item.slot && usable) {
-        row.title = `Click to equip — ${describeItem(stack.itemId)}`;
-        row.addEventListener('click', () => {
-          this.emit({ t: 'equip', itemId: stack.itemId });
+        cell.addEventListener('dragend', () => cell.classList.remove('dragging'));
+        cell.addEventListener('click', () => {
+          this.emit({ t: 'unequip', slot });
           this.renderInventory();
         });
       } else {
-        row.title = describeItem(stack.itemId);
+        cell.innerHTML = `<div class="doll-label">${label}</div><div class="doll-empty">empty</div>`;
+        cell.title = `Nothing on your ${label.toLowerCase()}`;
       }
-      body.appendChild(row);
+
+      // Every slot accepts a drop, filled or not — swapping a worn piece for a
+      // better one is the commonest thing anybody does in here.
+      cell.addEventListener('dragover', (e) => {
+        if (!this.dragItemId) return;
+        const dragged = getItem(this.dragItemId);
+        if (dragged.slot !== slot || !canEquip(dragged, player.classId)) return;
+        e.preventDefault();
+        cell.classList.add('drop-target');
+      });
+      cell.addEventListener('dragleave', () => cell.classList.remove('drop-target'));
+      cell.addEventListener('drop', (e) => {
+        e.preventDefault();
+        cell.classList.remove('drop-target');
+        const payload = e.dataTransfer?.getData('text/plain') ?? '';
+        if (!payload.startsWith('equip:')) return;
+        const itemId = payload.slice('equip:'.length);
+        const dragged = getItem(itemId);
+        if (dragged.slot !== slot || !canEquip(dragged, player.classId)) return;
+        this.emit({ t: 'equip', itemId });
+        this.renderInventory();
+      });
+
+      doll.appendChild(cell);
     }
+    return doll;
+  }
+
+  /** One square in the bag. */
+  private buildBagSlot(player: Entity, stack: ItemStack): HTMLElement {
+    const item = getItem(stack.itemId);
+    const usable = canEquip(item, player.classId);
+    const wearable = !!item.slot && item.slot !== 'none' && usable;
+    const drinkable = !!item.consumable;
+    const taught = item.teaches ? getSkill(item.teaches) : null;
+    const known = taught ? (player.learnedSkills ?? []).includes(taught.id) : false;
+    const learnable = !!taught && usable && !known && player.level >= taught.reqLevel;
+
+    const cell = document.createElement('div');
+    cell.className = `bag-slot${usable ? '' : ' unusable'}`;
+    cell.style.borderColor = QUALITY_COLORS[item.quality];
+
+    // Is anything you are carrying this for? A collection grind is a lot
+    // easier to read when the bag itself says 4/6.
+    const wanted = (player.quests ?? [])
+      .map((q) => ({ quest: getQuest(q.questId), progress: q }))
+      .flatMap(({ quest, progress }) =>
+        quest.objectives.map((o, i) => ({ o, have: progress.counts[i] ?? 0 })),
+      )
+      .find(({ o }) => o.kind === 'collect' && o.itemId === stack.itemId);
+
+    let tag = '';
+    if ((item.slot || taught) && !usable) tag = `<span class="locked-class">${item.classes?.join('/')}</span>`;
+    else if (taught) tag = known ? 'known' : learnable ? 'learn' : `Lv ${taught.reqLevel}`;
+    else if (wanted && wanted.o.kind === 'collect') {
+      const have = Math.min(wanted.have, wanted.o.count);
+      tag = `<span class="${have >= wanted.o.count ? 'quest-have' : 'quest-want'}">${have}/${wanted.o.count}</span>`;
+    } else if (drinkable) tag = 'drink';
+    else if (item.slot && item.slot !== 'none') tag = item.slot;
+    else tag = `${item.value}g`;
+
+    cell.innerHTML =
+      `<div class="bag-name" style="color:${QUALITY_COLORS[item.quality]}">${item.name}</div>` +
+      `<div class="bag-foot"><span class="muted">${tag}</span>` +
+      `${stack.qty > 1 ? `<span class="bag-qty">${stack.qty}</span>` : ''}</div>`;
+    cell.title = describeItem(stack.itemId);
+
+    if (wearable) {
+      cell.draggable = true;
+      cell.classList.add('clickable');
+      cell.addEventListener('dragstart', (e) => {
+        this.dragItemId = stack.itemId;
+        e.dataTransfer?.setData('text/plain', `equip:${stack.itemId}`);
+        cell.classList.add('dragging');
+        // Light up the slot it belongs in, so a player who has not read a
+        // tooltip still knows where it goes.
+        this.root
+          .querySelectorAll(`.doll-slot[data-slot="${item.slot}"]`)
+          .forEach((el) => el.classList.add('wants'));
+      });
+      cell.addEventListener('dragend', () => {
+        this.dragItemId = null;
+        cell.classList.remove('dragging');
+        this.root.querySelectorAll('.doll-slot.wants').forEach((el) => el.classList.remove('wants'));
+      });
+      cell.addEventListener('click', () => {
+        this.emit({ t: 'equip', itemId: stack.itemId });
+        this.renderInventory();
+      });
+    } else if (learnable) {
+      cell.classList.add('clickable');
+      cell.addEventListener('click', () => {
+        this.emit({ t: 'learnSkill', itemId: stack.itemId });
+        this.renderInventory();
+      });
+    } else if (drinkable) {
+      cell.classList.add('clickable');
+      cell.addEventListener('click', () => {
+        this.emit({ t: 'use', itemId: stack.itemId });
+        this.renderInventory();
+      });
+    }
+    return cell;
   }
 }
 
@@ -1700,20 +1783,55 @@ function bandClass(band: StandingBand): string {
   return 'band-good';
 }
 
+/**
+ * Everything an item does, as a block a player can read.
+ *
+ * Every field the sim reads gets a line. An item whose tooltip lists three of
+ * its six properties is worse than no tooltip: it teaches the player that the
+ * numbers here are not the numbers, and then they stop reading it.
+ */
 function describeItem(itemId: string): string {
   const item = getItem(itemId);
-  const parts: string[] = [];
+  const lines: string[] = [`${item.name} — ${item.quality}${item.slot && item.slot !== 'none' ? `, ${item.slot}` : ''}`];
+  if (item.reqLevel) lines.push(`Requires level ${item.reqLevel}`);
+  if (item.classes) lines.push(`${item.classes.join(' / ')} only`);
+
+  if (item.damageMin !== undefined) {
+    const swing = (item.swingMs ?? 2000) / 1000;
+    const dps = ((item.damageMin + (item.damageMax ?? item.damageMin)) / 2 / swing).toFixed(1);
+    lines.push(`${item.damageMin}–${item.damageMax} damage, ${swing.toFixed(2)}s swing (${dps}/s)`);
+    if (item.attackRange) lines.push(`${item.attackRange}m reach`);
+  }
+  if (item.armor) lines.push(`+${item.armor} armour`);
+  for (const [k, v] of Object.entries(item.attributes ?? {})) {
+    lines.push(`+${v} ${k[0]!.toUpperCase()}${k.slice(1)}`);
+  }
+  if (item.damageBonus) lines.push(`+${item.damageBonus} damage on every swing`);
+  if (item.healthBonus) lines.push(`+${item.healthBonus} health`);
+  if (item.critBonus) lines.push(`+${(item.critBonus * 100).toFixed(1)}% critical chance`);
+  if (item.moveSpeedBonus) lines.push(`+${item.moveSpeedBonus} movement speed`);
+  if (item.regenBonus) lines.push(`+${item.regenBonus} health per second`);
+  if (item.skillPower) {
+    lines.push(`Skills hit ${Math.round((item.skillPower - 1) * 100)}% harder`);
+  }
+
+  const c = item.consumable;
+  if (c) {
+    if (c.healPercent) lines.push(`Restores ${Math.round(c.healPercent * 100)}% of your health`);
+    if (c.regen) lines.push(`+${c.regen.perSec} health a second for ${c.regen.seconds}s`);
+    if (c.damageMultiplier) lines.push(`+${Math.round((c.damageMultiplier - 1) * 100)}% damage, 45s`);
+    if (c.defenseBonus) lines.push(`+${c.defenseBonus} defence, 45s`);
+    lines.push(c.family === 'potion' ? 'Potion — 18s between draughts' : 'Elixir — 2 minutes between');
+  }
+
   if (item.teaches) {
     const skill = getSkill(item.teaches);
-    parts.push(`teaches ${skill.name} at level ${skill.reqLevel} — ${skill.description}`);
+    lines.push(`Teaches ${skill.name} at level ${skill.reqLevel}`);
+    lines.push(skill.description);
   }
-  if (item.damageMin !== undefined) {
-    parts.push(`${item.damageMin}–${item.damageMax} dmg, ${(item.swingMs ?? 2000) / 1000}s swing`);
-  }
-  if (item.armor) parts.push(`${item.armor} armour`);
-  for (const [k, v] of Object.entries(item.attributes ?? {})) parts.push(`+${v} ${k}`);
-  parts.push(`worth ${item.value}g`);
-  return parts.join(', ');
+  if (item.flavor) lines.push(item.flavor);
+  lines.push(`Worth ${item.value.toLocaleString()}g`);
+  return lines.join('\n');
 }
 
 function setBar(fill: HTMLElement, value: number, max: number): void {

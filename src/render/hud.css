@@ -369,7 +369,10 @@ canvas { display: block; }
   position: absolute;
   top: 90px;
   right: 14px;
-  width: 268px;
+  /* Wide enough for the backpack's paper doll: four slots across, plus a
+     three-column bag under it. The panel used to be a list and 268px was
+     plenty; a grid needs the room or it renders off the side of the screen. */
+  width: 344px;
   max-height: calc(100vh - 200px);
   display: flex;
   flex-direction: column;
@@ -1022,3 +1025,88 @@ canvas { display: block; }
   /* ➤ is drawn pointing right; rotate from "up is forward". */
   rotate: -90deg;
 }
+
+/* --- The backpack -------------------------------------------------------- */
+/*
+ * A paper doll and a grid of squares, rather than two lists. Equipment is
+ * spatial in a player's head — you do not think "my head slot", you think "the
+ * thing on my head" — and a grid is also how you find something at a glance
+ * when you are carrying forty things.
+ */
+.doll {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.doll-slot {
+  min-height: 46px;
+  padding: 4px 5px;
+  border: 1px solid rgba(190, 168, 110, 0.3);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+  overflow: hidden;
+}
+
+.doll-slot.filled { background: rgba(20, 26, 22, 0.75); }
+.doll-slot:hover { background: rgba(40, 48, 40, 0.8); }
+
+/* Where the thing you are dragging belongs. */
+.doll-slot.wants {
+  border-color: var(--gold);
+  box-shadow: inset 0 0 0 1px rgba(201, 168, 76, 0.4);
+}
+.doll-slot.drop-target {
+  border-color: #8fd44f;
+  background: rgba(80, 130, 60, 0.35);
+}
+.doll-slot.dragging { opacity: 0.4; }
+
+.doll-label {
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.doll-name { font-size: 10px; line-height: 1.2; margin-top: 2px; }
+.doll-empty { font-size: 10px; color: rgba(255, 255, 255, 0.22); margin-top: 2px; }
+
+.bag-head {
+  display: flex;
+  justify-content: space-between;
+  margin: 11px 0 5px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(190, 168, 110, 0.28);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+.bag-head .v { color: var(--gold); font-weight: 700; }
+
+.bag-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+
+.bag-slot {
+  min-height: 44px;
+  padding: 4px 5px;
+  border: 1px solid rgba(190, 168, 110, 0.3);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+.bag-slot.clickable { cursor: pointer; }
+.bag-slot.clickable:hover { background: rgba(40, 48, 40, 0.8); }
+.bag-slot.unusable { opacity: 0.45; }
+.bag-slot.dragging { opacity: 0.35; }
+
+.bag-name { font-size: 10px; line-height: 1.2; }
+.bag-foot { display: flex; justify-content: space-between; align-items: flex-end; font-size: 9.5px; }
+.bag-qty { color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
