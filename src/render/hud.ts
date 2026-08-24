@@ -107,6 +107,8 @@ export class Hud {
     castLabel: HTMLElement;
     xpFill: HTMLElement;
     xpLabel: HTMLElement;
+    xpDebt: HTMLElement;
+    deathCost: HTMLElement;
     xpLevel: HTMLElement;
     tracker: HTMLElement;
     trackerHead: HTMLElement;
@@ -226,6 +228,8 @@ export class Hud {
       characterBody: this.q('#character-body'),
       inventoryWindow: this.q('#inventory-window'),
       inventoryBody: this.q('#inventory-body'),
+      xpDebt: this.q('#xp-debt'),
+      deathCost: this.q('#death-cost'),
       deathOverlay: this.q('#death-overlay'),
       overlays: this.q('#overlays'),
       telegraph: this.q('#telegraph-banner'),
@@ -337,7 +341,16 @@ export class Hud {
           break;
         }
         case 'xpGained':
-          this.log(`You gain ${ev.amount} experience.`, 'log-xp');
+          if (ev.amount > 0) this.log(`You gain ${ev.amount} experience.`, 'log-xp');
+          break;
+        case 'debt':
+          // A repayment is not worth a line every kill — the bar says it.
+          if (ev.kind === 'incurred') {
+            this.log(`Dying cost you ${ev.amount.toLocaleString()} experience.`, 'log-danger');
+            this.log('Your body lies where you fell. Go back to it and take it back.', 'log-loot');
+          } else if (ev.kind === 'reclaimed' && ev.amount > 0) {
+            this.log(`You take back ${ev.amount.toLocaleString()} experience.`, 'log-good');
+          }
           break;
         case 'levelUp':
           this.log(`You have reached level ${ev.level}!`, 'log-good');
@@ -611,6 +624,13 @@ export class Hud {
     this.updateTracker(player);
 
     this.els.deathOverlay.style.display = player.dead ? 'flex' : 'none';
+    if (player.dead) {
+      const owed = player.xpDebt ?? 0;
+      this.els.deathCost.textContent =
+        owed > 0
+          ? `${owed.toLocaleString()} experience owed. Walk back to where you fell and press V to take it back.`
+          : 'That one was free.';
+    }
 
     if (this.openVendorId !== null) {
       const vendor = this.world.entity(this.openVendorId);
@@ -801,11 +821,18 @@ export class Hud {
     const need = xpToNext(player.level);
     const have = player.xp ?? 0;
     const left = Math.max(0, need - have);
+    const owed = player.xpDebt ?? 0;
     this.els.xpFill.style.width = `${Math.min(100, (have / need) * 100)}%`;
+    // Debt is drawn as ground still to make up, sitting on the bar ahead of
+    // where you are — not as a bite taken out behind you. It has never taken
+    // anything away from you, and the bar should not imply that it has.
+    this.els.xpDebt.style.left = `${Math.min(100, (have / need) * 100)}%`;
+    this.els.xpDebt.style.width = `${Math.min(100 - (have / need) * 100, (owed / need) * 100)}%`;
     this.els.xpLabel.textContent =
       player.level >= MAX_LEVEL
         ? 'Level 100'
-        : `${have.toLocaleString()} / ${need.toLocaleString()} — ${left.toLocaleString()} to go`;
+        : `${have.toLocaleString()} / ${need.toLocaleString()} — ${left.toLocaleString()} to go` +
+          (owed > 0 ? `  ·  ${owed.toLocaleString()} owed` : '');
 
     const points = player.unspentPoints ?? 0;
     const skillPoints = player.skillPoints ?? 0;
@@ -1858,7 +1885,7 @@ const TEMPLATE = `
 
   <div id="skill-bar"></div>
 
-  <div id="xp-bar" class="bar panel"><div class="bar-fill"></div><div class="bar-label"></div></div>
+  <div id="xp-bar" class="bar panel"><div class="bar-fill"></div><div id="xp-debt"></div><div class="bar-label"></div></div>
   <div id="xp-level"></div>
 
   <div id="tracker">
@@ -1918,6 +1945,7 @@ const TEMPLATE = `
 
   <div id="death-overlay">
     <h2>YOU DIED</h2>
+    <p id="death-cost"></p>
     <button id="respawn-btn" class="clickable">Return to the standing stones</button>
   </div>
 
@@ -1925,6 +1953,6 @@ const TEMPLATE = `
     <b>WASD</b> move &nbsp; <b>Drag</b> or <b>←→</b> look &nbsp; <b>Scroll</b> zoom<br />
     <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–0</b> / <b>⇧1–6</b> skills &nbsp; <b>T</b> auto-attack<br />
     <b>F</b> loot &nbsp; <b>E</b> trade &nbsp; <b>G</b> travel &nbsp; <b>J</b> quests<br />
-    <b>H</b> take horse &nbsp; <b>R</b> ride &nbsp; <b>K</b> realm &nbsp; <b>M</b> map &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
+    <b>H</b> take horse &nbsp; <b>R</b> ride &nbsp; <b>K</b> realm &nbsp; <b>M</b> map &nbsp; <b>V</b> reclaim &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
   </div>
 `;

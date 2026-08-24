@@ -36,6 +36,10 @@ import {
   STAR_LOOT_MULTIPLIER,
   goldForKill,
   castBreakChance,
+  DEBT_CAP_LEVELS,
+  DEBT_REPAY_SHARE,
+  deathDebt,
+  RECLAIM_RANGE,
   resolveAttack,
   ROAM_PAUSE_MAX_MS,
   ROAM_PAUSE_MIN_MS,
@@ -172,7 +176,7 @@ function roamHash(a: number, b: number): number {
 const COMBAT_TIMEOUT_MS = 6000;
 
 /** Save format version. Bump when the Entity shape changes. */
-const SAVE_VERSION = 8;
+const SAVE_VERSION = 9;
 
 /**
  * How big a step `catchUp` takes through the time you were away.
@@ -1312,6 +1316,9 @@ export class World {
       case 'travel':
         this.tryTravel(e, cmd.toZoneId);
         break;
+      case 'reclaim':
+        if (e.kind === 'player') this.reclaim(e);
+        break;
       case 'respawn':
         if (e.dead && e.kind === 'player') this.respawnPlayer(e);
         break;
@@ -2115,6 +2122,8 @@ export class World {
       this.dragonEvent(dragon, state, `${dragon.name} is dead. Somebody will write that down.`);
     }
 
+    if (victim.kind === 'player') this.chargeForDeath(victim);
+
     if (victim.kind === 'mob') {
       const def = getMob(victim.defId!);
       victim.aiState = 'dead';
@@ -2238,6 +2247,24 @@ export class World {
 
   private awardXp(player: Entity, amount: number): void {
     if (player.level >= MAX_LEVEL) return;
+
+    // The debt is paid out of the same stream that levels you, at a share —
+    // never by subtracting from what you already have. Progress slows, and
+    // then it stops slowing; it does not reverse. See `deathDebt`.
+    const owed = player.xpDebt ?? 0;
+    if (owed > 0) {
+      const paid = Math.min(owed, Math.round(amount * DEBT_REPAY_SHARE));
+      player.xpDebt = owed - paid;
+      amount -= paid;
+      this.events.push({
+        t: 'debt',
+        entityId: player.id,
+        kind: 'repaid',
+        amount: paid,
+        remaining: player.xpDebt,
+      });
+    }
+
     player.xp = (player.xp ?? 0) + amount;
     this.events.push({ t: 'xpGained', entityId: player.id, amount });
 
@@ -2261,6 +2288,54 @@ export class World {
     }
     // At the cap, extra xp is discarded rather than banked.
     if (player.level >= MAX_LEVEL) player.xp = 0;
+  }
+
+  /**
+   * Open a debt, and leave a body on the map.
+   *
+   * The body is the interesting half. Without it the walk back is dead time
+   * and the debt is a flat tax; with it, the walk is a decision — go back
+   * through the thing that killed you and clear the rest, or take the slow
+   * road and pay it off in kills somewhere safer.
+   */
+  private chargeForDeath(player: Entity): void {
+    player.deathSpot = { zoneId: this.zone.id, pos: { ...player.pos } };
+    const debt = deathDebt(player.level, xpToNext(player.level));
+    if (debt <= 0) return;
+    const cap = xpToNext(player.level) * DEBT_CAP_LEVELS;
+    // Capped, because a losing streak that digs a hole deeper than the level
+    // took to earn is "you lost a level" wearing a different name.
+    player.xpDebt = Math.min(cap, (player.xpDebt ?? 0) + debt);
+    this.events.push({
+      t: 'debt',
+      entityId: player.id,
+      kind: 'incurred',
+      amount: debt,
+      remaining: player.xpDebt,
+    });
+  }
+
+  /** Stand where you fell and take the rest of it back. */
+  private reclaim(player: Entity): void {
+    const spot = player.deathSpot;
+    if (!spot || spot.zoneId !== this.zone.id) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'Your body is not here.' });
+      return;
+    }
+    if (dist(player.pos.x, player.pos.z, spot.pos.x, spot.pos.z) > RECLAIM_RANGE) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'Too far from where you fell.' });
+      return;
+    }
+    const cleared = player.xpDebt ?? 0;
+    player.xpDebt = 0;
+    player.deathSpot = null;
+    this.events.push({
+      t: 'debt',
+      entityId: player.id,
+      kind: 'reclaimed',
+      amount: cleared,
+      remaining: 0,
+    });
   }
 
   private respawnPlayer(player: Entity): void {

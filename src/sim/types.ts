@@ -574,6 +574,13 @@ export interface Entity {
   learnedSkills?: string[];
   /** What each faction makes of you. See `content/factions.ts`. */
   standing?: Partial<Record<FactionId, number>>;
+  /**
+   * Experience owed for dying. Kills pay it down; it is never subtracted from
+   * a level you already have. See `deathDebt` in `sim/formulas.ts`.
+   */
+  xpDebt?: number;
+  /** Where you fell, and in which zone. Walk back to it to clear the rest. */
+  deathSpot?: { zoneId: string; pos: Vec2 } | null;
   /** Mounts captured, by id. Yours for good once you have one. */
   stable?: string[];
   /** The mount currently being ridden, or null. */
@@ -666,6 +673,8 @@ export type Command =
   | { t: 'turnInQuest'; vendorId: EntityId; questId: string }
   | { t: 'abandonQuest'; questId: string }
   | { t: 'travel'; toZoneId: string }
+  /** Stand where you fell and take back what dying cost you. */
+  | { t: 'reclaim' }
   | { t: 'respawn' };
 
 /** A command paired with the actor issuing it. Server-side, actorId is trusted. */
@@ -728,6 +737,11 @@ export type SimEvent =
   | { t: 'aggro'; mobId: EntityId; targetId: EntityId }
   | { t: 'leash'; mobId: EntityId }
   | { t: 'xpGained'; entityId: EntityId; amount: number }
+  /**
+   * Dying opened a debt, or a kill paid some of it off, or you walked back and
+   * cleared the rest. `remaining` is what is still owed either way.
+   */
+  | { t: 'debt'; entityId: EntityId; kind: 'incurred' | 'repaid' | 'reclaimed'; amount: number; remaining: number }
   | { t: 'levelUp'; entityId: EntityId; level: number }
   /** A skill went up a rank. */
   | { t: 'skillRanked'; entityId: EntityId; skillId: string; rank: number }

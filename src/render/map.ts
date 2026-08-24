@@ -270,6 +270,24 @@ export class MapView {
       }
     }
 
+    // Where you fell. This is what turns the walk back from dead time into a
+    // decision — go through the thing that killed you, or pay it off in kills
+    // somewhere safer.
+    const spot = player.deathSpot;
+    if (spot && spot.zoneId === this.world.zone.id && (player.xpDebt ?? 0) > 0) {
+      const [x, y] = at(spot.pos);
+      if (x > -20 && y > -20 && x < size + 20 && y < size + 20) {
+        ctx.strokeStyle = '#ff6a5a';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(x - 7, y - 7);
+        ctx.lineTo(x + 7, y + 7);
+        ctx.moveTo(x + 7, y - 7);
+        ctx.lineTo(x - 7, y + 7);
+        ctx.stroke();
+      }
+    }
+
     // The player last, and as an arrow rather than a dot: on a north-up map
     // "which way am I facing" is the one thing a dot cannot say.
     const yaw = this.deps.yawOf();
@@ -425,6 +443,20 @@ export class MapView {
       label(`${exit.label} (${exit.minLevel}+)`, x, y - 18, player.level >= exit.minLevel ? '#b6f0c2' : '#8a968a', 600);
     }
 
+    const spot = player.deathSpot;
+    if (spot && spot.zoneId === zone.id && (player.xpDebt ?? 0) > 0) {
+      const [x, y] = at(spot.pos);
+      ctx.strokeStyle = '#ff6a5a';
+      ctx.lineWidth = 3.5;
+      ctx.beginPath();
+      ctx.moveTo(x - 9, y - 9);
+      ctx.lineTo(x + 9, y + 9);
+      ctx.moveTo(x + 9, y - 9);
+      ctx.lineTo(x - 9, y + 9);
+      ctx.stroke();
+      label('where you fell', x, y - 16, '#ff9a8a', 600);
+    }
+
     // Where you are, drawn last and drawn big.
     const [px, py] = at(player.pos);
     ctx.strokeStyle = '#ffffff';
@@ -447,6 +479,7 @@ export class MapView {
       `<span style="color:#57c6f0">● trader</span>` +
       `<span style="color:#8fe0a0">● road out</span>` +
       `<span style="color:#e8e3d0">▪ landmark</span>` +
+      `<span style="color:#ff9a8a">✕ where you fell (V)</span>` +
       `<span class="map-scale">${Math.round(zone.halfSize * 2)}u across, about ten minutes on foot</span>`;
   }
 

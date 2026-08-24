@@ -734,6 +734,63 @@ async function main() {
       garrisonAfter,
     };
   });
+  // Dying, and buying it back.
+  const death = await page.evaluate(async () => {
+    const g = window.__game;
+    const player = g.world.player;
+    player.level = 30;
+    player.xp = 500;
+    player.xpDebt = 0;
+    player.health = 1;
+    // Any live creature will finish the job at one point of health. Filtering
+    // for a ★3 made this depend on which zone the run happened to be standing
+    // in, which is how it started failing on alternate runs.
+    const killer = [...g.world.entities.values()].find(
+      (e) => e.kind === 'mob' && !e.dead && !g.mobOf(e.defId).horse,
+    );
+    if (!killer) return { ok: false, why: 'nothing alive nearby' };
+    killer.pos = { x: player.pos.x + 1, z: player.pos.z };
+    killer.aiState = 'chasing';
+    killer.targetId = player.id;
+    killer.threat = { [player.id]: 100 };
+    killer.autoAttack = true;
+    g.world.submit(player.id, { t: 'target', id: killer.id });
+    const until = Date.now() + 12000;
+    while (!player.dead && Date.now() < until) {
+      player.health = 1;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return {
+      ok: player.dead,
+      owed: player.xpDebt ?? 0,
+      level: player.level,
+      xp: player.xp,
+      spot: player.deathSpot ? { ...player.deathSpot.pos } : null,
+    };
+  });
+  await wait(500);
+  await page.screenshot({ path: join(OUT, '18-death.png') });
+  const deathUi = await page.evaluate(() => ({
+    shown: getComputedStyle(document.querySelector('#death-overlay')).display !== 'none',
+    cost: document.querySelector('#death-cost')?.textContent ?? '',
+    debtBar: parseFloat(document.querySelector('#xp-debt')?.style.width ?? '0'),
+  }));
+  const reclaimed = await page.evaluate(async () => {
+    const g = window.__game;
+    const player = g.world.player;
+    g.world.submit(player.id, { t: 'respawn' });
+    await new Promise((r) => setTimeout(r, 300));
+    const owedAfterRespawn = player.xpDebt ?? 0;
+    // Too far away first: the refusal has to name the reason.
+    g.world.submit(player.id, { t: 'reclaim' });
+    await new Promise((r) => setTimeout(r, 300));
+    const refused = (player.xpDebt ?? 0) === owedAfterRespawn;
+    if (player.deathSpot) player.pos = { ...player.deathSpot.pos };
+    g.world.submit(player.id, { t: 'reclaim' });
+    await new Promise((r) => setTimeout(r, 300));
+    return { owedAfterRespawn, refused, owedNow: player.xpDebt ?? 0, level: player.level };
+  });
+
   // The map. Checked by sampling the canvas rather than by looking for an
   // element: a map panel that opens onto a blank rectangle passes every
   // structural assertion anyone would think to write.
@@ -957,6 +1014,12 @@ async function main() {
     ['it carried something', (wyrmDead.carried ?? []).length > 0],
     ['a front changed hands', realm.ok],
     ['the new holder garrisons the ground', realm.garrisonAfter !== realm.garrisonBefore],
+    ['dying opens a debt instead of taking a level', death.ok && death.owed > 0 && death.level === 30 && death.xp === 500],
+    ['the death screen says what it cost', /experience owed/i.test(deathUi.cost) && deathUi.shown],
+    ['the debt is drawn on the xp bar', deathUi.debtBar > 0],
+    ['the debt survives the respawn', reclaimed.owedAfterRespawn > 0],
+    ['reclaiming from across the zone is refused', reclaimed.refused === true],
+    ['walking back to the body clears it', reclaimed.owedNow === 0],
     ['the map opens', mapState.open === true],
     ['the map drew the zone rather than a blank rectangle', mapState.fullColours > 40],
     ['the minimap drew ground', mapState.miniColours > 12],
@@ -985,6 +1048,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('map:', JSON.stringify(mapState), 'closed:', mapClosed);
+  console.log('death:', JSON.stringify(death), JSON.stringify(deathUi), JSON.stringify(reclaimed));
   console.log('armour:', JSON.stringify(armour), '| bounty:', JSON.stringify(bounty));
   console.log('rare:', JSON.stringify({ ...rareCheck, ...rareLoot }), '| rare plates:', rarePlate);
   console.log('away:', JSON.stringify(backdated), JSON.stringify(away), 'dismissed:', awayDismissed);

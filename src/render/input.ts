@@ -130,6 +130,9 @@ export class InputController {
       case 'KeyM':
         this.map.toggle();
         break;
+      case 'KeyV':
+        this.emit({ t: 'reclaim' });
+        break;
       case 'Escape':
         // Back out one layer at a time. The away report is the outermost thing
         // on screen when it is up, so it goes first.

@@ -1234,3 +1234,26 @@ canvas { display: block; }
 
 #map-hint .map-you { color: #fff; }
 #map-hint .map-scale { margin-left: auto; font-style: italic; }
+
+/* Death's price, drawn as ground still to make up rather than as a bite taken
+   out of what you have. Debt has never taken anything away from you. */
+#xp-debt {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(184, 57, 47, 0.62) 0 6px,
+    rgba(120, 34, 28, 0.62) 6px 12px
+  );
+  pointer-events: none;
+}
+
+#death-cost {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: #cbb98f;
+  max-width: 420px;
+  text-align: center;
+  line-height: 1.5;
+}

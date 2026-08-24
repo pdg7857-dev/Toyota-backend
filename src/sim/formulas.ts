@@ -455,6 +455,56 @@ export function roamRadiusFor(leashRadius: number): number {
 }
 
 /**
+ * What dying costs.
+ *
+ * Death used to cost the walk back and nothing else, which in a game this
+ * lethal makes a bad pull free — and a fight with no downside is a fight with
+ * no tension. But the two obvious prices are both worse than no price at all:
+ *
+ *  - **Losing gear** turns a bad pull into a shopping trip, and punishes the
+ *    player hardest at exactly the moment they were already having a bad time.
+ *  - **Losing experience** means a run of bad luck can push a character
+ *    *backwards*. A level you have already earned should never be revocable —
+ *    twenty-eight thousand kills is not something to take away from somebody.
+ *
+ * So death is priced in the currency the whole game is denominated in, without
+ * ever subtracting from it: you take on a **debt**, and kills pay it down out
+ * of the same stream that levels you. Progress never reverses; it slows, and
+ * then it stops slowing. A player can always see the end of it.
+ */
+export const DEATH_DEBT_SHARE = 0.35;
+
+/** How much of each kill's experience goes to the debt rather than the bar. */
+export const DEBT_REPAY_SHARE = 0.5;
+
+/**
+ * Debt never exceeds this many levels' worth.
+ *
+ * A losing streak against something well above you would otherwise dig a hole
+ * that takes longer to climb out of than the level did to earn — which is the
+ * "lost a level" failure wearing a different name.
+ */
+export const DEBT_CAP_LEVELS = 1;
+
+/**
+ * Below this level, dying is free.
+ *
+ * The first ten levels are where a player is learning which fights are
+ * survivable. Charging for that lesson teaches caution before the game has
+ * taught competence, and the numbers involved are trivial anyway.
+ */
+export const DEBT_FROM_LEVEL = 10;
+
+/** How close you must get to where you fell to take the rest of it back. */
+export const RECLAIM_RANGE = 5;
+
+/** The debt one death at this level opens. */
+export function deathDebt(level: number, xpToNextLevel: number): number {
+  if (level < DEBT_FROM_LEVEL) return 0;
+  return Math.round(xpToNextLevel * DEATH_DEBT_SHARE);
+}
+
+/**
  * Turn attributes + gear into the numbers combat actually reads.
  *
  * Deliberately linear and readable. Tuning happens by changing coefficients

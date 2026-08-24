@@ -16,6 +16,11 @@ import {
   expectedDefense,
   goldForKill,
   roamRadiusFor,
+  DEATH_DEBT_SHARE,
+  DEBT_CAP_LEVELS,
+  DEBT_FROM_LEVEL,
+  DEBT_REPAY_SHARE,
+  deathDebt,
   xpToNext,
 } from '../src/sim/formulas.js';
 import { FENMARCH, PLAYABLE_CLASSES, ZONES, getZone } from '../src/content/zone.js';
@@ -37,7 +42,8 @@ import {
   GRATS_RANGE,
 } from '../src/content/adventurers.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
-import { ITEMS, canEquip, getItem } from '../src/content/items.js';
+import { grindMobFor, killsForLevel } from './pace.js';
+import { ITEMS, canEquip, gearSetFor, getItem } from '../src/content/items.js';
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
 import {
   ARMOUR_LINES,
@@ -3319,5 +3325,142 @@ describe('camps mill about', () => {
       if (post.dead || post.aiState !== 'idle') return;
       expect(Math.hypot(post.pos.x - homes[i]!.x, post.pos.z - homes[i]!.z)).toBe(0);
     });
+  });
+});
+
+describe('death costs something', () => {
+  const this_max = (world: World, e: Entity): number => world.statsOf(e).maxHealth;
+
+  /** Kill the player outright, the way a bad pull does. */
+  function killPlayer(world: World): void {
+    const player = world.player;
+    const mob = [...world.entities.values()].find((e) => e.kind === 'mob' && !e.dead)!;
+    player.health = 1;
+    world.submit(player.id, { t: 'target', id: mob.id });
+    for (let t = 0; t < 60000 && !player.dead; t += TICK_MS) world.tick();
+  }
+
+  it('opens a debt rather than taking a level back', () => {
+    const world = new World({ seed: 5, zone: duelZone('marsh_bear', 3), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 30 });
+    player.xp = 500;
+    killPlayer(world);
+    expect(player.dead, 'the harness never managed to kill anybody').toBe(true);
+
+    // The two things that must never happen: a level lost, or the bar going
+    // backwards. Twenty-eight thousand kills is not something to take away.
+    expect(player.level).toBe(30);
+    expect(player.xp).toBe(500);
+    expect(player.xpDebt!).toBeGreaterThan(0);
+    expect(player.xpDebt!).toBeCloseTo(Math.round(xpToNext(30) * DEATH_DEBT_SHARE), -1);
+  });
+
+  it('is free while you are still learning which fights are survivable', () => {
+    const world = new World({ seed: 6, zone: duelZone('marsh_bear', 3), classId: 'warrior' });
+    const player = levelPlayer(world, { level: DEBT_FROM_LEVEL - 1 });
+    killPlayer(world);
+    expect(player.dead).toBe(true);
+    expect(player.xpDebt ?? 0).toBe(0);
+    // The body is still marked, so the map does not lie about where you died.
+    expect(player.deathSpot?.zoneId).toBe('test-duel');
+  });
+
+  it('pays the debt down out of kills, and never stops you moving forward', () => {
+    // A level-appropriate creature, deliberately: a level-30 character killing
+    // a level-1 hare earns nothing at all by design, and measuring the debt
+    // against that measures the xp curve, not the debt.
+    const world = new World({ seed: 7, zone: duelZone('outlaw_reaver', 3), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 16, gear: gearSetFor('warrior', 16) });
+    player.xpDebt = 4000;
+    const before = player.xp ?? 0;
+    const owedBefore = player.xpDebt;
+
+    world.submit(player.id, { t: 'autoAttack', on: true });
+    const mob = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+    world.submit(player.id, { t: 'target', id: mob.id });
+    // Held on its last point of health until a swing lands. This measures the
+    // accounting, not whether a level-16 warrior wins the fight.
+    for (let t = 0; t < 60000 && !mob.dead; t += TICK_MS) {
+      mob.health = 1;
+      player.health = this_max(world, player);
+      world.tick();
+    }
+    expect(mob.dead).toBe(true);
+
+    expect(player.xpDebt!, 'the kill paid nothing off').toBeLessThan(owedBefore);
+    expect(player.xp!, 'the kill moved you backwards').toBeGreaterThan(before);
+  });
+
+  it('caps what a losing streak can dig', () => {
+    const world = new World({ seed: 8, zone: duelZone('marsh_bear', 3), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 30 });
+    for (let i = 0; i < 6; i++) {
+      world.submit(player.id, { t: 'respawn' });
+      world.tick();
+      killPlayer(world);
+    }
+    // Otherwise a bad night digs a hole deeper than the level took to earn,
+    // which is "you lost a level" wearing a different name.
+    expect(player.xpDebt!).toBeLessThanOrEqual(xpToNext(30) * DEBT_CAP_LEVELS);
+  });
+
+  it('gives the walk back a point', () => {
+    const world = new World({ seed: 9, zone: duelZone('marsh_bear', 3), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 30 });
+    killPlayer(world);
+    const spot = player.deathSpot!;
+    world.submit(player.id, { t: 'respawn' });
+    world.tick();
+    expect(player.xpDebt!).toBeGreaterThan(0);
+
+    // Too far is a named failure, not a silent no-op.
+    player.pos = { x: spot.pos.x + 40, z: spot.pos.z };
+    world.submit(player.id, { t: 'reclaim' });
+    let events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /fell/i.test(e.message))).toBe(true);
+    expect(player.xpDebt!).toBeGreaterThan(0);
+
+    player.pos = { ...spot.pos };
+    world.submit(player.id, { t: 'reclaim' });
+    events = world.tick();
+    expect(events.some((e) => e.t === 'debt' && e.kind === 'reclaimed')).toBe(true);
+    expect(player.xpDebt).toBe(0);
+    expect(player.deathSpot).toBe(null);
+  });
+
+  it('prices a death in kills, at every band', () => {
+    // Printed, not just asserted. "35% of a level" means nothing until it is
+    // "about nine boars", which is the unit a player actually experiences.
+    const rows: string[] = [];
+    for (const level of [DEBT_FROM_LEVEL - 1, 12, 22, 40, 70, 99]) {
+      const def = grindMobFor(level);
+      const perKill = xpForKill(def.xp, def.level, level);
+      const debt = deathDebt(level, xpToNext(level));
+      const levelKills = killsForLevel(level);
+      // Two different numbers, and the difference is the whole design. You
+      // grind `owedKills` before the bar moves at full speed again, but half
+      // of those kills were progress — so what the death actually cost you is
+      // `lostKills`, and it is never more than that.
+      const owedKills = debt / (perKill * DEBT_REPAY_SHARE);
+      const lostKills = debt / perKill;
+      rows.push(
+        `  lv${String(level).padEnd(3)} ${def.name.padEnd(22)}` +
+          ` ${String(debt).padStart(8)} owed = ${lostKills.toFixed(0).padStart(4)} kills lost` +
+          ` over ${owedKills.toFixed(0).padStart(4)} slow ones` +
+          ` (a level is ${levelKills})`,
+      );
+      if (level < DEBT_FROM_LEVEL) {
+        expect(debt, 'learning to die was charged for').toBe(0);
+        continue;
+      }
+      // The claim under test is that a death costs the same *share* of the
+      // level it happened in at every band. Price it off a flat number instead
+      // of `xpToNext` and this fails at both ends at once — trivial at 99,
+      // ruinous at 12 — which is exactly the failure that made every other
+      // fixed constant in this game get scaled.
+      expect(lostKills / levelKills, `a death at ${level} is mispriced`).toBeGreaterThan(0.2);
+      expect(lostKills / levelKills, `a death at ${level} is mispriced`).toBeLessThan(0.5);
+    }
+    console.log('\nWHAT A DEATH COSTS\n' + rows.join('\n'));
   });
 });

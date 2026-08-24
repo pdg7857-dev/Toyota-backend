@@ -98,7 +98,42 @@ Four rules hold it together, and each of them is load-bearing:
 A front is ~114 kills to flip against the drift — grind scale, deliberately, so
 territory is bought in the same currency as everything else.
 
-### The map moves while the game is closed
+### What dying costs
+
+Death used to cost the walk back and nothing else, which in a game where a ★4
+kills you 18% of the time makes a bad pull free — and a fight with no downside
+is a fight with no tension. Both of the obvious prices are worse than no price:
+
+- **Losing gear** turns a bad pull into a shopping trip, and hits hardest at
+  exactly the moment the player was already having a bad time.
+- **Losing experience** lets a run of bad luck push a character *backwards*. A
+  level you have already earned should never be revocable; twenty-eight
+  thousand kills is not something to take away from somebody.
+
+So death is priced in the currency the whole game is denominated in, without
+ever subtracting from it: you take on a **debt**, and kills pay it down out of
+the same stream that levels you (`DEBT_REPAY_SHARE`). Progress never reverses;
+it slows, and then it stops slowing, and the player can always see the end of
+it. `npm test` prints what a death costs at each band — currently 20 to 290
+kills, always about 35% of the level it happened in.
+
+Three rules around it:
+
+- **Capped at one level's worth.** A losing streak that digs a hole deeper than
+  the level took to earn is "you lost a level" wearing a different name.
+- **Free below level 10.** The first ten levels are where a player learns which
+  fights are survivable; charging for that lesson teaches caution before the
+  game has taught competence.
+- **Your body is on the map.** Walk back to where you fell and press **V** and
+  the rest of the debt is cleared. This is the half that makes it a decision
+  rather than a tax: go back through the thing that killed you, or pay it off
+  in kills somewhere safer. Without it the walk back is dead time.
+
+The bar draws the debt as ground still to make up, sitting *ahead* of where you
+are — not as a bite taken out behind you. It has never taken anything away, and
+the bar must not imply that it has.
+
+## The map moves while the game is closed
 
 `tickTerritory` made the war carry on without you, but only while the tab was
 open — which made "the world moves without you" a claim the game honoured
@@ -537,6 +572,41 @@ seeded fight — a test asserts the Rng state is untouched across a minute of it
 The cost is real and lands in one place: aggro is measured from where a
 creature *is*, so every clearance in the game — boss arenas, shopfronts, the
 arrival point — is now `aggroRadius + roam + margin`, and the tests say so.
+
+## What dying costs
+
+Death used to cost the walk back and nothing else, which in a game where a ★4
+kills you 18% of the time makes a bad pull free — and a fight with no downside
+is a fight with no tension. Both of the obvious prices are worse than no price:
+
+- **Losing gear** turns a bad pull into a shopping trip, and hits hardest at
+  exactly the moment the player was already having a bad time.
+- **Losing experience** lets a run of bad luck push a character *backwards*. A
+  level you have already earned should never be revocable; twenty-eight
+  thousand kills is not something to take away from somebody.
+
+So death is priced in the currency the whole game is denominated in, without
+ever subtracting from it: you take on a **debt**, and kills pay it down out of
+the same stream that levels you (`DEBT_REPAY_SHARE`). Progress never reverses;
+it slows, and then it stops slowing, and the player can always see the end of
+it. `npm test` prints what a death costs at each band — currently 20 to 290
+kills, always about 35% of the level it happened in.
+
+Three rules around it:
+
+- **Capped at one level's worth.** A losing streak that digs a hole deeper than
+  the level took to earn is "you lost a level" wearing a different name.
+- **Free below level 10.** The first ten levels are where a player learns which
+  fights are survivable; charging for that lesson teaches caution before the
+  game has taught competence.
+- **Your body is on the map.** Walk back to where you fell and press **V** and
+  the rest of the debt is cleared. This is the half that makes it a decision
+  rather than a tax: go back through the thing that killed you, or pay it off
+  in kills somewhere safer. Without it the walk back is dead time.
+
+The bar draws the debt as ground still to make up, sitting *ahead* of where you
+are — not as a bite taken out behind you. It has never taken anything away, and
+the bar must not imply that it has.
 
 ## The map
 
