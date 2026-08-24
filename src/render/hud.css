@@ -367,13 +367,15 @@ canvas { display: block; }
    tall their contents grow. */
 #right-panels {
   position: absolute;
-  top: 90px;
+  /* Below the minimap, which owns the top-right corner. A panel that overlaps
+     the map is a panel you close to navigate and reopen to read. */
+  top: 246px;
   right: 14px;
   /* Wide enough for the backpack's paper doll: four slots across, plus a
      three-column bag under it. The panel used to be a list and 268px was
      plenty; a grid needs the room or it renders off the side of the screen. */
   width: 344px;
-  max-height: calc(100vh - 200px);
+  max-height: calc(100vh - 356px);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1110,3 +1112,125 @@ canvas { display: block; }
 .bag-name { font-size: 10px; line-height: 1.2; }
 .bag-foot { display: flex; justify-content: space-between; align-items: flex-end; font-size: 9.5px; }
 .bag-qty { color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* -------------------------------------------------------------- the map --
+ *
+ * A zone is three kilometres across. Before this the only navigation in the
+ * game was the quest arrow, which points at exactly one thing.
+ */
+
+#map-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 11;
+}
+
+#minimap {
+  position: absolute;
+  top: 46px;
+  right: 14px;
+  width: 178px;
+  height: 178px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+#minimap-canvas {
+  width: 178px;
+  height: 178px;
+  border-radius: 50%;
+  border: 2px solid var(--panel-edge);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6), inset 0 0 22px rgba(0, 0, 0, 0.5);
+  background: rgba(10, 14, 12, 0.9);
+}
+
+#minimap-zone {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -17px;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  color: var(--gold);
+  text-shadow: 0 1px 3px #000;
+}
+
+#minimap-key {
+  position: absolute;
+  right: 4px;
+  bottom: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(232, 226, 212, 0.75);
+  background: rgba(10, 14, 12, 0.75);
+  border: 1px solid var(--panel-edge);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+#map-panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  background: rgba(10, 14, 12, 0.97);
+  border: 1px solid var(--panel-edge);
+  border-radius: 4px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
+  padding: 12px 14px 10px;
+  width: min(78vh, calc(100vw - 60px));
+}
+
+#map-panel.map-hidden { display: none; }
+
+#map-panel header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--panel-edge);
+  padding-bottom: 6px;
+  margin-bottom: 8px;
+}
+
+#map-panel h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--gold);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+#map-close {
+  background: none;
+  border: none;
+  color: #9a9384;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#map-canvas-wrap {
+  width: 100%;
+  aspect-ratio: 1;
+  border: 1px solid rgba(190, 168, 110, 0.22);
+  border-radius: 3px;
+  overflow: hidden;
+  background: #14180f;
+}
+
+#map-canvas { width: 100%; height: 100%; display: block; }
+
+#map-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding-top: 8px;
+  font-size: 11px;
+  color: #9a9384;
+}
+
+#map-hint .map-you { color: #fff; }
+#map-hint .map-scale { margin-left: auto; font-style: italic; }

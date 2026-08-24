@@ -41,7 +41,7 @@ function findChromium() {
  * Walk at the current target until it is inside weapon range. Reads distance
  * from the running game rather than guessing at a duration.
  */
-async function closeToTarget(page, timeoutMs = 8000) {
+async function closeToTarget(page, timeoutMs = 60000) {
   const gap = () =>
     page.evaluate(() => {
       const g = window.__game;
@@ -54,18 +54,36 @@ async function closeToTarget(page, timeoutMs = 8000) {
       );
     });
 
+  // Point the camera at it before each step. 'w' walks where the camera is
+  // looking, and camps roam now — walking forward at where a creature used to
+  // be standing is how "closed to weapon range" started failing on a game that
+  // was working perfectly.
+  const face = () =>
+    page.evaluate(() => {
+      const g = window.__game;
+      const player = g.world.player;
+      const target = player.targetId != null ? g.world.entity(player.targetId) : null;
+      if (!target) return;
+      g.rig.yaw = Math.atan2(target.pos.x - player.pos.x, target.pos.z - player.pos.z);
+    });
+
   const start = Date.now();
   let d = await gap();
   if (d === null) return false;
+  // Hold the key down and poll, rather than tapping it. Tapping walked for
+  // 220ms and then spent as long again round-tripping two evaluates, so the
+  // character covered about a fifth of the ground the clock said it should —
+  // which reads as "walking is broken" rather than "the harness is slow".
+  await page.keyboard.down('w');
   while (d > 0 && Date.now() - start < timeoutMs) {
-    await page.keyboard.down('w');
-    await wait(220);
-    await page.keyboard.up('w');
+    await face();
+    await wait(120);
     d = await gap();
-    if (d === null) return false;
+    if (d === null) break;
   }
+  await page.keyboard.up('w');
   await wait(400);
-  return d <= 0;
+  return d !== null && d <= 0;
 }
 
 /**
@@ -129,20 +147,32 @@ async function main() {
   await wait(1500);
   await page.screenshot({ path: join(OUT, '01-spawn.png') });
 
-  // Walk into the boar camp.
-  await page.keyboard.down('w');
-  await wait(5200);
-  await page.keyboard.up('w');
-  await wait(400);
-  await page.screenshot({ path: join(OUT, '02-approach.png') });
-
-  // Target the nearest hostile and close to weapon range before swinging.
+  // Target the nearest ordinary creature, then walk to it.
   //
-  // Walking for a fixed number of seconds and hoping to stop inside reach is
-  // luck: it left the run standing four metres short, logging "Out of range"
-  // and reporting "no combat happened" as though the sim were broken.
-  await page.keyboard.press('Tab');
-  await wait(200);
+  // This used to hold 'w' for five seconds and press Tab, which assumed the
+  // nearest camp was straight ahead of the spawn facing. On a zone three
+  // kilometres across it is not: the run walked twenty-seven metres into empty
+  // moor, Tab found nothing, and the report said combat was broken. Pick the
+  // creature first and let `closeToTarget` do the walking — it steers.
+  await page.evaluate(() => {
+    const g = window.__game;
+    const player = g.world.player;
+    let best = null;
+    let bestD = Infinity;
+    for (const e of g.world.entities.values()) {
+      if (e.kind !== 'mob' || e.dead) continue;
+      const def = g.mobOf(e.defId);
+      if (def.horse || def.stars >= 5) continue;
+      const d = Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z);
+      if (d < bestD) {
+        bestD = d;
+        best = e.id;
+      }
+    }
+    if (best !== null) g.world.submit(player.id, { t: 'target', id: best });
+  });
+  await wait(300);
+  await page.screenshot({ path: join(OUT, '02-approach.png') });
   await page.keyboard.press('t');
   const reached = await closeToTarget(page);
   await page.keyboard.press('1'); // Strike
@@ -704,6 +734,39 @@ async function main() {
       garrisonAfter,
     };
   });
+  // The map. Checked by sampling the canvas rather than by looking for an
+  // element: a map panel that opens onto a blank rectangle passes every
+  // structural assertion anyone would think to write.
+  await page.keyboard.press('m');
+  await wait(900);
+  await page.screenshot({ path: join(OUT, '17-map.png') });
+  const mapState = await page.evaluate(() => {
+    const panel = document.querySelector('#map-panel');
+    const full = document.querySelector('#map-canvas');
+    const mini = document.querySelector('#minimap-canvas');
+    const distinct = (canvas) => {
+      const ctx = canvas.getContext('2d');
+      const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const seen = new Set();
+      for (let i = 0; i < d.length; i += 4 * 97) {
+        seen.add((d[i] >> 3) * 4096 + (d[i + 1] >> 3) * 64 + (d[i + 2] >> 3));
+      }
+      return seen.size;
+    };
+    return {
+      open: panel && !panel.classList.contains('map-hidden'),
+      fullColours: distinct(full),
+      miniColours: distinct(mini),
+      title: document.querySelector('#map-title')?.textContent ?? '',
+      legend: document.querySelectorAll('#map-hint span').length,
+    };
+  });
+  await page.keyboard.press('Escape');
+  await wait(300);
+  const mapClosed = await page.evaluate(() =>
+    document.querySelector('#map-panel').classList.contains('map-hidden'),
+  );
+
   await wait(500);
   await page.keyboard.press('k');
   await wait(500);
@@ -856,7 +919,9 @@ async function main() {
     // bar rendered a plausible number of slots for the chosen class.
     ['skill bar built', state.slots >= 6],
     ['player health shown', /\d+ \/ \d+/.test(state.hp)],
-    ['xp bar shown', /\d+ \/ \d+ XP/.test(state.xp)],
+    // Thousands separators, and a "to go" tail. The old pattern wanted a bare
+    // `n / n XP` and had been quietly failing since the bar was reformatted.
+    ['xp bar shown', /[\d,]+ \/ [\d,]+/.test(state.xp)],
     ['a target was acquired', state.targetVisible && state.target.length > 0],
     ['nameplates rendering', state.nameplates > 0],
     ['closed to weapon range', reached],
@@ -892,6 +957,12 @@ async function main() {
     ['it carried something', (wyrmDead.carried ?? []).length > 0],
     ['a front changed hands', realm.ok],
     ['the new holder garrisons the ground', realm.garrisonAfter !== realm.garrisonBefore],
+    ['the map opens', mapState.open === true],
+    ['the map drew the zone rather than a blank rectangle', mapState.fullColours > 40],
+    ['the minimap drew ground', mapState.miniColours > 12],
+    ['the map names the zone and its band', /levels \d+/i.test(mapState.title)],
+    ['the map has a legend', mapState.legend >= 7],
+    ['escape closes the map', mapClosed === true],
     ['realm panel opens', realmPanel.open],
     ['realm panel lists every front', realmPanel.fronts === 8],
     ['realm panel lists standing', realmPanel.standings === 5],
@@ -913,6 +984,7 @@ async function main() {
   console.log('horse:', JSON.stringify(horse), '| luxury:', JSON.stringify(luxury));
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
+  console.log('map:', JSON.stringify(mapState), 'closed:', mapClosed);
   console.log('armour:', JSON.stringify(armour), '| bounty:', JSON.stringify(bounty));
   console.log('rare:', JSON.stringify({ ...rareCheck, ...rareLoot }), '| rare plates:', rarePlate);
   console.log('away:', JSON.stringify(backdated), JSON.stringify(away), 'dismissed:', awayDismissed);

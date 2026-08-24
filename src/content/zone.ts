@@ -129,6 +129,16 @@ export const ZONE_HALF = 1560;
 const ROAD_START = ZONE_HALF * 0.78;
 const ROAD_END = -ZONE_HALF * 0.88;
 
+/**
+ * How far the arrival point sits behind the first camp on the road.
+ *
+ * It was 190, which is thirty-six seconds of walking before a new character
+ * meets anything at all — on a map where the first thing you are told is to
+ * click a beast. A zone this size can afford a long walk anywhere except at
+ * the very start, where the walk is the whole first impression.
+ */
+const ARRIVAL_GAP = 105;
+
 /** How far off the road the near camps sit. */
 const ROAD_OFFSET = 165;
 
@@ -303,7 +313,7 @@ export const FENMARCH: ZoneDef = {
   id: 'fenmarch',
   name: 'The Fenmarch',
   halfSize: ZONE_HALF,
-  playerStart: { x: 0, z: ROAD_START + 190 },
+  playerStart: { x: 0, z: ROAD_START + ARRIVAL_GAP },
   spawns: [
     ...layout('plains', [
       { mobId: 'moor_hare', at: 0.0, wilds: 2 },
@@ -328,10 +338,10 @@ export const FENMARCH: ZoneDef = {
   ],
   vendors: [
     // At the standing stones, where you arrive and where you come back to.
-    { vendorId: 'maeve', pos: { x: 0, z: ROAD_START + 250 } },
+    { vendorId: 'maeve', pos: { x: 0, z: ROAD_START + ARRIVAL_GAP + 44 } },
     // And the one whose wagon a level-1 character walks straight past on the
     // way to kill hares. The carrot has to be visible from the beginning.
-    { vendorId: 'ceallach', pos: { x: -46, z: ROAD_START + 262 } },
+    { vendorId: 'ceallach', pos: { x: -46, z: ROAD_START + ARRIVAL_GAP + 56 } },
     // Off the road east of the outlaw watch, for the second half of the zone.
     { vendorId: 'bryn', pos: { x: 430, z: -330 } },
   ],
@@ -350,7 +360,7 @@ export const ARDMOOR: ZoneDef = {
   id: 'ardmoor',
   name: 'Ardmoor',
   halfSize: ZONE_HALF,
-  playerStart: { x: 0, z: ROAD_START + 190 },
+  playerStart: { x: 0, z: ROAD_START + ARRIVAL_GAP },
   levelRange: [20, 40],
   theme: 'crags',
   spawns: [
@@ -370,9 +380,9 @@ export const ARDMOOR: ZoneDef = {
     ...herd('wild_crag_direwolf', 880, -260, 4, 'crags'),
     { mobId: 'muireann', pos: { x: 0, z: ROAD_END - 60 } },
   ],
-  vendors: [{ vendorId: 'sorcha', pos: { x: 0, z: ROAD_START + 250 } }],
+  vendors: [{ vendorId: 'sorcha', pos: { x: 0, z: ROAD_START + ARRIVAL_GAP + 44 } }],
   exits: [
-    { toZoneId: 'fenmarch', pos: { x: -640, z: ROAD_START + 260 }, label: 'The Hill Road to the Fenmarch', minLevel: 1 },
+    { toZoneId: 'fenmarch', pos: { x: -640, z: ROAD_START + ARRIVAL_GAP + 60 }, label: 'The Hill Road to the Fenmarch', minLevel: 1 },
     { toZoneId: 'reach', pos: { x: 800, z: -700 }, label: 'The Drowned Causeway', minLevel: 38 },
   ],
 };
@@ -381,7 +391,7 @@ export const SUNKEN_REACH: ZoneDef = {
   id: 'reach',
   name: 'The Sunken Wood',
   halfSize: ZONE_HALF,
-  playerStart: { x: 0, z: ROAD_START + 190 },
+  playerStart: { x: 0, z: ROAD_START + ARRIVAL_GAP },
   levelRange: [38, 70],
   theme: 'wyldwood',
   spawns: [
@@ -401,9 +411,9 @@ export const SUNKEN_REACH: ZoneDef = {
     ...herd('wild_drowned_direwolf', -840, -420, 3, 'wyldwood'),
     { mobId: 'old_cauldron', pos: { x: 0, z: ROAD_END - 60 } },
   ],
-  vendors: [{ vendorId: 'odhran', pos: { x: 0, z: ROAD_START + 250 } }],
+  vendors: [{ vendorId: 'odhran', pos: { x: 0, z: ROAD_START + ARRIVAL_GAP + 44 } }],
   exits: [
-    { toZoneId: 'ardmoor', pos: { x: -640, z: ROAD_START + 260 }, label: 'The Causeway to Ardmoor', minLevel: 1 },
+    { toZoneId: 'ardmoor', pos: { x: -640, z: ROAD_START + ARRIVAL_GAP + 60 }, label: 'The Causeway to Ardmoor', minLevel: 1 },
     { toZoneId: 'caer_dubh', pos: { x: 800, z: -700 }, label: 'The Black Road to Caer Dubh', minLevel: 66 },
   ],
 };
@@ -412,7 +422,7 @@ export const CAER_DUBH: ZoneDef = {
   id: 'caer_dubh',
   name: 'Caer Dubh',
   halfSize: ZONE_HALF,
-  playerStart: { x: 0, z: ROAD_START + 190 },
+  playerStart: { x: 0, z: ROAD_START + ARRIVAL_GAP },
   levelRange: [66, 100],
   theme: 'otherworld',
   spawns: [
@@ -432,9 +442,9 @@ export const CAER_DUBH: ZoneDef = {
     ...herd('wild_unicorn', 920, -520, 1, 'otherworld'),
     { mobId: 'donnchadh', pos: { x: 0, z: ROAD_END - 60 } },
   ],
-  vendors: [{ vendorId: 'aoife', pos: { x: 0, z: ROAD_START + 250 } }],
+  vendors: [{ vendorId: 'aoife', pos: { x: 0, z: ROAD_START + ARRIVAL_GAP + 44 } }],
   exits: [
-    { toZoneId: 'reach', pos: { x: -640, z: ROAD_START + 260 }, label: 'The Black Road to the Sunken Wood', minLevel: 1 },
+    { toZoneId: 'reach', pos: { x: -640, z: ROAD_START + ARRIVAL_GAP + 60 }, label: 'The Black Road to the Sunken Wood', minLevel: 1 },
   ],
 };
 

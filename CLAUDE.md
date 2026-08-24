@@ -60,6 +60,7 @@ input / HUD click ──> Command ──> World.submit()
 | `src/render/` | three.js, DOM, input. Nothing gameplay-authoritative. |
 | `src/render/scene.ts` | Builds a zone from its theme. Knows *how*, not *which*. |
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
+| `src/render/map.ts` | The minimap and the map. Both drawn from one relief bitmap. |
 | `tools/smoke.mjs` | Boots the real game in Chromium, plays it, screenshots it. |
 | `tools/look.mjs` | Stands the camera somewhere and takes a picture. See below. |
 
@@ -537,14 +538,37 @@ The cost is real and lands in one place: aggro is measured from where a
 creature *is*, so every clearance in the game — boss arenas, shopfronts, the
 arrival point — is now `aggroRadius + roam + margin`, and the tests say so.
 
+## The map
+
+Three kilometres of ground, and until now the only navigation in the game was
+the quest arrow — which points at exactly one thing. Every other question a
+player has ("where is a camp my level", "which way is the shop", "how far is
+the boss") had no answer but walking until you found out, which is not
+exploration, it is being lost.
+
+Both views come from **one relief bitmap** rendered once per zone: the minimap
+is a crop of it, the map (**M**) is the whole thing scaled down. Two separately
+drawn maps are two things that can disagree about what the ground looks like.
+
+What makes it worth reading rather than pretty:
+
+- **Camps are coloured by how they compare to you**, on the same five-step
+  scale as a nameplate. A dot's position is a fact; its colour is a decision.
+- **Camps are grouped, and labelled once.** Five hundred spawn points is five
+  hundred dots. The first version labelled every cluster and wrote "Bog Wolf 8"
+  five times down one road.
+- **Holdings are drawn in the colour of whoever holds them right now**, which
+  is the territory layer's only picture of itself.
+- The relief is shaded off the **slope**, not the height, because that is the
+  only thing that makes a hill legible in plan.
+
 ## Looking at it
 
 `npm run smoke` proves the game runs. `npm run look` is the other half: it
 stands the camera in front of each of a zone's landmarks and takes a picture,
 or at any coordinate you name.
 
-It exists because the bug it found on its first run was invisible to every
-other check — the ground's dry/damp tint was sampled in **tile-local**
+It exists because the bugs it found were invisible to every other check — the ground's dry/damp tint was sampled in **tile-local**
 coordinates, and the ground tile follows the player. The pattern of dry rises
 and wet hollows was therefore nailed to the camera: a dark halo that walked
 across the entire zone with the character, in every screenshot this project has

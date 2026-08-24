@@ -79,8 +79,13 @@ export class SceneRig {
   private clearingList: Clearing[] = [];
   /** Cell key -> the scenery standing in it. Built and dropped as you walk. */
   private cells = new Map<string, THREE.Group>();
-  /** This zone's landmarks. Placed once on load, built and dropped per cell. */
-  private structures: StructureDef[] = [];
+  /**
+   * This zone's landmarks. Placed once on load, built and dropped per cell.
+   *
+   * Public because the map draws them: a landmark whose whole job is telling
+   * you where you are should be on the thing you look at to find out.
+   */
+  structures: StructureDef[] = [];
   /** Where the ground tile is currently centred, snapped to the vertex grid. */
   private tileAt = { x: Infinity, z: Infinity };
   private motesAt = { x: Infinity, z: Infinity };

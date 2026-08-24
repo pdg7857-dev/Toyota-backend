@@ -3,6 +3,7 @@ import { getMob } from '../content/mobs.js';
 import type { Command, EntityId } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 import type { Hud } from './hud.js';
+import type { MapView } from './map.js';
 import type { SceneRig } from './scene.js';
 
 const LOOT_RANGE = 4.5;
@@ -47,6 +48,7 @@ export class InputController {
     private readonly rig: SceneRig,
     private readonly hud: Hud,
     private readonly emit: (cmd: Command) => void,
+    private readonly map: MapView,
   ) {
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -125,10 +127,14 @@ export class InputController {
       case 'KeyI':
         this.hud.toggleInventory();
         break;
+      case 'KeyM':
+        this.map.toggle();
+        break;
       case 'Escape':
         // Back out one layer at a time. The away report is the outermost thing
         // on screen when it is up, so it goes first.
         if (this.hud.awayReportOpen) this.hud.hideAwayReport();
+        else if (this.map.isOpen) this.map.close();
         else if (this.hud.vendorOpen) this.hud.closeVendor();
         else this.emit({ t: 'target', id: null });
         break;
@@ -239,7 +245,11 @@ export class InputController {
     }
 
     const current = player.targetId === null ? null : this.world.entity(player.targetId);
-    const stale = !current || current.dead || current.kind !== 'mob';
+    // A target is stale when it is gone or dead, and not before. It used to
+    // count anything that was not a mob, which meant clicking on another
+    // adventurer to read their name and having auto-select yank the selection
+    // onto a wolf walking past — the game arguing with something you just did.
+    const stale = !current || current.dead;
     const pick = attacker ?? nearest;
     if (stale && pick !== null && pick !== player.targetId) {
       this.emit({ t: 'target', id: pick });

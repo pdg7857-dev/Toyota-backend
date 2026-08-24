@@ -10,12 +10,16 @@ import { getVendor } from './content/vendors.js';
 import { SceneRig } from './render/scene.js';
 import { ViewManager } from './render/views.js';
 import { Hud } from './render/hud.js';
+import { MapView } from './render/map.js';
 import { InputController } from './render/input.js';
 import { chooseClass } from './render/classSelect.js';
 import type { ClassId, Command, SimEvent } from './sim/types.js';
 
 const SAVE_KEY = 'emerald-isle:save:v1';
 const AUTOSAVE_MS = 10000;
+
+/** Most world time one frame may advance. See the clamp in `frame`. */
+const MAX_FRAME_MS = 500;
 
 /**
  * Wiring and the game loop.
@@ -59,7 +63,16 @@ async function boot(): Promise<void> {
     (x, z) => rig.heightAt(x, z),
     () => rig.yaw,
   );
-  const input = new InputController(rig.renderer.domElement, world, rig, hud, emit);
+  // The map reads the rig through thunks rather than being handed the zone's
+  // terrain: travel rebuilds all of it, and a map holding the old zone's height
+  // field is a map of somewhere you are not.
+  const map = new MapView(container, world, {
+    heightOf: () => rig.height,
+    themeOf: () => rig.theme,
+    structuresOf: () => rig.structures,
+    yawOf: () => rig.yaw,
+  });
+  const input = new InputController(rig.renderer.domElement, world, rig, hud, emit, map);
 
   views.sync();
   views.pushTick();
@@ -82,7 +95,14 @@ async function boot(): Promise<void> {
   function frame(now: number): void {
     requestAnimationFrame(frame);
     // Clamp so an alt-tabbed tab doesn't fast-forward hundreds of ticks at once.
-    const dtMs = Math.min(120, now - lastFrame);
+    //
+    // 120ms was too tight and the failure it caused is invisible until you
+    // measure it: a machine drawing four frames a second can only ever advance
+    // 480ms of world per second, so the whole game runs at a quarter speed —
+    // walking, swinging, respawns, everything — and looks like a game that is
+    // simply slow rather than one that is losing time. Half a second still
+    // caps a minimised tab at nothing, and lets a struggling renderer keep up.
+    const dtMs = Math.min(MAX_FRAME_MS, now - lastFrame);
     lastFrame = now;
     accumulator += dtMs;
 
@@ -115,6 +135,7 @@ async function boot(): Promise<void> {
     if (playerView) rig.updateCamera(playerView.group.position);
 
     hud.update(rig.camera);
+    map.update(dtMs);
     rig.render();
 
     sinceSave += dtMs;
@@ -165,6 +186,7 @@ async function boot(): Promise<void> {
     views,
     rig,
     hud,
+    map,
     // Content lookups, so a test can ask what a trader stocks or what an item
     // does without reaching into module internals from the page.
     vendorStock: (vendorId: string) => getVendor(vendorId).stock,
