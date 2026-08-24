@@ -3,7 +3,13 @@ import { getMob } from '../content/mobs.js';
 import { isBoss } from '../sim/types.js';
 import { HeightField, getTheme } from '../content/terrain.js';
 import type { Clearing, PropSpec, ZoneTheme } from '../content/terrain.js';
-import type { ZoneDef } from '../content/zone.js';
+import {
+  ROAD_EDGE,
+  ROAD_HALF_WIDTH,
+  roadDistance,
+  roadPoints,
+  type ZoneDef,
+} from '../content/zone.js';
 import { holdingStructure, structuresFor, type StructureDef, type StructureKind } from '../content/structures.js';
 import type { Vec2 } from '../sim/types.js';
 import { NIGHT_FLOOR, type Daylight, type Weather } from '../content/daylight.js';
@@ -96,6 +102,8 @@ export class SceneRig {
    * Aligned by index with `theme.props`.
    */
   private propParts: PropPart[][] = [];
+  /** Where this zone's road runs. Painted into the ground, never built. */
+  private road: Vec2[] = [];
   /** Cell key -> the scenery standing in it. Built and dropped as you walk. */
   private cells = new Map<string, THREE.Group>();
   /**
@@ -195,6 +203,7 @@ export class SceneRig {
     this.sun.shadow.camera.updateProjectionMatrix();
 
     this.zone = zone;
+    this.road = roadPoints(zone.id, zone.theme);
     this.propParts = theme.props.map((spec) => propParts(spec));
     this.structures = this.siteStructures(zone);
     this.clearingList = this.clearings(zone);
@@ -337,7 +346,7 @@ export class SceneRig {
     }
     pos.needsUpdate = true;
     geo.computeVertexNormals();
-    tintGround(geo, this.theme, cx, cz);
+    tintGround(geo, this.theme, cx, cz, this.road);
     this.ground.position.set(cx, 0, cz);
     if (this.water) {
       this.water.position.x = cx;
@@ -483,8 +492,11 @@ export class SceneRig {
    * time.
    */
   private addCellScatter(group: THREE.Group, x0: number, z0: number): void {
-    const blocked = (x: number, z: number): boolean =>
-      this.clearingList.some((c) => Math.hypot(x - c.x, z - c.z) < c.r);
+    const blocked = (x: number, z: number): boolean => {
+      // Nothing grows in a road. People have been walking on it.
+      if (this.road.length > 1 && roadDistance(this.road, x, z) < ROAD_HALF_WIDTH + 1.2) return true;
+      return this.clearingList.some((c) => Math.hypot(x - c.x, z - c.z) < c.r);
+    };
     // Seeded from the cell and the zone, never from the sim's Rng: decor must
     // not be able to shift a gameplay roll, and this runs as you walk.
     const rng = mulberry(hash(`${this.zone.id}:${x0}:${z0}`));
@@ -1203,11 +1215,24 @@ function tintGround(
    */
   originX: number,
   originZ: number,
+  /**
+   * The road, painted rather than built.
+   *
+   * Vertex colour instead of geometry: it costs no draw calls, it follows
+   * every hill and hollow for free, and it can never float above the ground or
+   * sink into it — which is most of what goes wrong with a road laid on a
+   * heightfield as a separate mesh.
+   */
+  road: Vec2[] = [],
 ): void {
   const pos = geo.attributes.position!;
   const colors = new Float32Array(pos.count * 3);
   const dry = new THREE.Color(theme.ground.dry);
   const damp = new THREE.Color(theme.ground.damp);
+  // Worn ground, derived from the zone's own palette rather than a fixed
+  // brown: a track through the Otherworld should be pale violet dirt, not the
+  // same mud as the Fenmarch.
+  const track = new THREE.Color(theme.ground.dry).lerp(new THREE.Color(0xd8c9a8), 0.55);
   const tmp = new THREE.Color();
   // Normalised against the FULL relief, not the rolling hills alone. With
   // mountains forty metres up and lake beds thirteen down, dividing by the hill
@@ -1228,6 +1253,19 @@ function tintGround(
     const low = -pos.getY(i) / amp; // below zero = hollow = damp
     const mix = Math.max(0, Math.min(1, 0.5 + n * 0.32 + low * 0.55));
     tmp.copy(dry).lerp(damp, mix);
+
+    // The road: worn, pale, and drier than whatever it crosses.
+    if (road.length > 1) {
+      const d = roadDistance(road, x, z);
+      if (d < ROAD_HALF_WIDTH + ROAD_EDGE) {
+        // Hard-ish in the middle, feathered at the verge — a road with a sharp
+        // edge reads as a decal, and one that fades the whole way across reads
+        // as a stain.
+        const e = Math.max(0, Math.min(1, (ROAD_HALF_WIDTH + ROAD_EDGE - d) / ROAD_EDGE));
+        tmp.lerp(track, e * e * (3 - 2 * e) * 0.85);
+      }
+    }
+
     // Jitter is hashed from the world position for the same reason: a
     // per-index sequence is a fixed speckle pattern nailed to the tile.
     const v = 0.94 + hashUnit(x, z) * 0.12;

@@ -8,6 +8,7 @@ import { clockOf, type WeatherKind } from '../content/daylight.js';
 import { getMob } from '../content/mobs.js';
 import { getVendor } from '../content/vendors.js';
 import { FACTIONS, holdingsIn } from '../content/factions.js';
+import { roadPoints } from '../content/zone.js';
 
 /**
  * The minimap, and the map.
@@ -81,6 +82,14 @@ export class MapView {
 
   /** The whole zone's ground, drawn once. Both views are crops of this. */
   private relief: HTMLCanvasElement | null = null;
+  /**
+   * The road, from the same function the renderer paints it with.
+   *
+   * Baked into the relief bitmap rather than drawn over the top, so it shows on
+   * the minimap as well as the map without either view knowing about it —
+   * and so the two can never disagree about where the road goes.
+   */
+  private road: Vec2[] = [];
   private reliefZone = '';
   private open = false;
   /** Redraw throttle for the minimap: the ground under it does not move fast. */
@@ -216,6 +225,37 @@ export class MapView {
       }
     }
     ctx.putImageData(img, 0, 0);
+
+    // The road, drawn straight onto the relief.
+    this.road = roadPoints(zone.id, zone.theme);
+    if (this.road.length > 1) {
+      const px = (p: Vec2): [number, number] => [
+        ((p.x + zone.halfSize) / span) * RELIEF,
+        ((p.z + zone.halfSize) / span) * RELIEF,
+      ];
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      // Twice: a dark verge under a pale track, which is what makes a thin
+      // line read as a worn road rather than as a scratch on the image.
+      for (const [width, colour] of [
+        [7, 'rgba(38, 30, 20, 0.5)'],
+        [4, 'rgba(216, 201, 168, 0.75)'],
+      ] as Array<[number, string]>) {
+        ctx.beginPath();
+        const [sx, sy] = px(this.road[0]!);
+        ctx.moveTo(sx, sy);
+        for (const point of this.road.slice(1)) {
+          const [x, y] = px(point);
+          ctx.lineTo(x, y);
+        }
+        ctx.lineWidth = width;
+        ctx.strokeStyle = colour;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     this.relief = canvas;
     this.reliefZone = zone.id;
   }

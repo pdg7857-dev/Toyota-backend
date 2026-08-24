@@ -44,7 +44,8 @@ import {
 } from '../src/content/dragons.js';
 import { curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
 import { consumableDropFor } from '../src/content/consumables.js';
-import { FENMARCH, PLAYABLE_CLASSES, ZONES } from '../src/content/zone.js';
+import { FENMARCH, PLAYABLE_CLASSES, ZONES, roadDistance, roadPoints } from '../src/content/zone.js';
+import { getTheme, terrainHeight } from '../src/content/terrain.js';
 import { MOUNTS } from '../src/content/mounts.js';
 import { crossingSeconds, hoursToCap, type PaceInput } from './pace.js';
 
@@ -1753,6 +1754,55 @@ describe('the whole 1-100 progression', () => {
     }
     expect(zones[0]!.levelRange[0]).toBe(1);
     expect(zones[zones.length - 1]!.levelRange[1]).toBe(MAX_LEVEL);
+  });
+
+  it('runs a road the zone is actually built along', () => {
+    // The claim being tested is not "there is a line on the map". Every zone is
+    // *generated* along this road — `layout` walks its bands down it and puts
+    // the camps either side — so the road and the content have to agree, or the
+    // thing drawn on the ground is decoration pointing the wrong way.
+    const rows: string[] = [];
+    for (const zone of Object.values(ZONES)) {
+      const road = roadPoints(zone.id, zone.theme);
+      const spec = getTheme(zone.theme).terrain;
+      expect(road.length, `${zone.id} has no road`).toBeGreaterThan(8);
+
+      let length = 0;
+      for (let i = 1; i < road.length; i++) {
+        length += Math.hypot(road[i]!.x - road[i - 1]!.x, road[i]!.z - road[i - 1]!.z);
+      }
+
+      for (const point of road) {
+        expect(Math.abs(point.x), `${zone.id} road leaves the zone`).toBeLessThan(zone.halfSize);
+        expect(Math.abs(point.z), `${zone.id} road leaves the zone`).toBeLessThan(zone.halfSize);
+        // A road into a lake is worse than no road.
+        if (spec.waterLevel !== undefined) {
+          expect(
+            terrainHeight(point.x, point.z, spec),
+            `${zone.id} road goes under water`,
+          ).toBeGreaterThan(spec.waterLevel);
+        }
+      }
+
+      // Every camp on the road proper — the three per band that `layout` puts
+      // beside it — has to be within sight of it. The wilds camps do not: they
+      // are the reason to leave the road.
+      const near = zone.spawns.filter(
+        (sp) => roadDistance(road, sp.pos.x, sp.pos.z) < 200 && !sp.guardOf,
+      ).length;
+      rows.push(
+        `  ${zone.id.padEnd(10)} ${road.length} points, ${length.toFixed(0)}u long, ` +
+          `${near} creatures within 200u of it`,
+      );
+      expect(near, `${zone.id}'s road passes nothing`).toBeGreaterThan(40);
+      // Long enough to cross the zone, not so long it is wandering.
+      expect(length).toBeGreaterThan(zone.halfSize * 1.6);
+      expect(length).toBeLessThan(zone.halfSize * 2.6);
+
+      // And the same road every time, or nobody can learn the route.
+      expect(roadPoints(zone.id, zone.theme)).toEqual(road);
+    }
+    console.log('\nTHE ROAD\n' + rows.join('\n'));
   });
 
   it('leaves no quarter of the map with nothing in it', () => {

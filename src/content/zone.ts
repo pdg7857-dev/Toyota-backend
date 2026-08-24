@@ -291,6 +291,113 @@ function layout(theme: string, bands: BandSpec[]): SpawnPoint[] {
 }
 
 /**
+ * The road.
+ *
+ * Every zone in this game is generated *along* a road — `layout` walks its
+ * bands down one, the camps sit either side of it, the traders stand at the
+ * top of it and the way out is at the bottom. It has been the organising idea
+ * of the whole map since the zones were four hand-written literals, and until
+ * now there was nothing on the ground to show for it. The map was doing all
+ * the work of telling you where the road was, which is a strange thing to ask
+ * of a map when the road is the one feature you could simply *draw*.
+ *
+ * A polyline rather than a straight line down x=0, for two reasons: a ruler
+ * across three kilometres of moor reads as a seam in the terrain rather than
+ * as something people wore into it, and — the practical half — a straight line
+ * at x=0 goes through whatever lakes happen to be there.
+ *
+ * Exported as plain points because two very different things need it: the
+ * renderer paints it into the ground's vertex colours (no geometry, no draw
+ * calls, and it follows the hills for free), and the map draws it as a line.
+ * Both from one source, so they cannot disagree about where the road goes.
+ */
+
+/** How wide the worn ground is, and how far the edge feathers out past it. */
+export const ROAD_HALF_WIDTH = 4.2;
+export const ROAD_EDGE = 3.4;
+
+/** Points down the road, north to south. Uniform in z, which `roadOffsetAt` relies on. */
+const ROAD_STEPS = 16;
+
+/**
+ * Deterministic wander, so the road bends without being random.
+ *
+ * Derived from the zone id: the Fenmarch's road is the Fenmarch's road on
+ * every load, which matters more than it sounds — a route that moves between
+ * sessions is one nobody can learn, and learning the route is most of what
+ * knowing a zone means.
+ */
+function roadWander(zoneId: string, i: number): number {
+  let h = 2166136261;
+  for (let k = 0; k < zoneId.length; k++) {
+    h ^= zoneId.charCodeAt(k);
+    h = Math.imul(h, 16777619);
+  }
+  let x = Math.imul(h ^ (i * 0x9e3779b9), 0x85ebca6b);
+  x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35);
+  x ^= x >>> 16;
+  return ((x >>> 0) / 4294967296) * 2 - 1;
+}
+
+/**
+ * Where the road runs through a zone.
+ *
+ * Anchored on the same `ROAD_START`/`ROAD_END` the bands are placed against —
+ * it is not a decoration laid over the layout, it is the line the layout was
+ * always built on. Each point is nudged onto dry ground, because a road into a
+ * lake is worse than no road.
+ */
+export function roadPoints(zoneId: string, theme: string | undefined): Vec2[] {
+  const out: Vec2[] = [];
+  for (let i = 0; i <= ROAD_STEPS; i++) {
+    const t = i / ROAD_STEPS;
+    const z = ROAD_START + ARRIVAL_GAP + (ROAD_END - 90 - (ROAD_START + ARRIVAL_GAP)) * t;
+    // Wide, lazy bends: a road that wiggles every fifty metres reads as a
+    // river. The ends are pinned near the middle so the arrival point and the
+    // way out are both on it.
+    const bend = Math.sin(t * Math.PI) * roadWander(zoneId, i) * 95;
+    // A wide search, because the Sunken Wood is a drowned forest and there is
+    // not always dry ground within a hundred metres. Every point that has to
+    // detour bends the road, which is fine — a road that goes round a lake is
+    // what a road does.
+    out.push(dryPlace(bend, z, theme, 14, 26));
+  }
+  return out;
+}
+
+/**
+ * How far a world position is from the road, and nothing else.
+ *
+ * Called per ground vertex every time the terrain tile re-centres — a hundred
+ * thousand times, several times a second while walking — so it must not walk
+ * the whole polyline. The points are uniform in z by construction, so the
+ * segment covering a given z is an index rather than a search.
+ */
+export function roadDistance(road: Vec2[], x: number, z: number): number {
+  if (road.length < 2) return Infinity;
+  const zStart = road[0]!.z;
+  const zEnd = road[road.length - 1]!.z;
+  const span = zEnd - zStart;
+  const guess = Math.floor(((z - zStart) / span) * (road.length - 1));
+  let best = Infinity;
+  // The guess plus its neighbours: a bend means the nearest segment is not
+  // always the one whose z-range contains the point.
+  for (let i = guess - 1; i <= guess + 1; i++) {
+    if (i < 0 || i >= road.length - 1) continue;
+    const a = road[i]!;
+    const b = road[i + 1]!;
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const len2 = dx * dx + dz * dz;
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / len2));
+    const px = a.x + dx * t;
+    const pz = a.z + dz * t;
+    best = Math.min(best, Math.hypot(x - px, z - pz));
+  }
+  return best;
+}
+
+/**
  * How many single creatures are scattered across the open country.
  *
  * The wilds measured 45% of the ground more than 250 units — forty-eight

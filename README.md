@@ -262,6 +262,13 @@ And **your body is on the map**. Walk back to where you fell, press `V`, and
 the rest of it is cleared. That is what makes the walk a decision — through the
 thing that killed you, or pay it off in kills somewhere safer.
 
+## The road
+
+Every zone is built along one, north to south, with the level bands walking
+down it and the camps either side. It is worn into the ground — pale, dry, and
+nothing grows on it — and it is on the map and the minimap too. Follow it and
+you will pass everything the zone has, in the order it was meant to be met.
+
 ## The map
 
 Press `M`. A minimap sits in the corner; both are drawn from one relief bitmap

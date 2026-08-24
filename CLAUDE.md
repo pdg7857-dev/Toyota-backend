@@ -533,6 +533,35 @@ three-way rule `castBreak` uses, for the same reason: if chip damage threw you,
 nobody would ever ride into a fight and the mount would stop existing the moment
 combat started.
 
+## The road
+
+Every zone in this game is *generated along a road* — `layout` walks its bands
+down one, the camps sit either side of it, the traders stand at the top and the
+way out is at the bottom. It has been the organising idea of the whole map
+since the zones were four hand-written literals, and for a long time there was
+nothing on the ground to show for it. The map was doing all the work of telling
+you where the road was, which is a strange thing to ask of a map when the road
+is the one feature you could simply draw.
+
+It is **painted, never built**: a term in `tintGround`'s per-vertex colour. That
+costs no draw calls, follows every hill and hollow for free, and can never
+float above the ground or sink into it — which is most of what goes wrong with
+a road laid on a heightfield as a separate mesh. Scatter is excluded from the
+corridor, because nothing grows where people have been walking.
+
+`roadPoints` is a polyline rather than a straight line down x=0 for two
+reasons: a ruler across three kilometres of moor reads as a seam in the terrain
+rather than as something worn into it, and a straight line at x=0 goes through
+whatever lakes happen to be there. Each point is nudged onto dry ground, with a
+wide search — the Sunken Wood is a drowned forest and there is not always land
+within a hundred metres, and a road that goes round a lake is what a road does.
+
+The renderer and the map both read the same function, so they cannot disagree
+about where it goes; the map bakes it into the relief bitmap, which puts it on
+the minimap too without either view knowing about it. A test walks every road
+and fails if it leaves the zone, goes under water, or stops passing the camps
+the layout put beside it.
+
 ## The country between the camps
 
 Three kilometres of ground laid out as camps on a road measured **45% of every
