@@ -61,6 +61,7 @@ input / HUD click ──> Command ──> World.submit()
 | `src/render/scene.ts` | Builds a zone from its theme. Knows *how*, not *which*. |
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
 | `src/render/map.ts` | The minimap and the map. Both drawn from one relief bitmap. |
+| `src/render/audio.ts` | Every sound in the game, synthesised. No audio files. |
 | `src/content/models.ts` | Which creatures have real art, and how it is fitted. |
 | `tools/smoke.mjs` | Boots the real game in Chromium, plays it, screenshots it. |
 | `tools/look.mjs` | Stands the camera somewhere and takes a picture. See below. |
@@ -929,6 +930,38 @@ animated glTF, checks that the capsule went away, that the model came out the
 height the creature was authored at, that it is still clickable and that a clip
 is playing — then deletes it. Committing a fake wolf would put a grey box in
 the shipped game.
+
+## Sound
+
+Every noise in this game is **synthesised at runtime** (`render/audio.ts`).
+There is not one audio file in the repository, and that is not a purity
+exercise: a decent library of combat samples is tens of megabytes and somebody
+else's licence, and the realistic alternative to synthesis was not "better
+sound", it was **silence**, which is what the game shipped with until now.
+
+Audio is a *third subscriber* to the `SimEvent` stream the HUD and the views
+already read. It calls nothing and mutates nothing, so a muted game and a loud
+one simulate identically and the whole file could be deleted without the sim
+noticing.
+
+Two rules stop it being a nuisance:
+
+- **Distance decides volume.** Six hundred creatures are alive in a zone.
+  Anything not involving the player fades with the square of distance and is
+  silent past `EARSHOT`; anything the player is the source or target of is full
+  volume, and so is a boss telegraph — a warning you might not hear is not one.
+- **Nothing plays twice in the same instant.** A boss with adds emits several
+  damage events in one tick, and six identical thuds stacked on one sample is
+  not six hits, it is a click. Each voice has a floor on how often it retriggers.
+
+**It is tested by rendering offline, not by listening.** `AudioContext` is
+injectable for exactly this reason: a machine with no sound card — every CI
+runner, and the browser `smoke` drives — has a live context whose clock does
+not reliably advance, so measuring one reports a working synthesiser as silence
+about half the time. `__game.audioProbe(event)` renders the same graph through
+an `OfflineAudioContext` and returns real peak and RMS, which is how `smoke`
+can assert that a crit is louder than an ordinary hit and that a fight across
+the zone makes no sound at all.
 
 ## What a frame costs
 

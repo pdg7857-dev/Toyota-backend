@@ -11,6 +11,7 @@ import { SceneRig } from './render/scene.js';
 import { ViewManager } from './render/views.js';
 import { Hud } from './render/hud.js';
 import { MapView } from './render/map.js';
+import { GameAudio } from './render/audio.js';
 import { InputController } from './render/input.js';
 import { chooseClass } from './render/classSelect.js';
 import type { ClassId, Command, SimEvent } from './sim/types.js';
@@ -78,7 +79,22 @@ async function boot(): Promise<void> {
     structuresOf: () => rig.structures,
     yawOf: () => rig.yaw,
   });
-  const input = new InputController(rig.renderer.domElement, world, rig, hud, emit, map);
+  // Sound is a third subscriber to the same event stream the HUD and the views
+  // read — it calls nothing and mutates nothing, so a muted game and a loud one
+  // simulate identically.
+  const audio = new GameAudio(world);
+  const input = new InputController(rig.renderer.domElement, world, rig, hud, emit, map, audio);
+
+  // Browsers refuse to start an AudioContext before a gesture, and one created
+  // too early stays suspended with no error — the game is just silent and
+  // nothing says why. Any first interaction will do.
+  const wake = (): void => {
+    audio.start();
+    window.removeEventListener('pointerdown', wake);
+    window.removeEventListener('keydown', wake);
+  };
+  window.addEventListener('pointerdown', wake);
+  window.addEventListener('keydown', wake);
 
   views.sync();
   views.pushTick();
@@ -130,6 +146,7 @@ async function boot(): Promise<void> {
       views.pushTick();
       applyEventsToViews(events);
       hud.handleEvents(events, rig.camera);
+      audio.handleEvents(events);
       accumulator -= TICK_MS;
     }
 
@@ -148,6 +165,7 @@ async function boot(): Promise<void> {
 
     hud.update(rig.camera);
     map.update(dtMs);
+    audio.update();
     rig.render();
 
     sinceSave += dtMs;
@@ -199,6 +217,7 @@ async function boot(): Promise<void> {
     rig,
     hud,
     map,
+    audio,
     // Content lookups, so a test can ask what a trader stocks or what an item
     // does without reaching into module internals from the page.
     vendorStock: (vendorId: string) => getVendor(vendorId).stock,
@@ -208,6 +227,31 @@ async function boot(): Promise<void> {
     questOf: (questId: string) => getQuest(questId),
     holdingOf: (holdingId: string) => getHolding(holdingId),
     dragons: () => DRAGONS,
+    /**
+     * Render the sound graph offline and report its peak.
+     *
+     * Lives here because "did it make a sound" is otherwise unanswerable on a
+     * machine with no sound card — which is every CI runner and the browser
+     * `smoke` drives. A live AudioContext on such a machine has a clock that
+     * does not reliably advance, so measuring one reports a working
+     * synthesiser as silence about half the time. Rendered offline, the same
+     * graph produces exact samples.
+     */
+    audioProbe: async (event: SimEvent, seconds = 1.5) => {
+      const off = new OfflineAudioContext(1, Math.round(48000 * seconds), 48000);
+      const probe = new GameAudio(world);
+      probe.start(off);
+      probe.handleEvents([event]);
+      const rendered = await off.startRendering();
+      const samples = rendered.getChannelData(0);
+      let peak = 0;
+      let energy = 0;
+      for (const v of samples) {
+        peak = Math.max(peak, Math.abs(v));
+        energy += v * v;
+      }
+      return { peak: +peak.toFixed(4), rms: +Math.sqrt(energy / samples.length).toFixed(5) };
+    },
     // Try a model without a rebuild. This is the loop somebody iterating on
     // art actually wants: export, refresh the file, paste one line, look at it.
     tryModel: (key: string, def: { file: string; scale?: number; turn?: number; lift?: number } | null) =>

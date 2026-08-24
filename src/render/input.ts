@@ -4,6 +4,7 @@ import type { Command, EntityId } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 import type { Hud } from './hud.js';
 import type { MapView } from './map.js';
+import type { GameAudio } from './audio.js';
 import type { SceneRig } from './scene.js';
 
 const LOOT_RANGE = 4.5;
@@ -49,6 +50,7 @@ export class InputController {
     private readonly hud: Hud,
     private readonly emit: (cmd: Command) => void,
     private readonly map: MapView,
+    private readonly audio: GameAudio,
   ) {
     window.addEventListener('keydown', (e) => this.onKeyDown(e));
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -132,6 +134,15 @@ export class InputController {
         break;
       case 'KeyV':
         this.emit({ t: 'reclaim' });
+        break;
+      case 'KeyN':
+        this.hud.showVolume(this.audio.toggleMute(), this.audio.level);
+        break;
+      case 'BracketLeft':
+        this.hud.showVolume(this.audio.isMuted, this.audio.nudge(-0.05));
+        break;
+      case 'BracketRight':
+        this.hud.showVolume(this.audio.isMuted, this.audio.nudge(0.05));
         break;
       case 'Escape':
         // Back out one layer at a time. The away report is the outermost thing

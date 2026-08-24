@@ -39,6 +39,8 @@ Add `?fresh` to the URL to discard your save and start over.
 | `J` | Quest log |
 | `K` | The realm — who holds what, and what they make of you |
 | `M` | The map |
+| `N` | Mute |
+| `[` `]` | Volume |
 | `V` | Take back what dying cost you, standing where you fell |
 | `C` / `I` | Character / Backpack |
 | `Esc` | Clear target |
@@ -232,6 +234,17 @@ held in DPS parity tier for tier, so the differences are in *feel*, not power.
 Weapons are class-locked — a Priest cannot swing a greatsword — but armour and
 rings are shared. **Each boss drops a guaranteed epic weapon matched to whoever
 kills it**, so the reward is never something you can only vendor.
+
+## Sound
+
+Every noise in the game is synthesised as it plays — there is not one audio
+file in the project. Swings, impacts, crits, spells, coins, a level-up
+fanfare, a boss's warning, and wind that lifts at night and turns to rain when
+the weather does.
+
+Distance decides volume: your own fight is always audible, somebody else's
+fades with distance and is silent past seventy metres. `N` mutes, `[` and `]`
+set the level, and it remembers.
 
 ## Dying
 

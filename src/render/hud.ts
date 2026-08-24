@@ -122,6 +122,9 @@ export class Hud {
     characterBody: HTMLElement;
     inventoryWindow: HTMLElement;
     inventoryBody: HTMLElement;
+    volumeToast: HTMLElement;
+    volumeIcon: HTMLElement;
+    volumeBar: HTMLElement;
     deathOverlay: HTMLElement;
     overlays: HTMLElement;
     telegraph: HTMLElement;
@@ -147,6 +150,7 @@ export class Hud {
   private openVendorId: EntityId | null = null;
 
   private telegraphTimer: number | null = null;
+  private volumeTimer: number | null = null;
 
   private slots = new Map<string, { el: HTMLElement; cd: HTMLElement; name: HTMLElement }>();
   /** Hotkey order for this character's class, filled in at construction. */
@@ -230,6 +234,9 @@ export class Hud {
       inventoryBody: this.q('#inventory-body'),
       xpDebt: this.q('#xp-debt'),
       deathCost: this.q('#death-cost'),
+      volumeToast: this.q('#volume-toast'),
+      volumeIcon: this.q('#volume-icon'),
+      volumeBar: this.q('#volume-bar'),
       deathOverlay: this.q('#death-overlay'),
       overlays: this.q('#overlays'),
       telegraph: this.q('#telegraph-banner'),
@@ -546,6 +553,28 @@ export class Hud {
   }
 
   /** Big centred warning while a boss winds up something dangerous. */
+  /**
+   * Flash the volume, then get out of the way.
+   *
+   * A toast rather than a permanent control: the mixer is two keys and a
+   * setting people change twice, and a slider parked on screen forever costs
+   * more attention than it ever repays.
+   */
+  showVolume(muted: boolean, level: number): void {
+    const steps = 10;
+    const filled = muted ? 0 : Math.round(level * steps);
+    this.els.volumeIcon.textContent = muted || filled === 0 ? 'Muted' : 'Sound';
+    this.els.volumeBar.innerHTML = Array.from({ length: steps }, (_, i) =>
+      `<i class="${i < filled ? 'on' : ''}"></i>`,
+    ).join('');
+    this.els.volumeToast.classList.add('shown');
+    if (this.volumeTimer !== null) window.clearTimeout(this.volumeTimer);
+    this.volumeTimer = window.setTimeout(() => {
+      this.els.volumeToast.classList.remove('shown');
+      this.volumeTimer = null;
+    }, 1400);
+  }
+
   private showTelegraphBanner(text: string, durationMs: number): void {
     const banner = this.els.telegraph;
     banner.textContent = text;
@@ -1943,6 +1972,8 @@ const TEMPLATE = `
     </div>
   </div>
 
+  <div id="volume-toast"><span id="volume-icon"></span><span id="volume-bar"></span></div>
+
   <div id="death-overlay">
     <h2>YOU DIED</h2>
     <p id="death-cost"></p>
@@ -1953,6 +1984,6 @@ const TEMPLATE = `
     <b>WASD</b> move &nbsp; <b>Drag</b> or <b>←→</b> look &nbsp; <b>Scroll</b> zoom<br />
     <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–0</b> / <b>⇧1–6</b> skills &nbsp; <b>T</b> auto-attack<br />
     <b>F</b> loot &nbsp; <b>E</b> trade &nbsp; <b>G</b> travel &nbsp; <b>J</b> quests<br />
-    <b>H</b> take horse &nbsp; <b>R</b> ride &nbsp; <b>K</b> realm &nbsp; <b>M</b> map &nbsp; <b>V</b> reclaim &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
+    <b>H</b> take horse &nbsp; <b>R</b> ride &nbsp; <b>K</b> realm &nbsp; <b>M</b> map &nbsp; <b>V</b> reclaim &nbsp; <b>N</b> mute &nbsp; <b>[ ]</b> volume &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
   </div>
 `;

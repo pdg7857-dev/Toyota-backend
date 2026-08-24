@@ -148,6 +148,77 @@ async function main() {
   await wait(1500);
   await page.screenshot({ path: join(OUT, '01-spawn.png') });
 
+  // Sound.
+  //
+  // Rendered offline, not measured off the speakers: this browser has no audio
+  // device, so a live context's clock does not reliably advance and the same
+  // working synthesiser measures as silence about half the time. Offline the
+  // graph produces exact samples, and the question — did it make a sound —
+  // finally has an answer that means something.
+  const sound = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player.id;
+    const probe = g.audioProbe;
+    if (!probe) return { ok: false, why: 'no probe' };
+
+    const level = await probe({ t: 'levelUp', entityId: me, level: 2 });
+    const swing = await probe({ t: 'swing', sourceId: me, targetId: me }, 0.5);
+    const hit = await probe({
+      t: 'damage', sourceId: me, targetId: me, amount: 40,
+      crit: false, damageType: 'physical', abilityId: null,
+    }, 0.6);
+    // A real creature as the victim: distance decides volume, so an event
+    // aimed at an entity id that does not exist is correctly silent — which is
+    // what the first version of this check accidentally measured.
+    // Stand the victim next to the player. Distance decides volume, and at the
+    // spawn point the nearest camp is a hundred metres off and correctly
+    // silent — which is what the first two versions of this check measured
+    // without noticing.
+    const pp = g.world.player.pos;
+    const victim = [...g.world.entities.values()].find((e) => e.kind === 'mob');
+    const home = { ...victim.pos };
+    victim.pos = { x: pp.x + 3, z: pp.z };
+    const crit = await probe({
+      t: 'damage', sourceId: me, targetId: victim.id, amount: 90,
+      crit: true, damageType: 'physical', abilityId: null,
+    }, 0.6);
+    const near = await probe({
+      t: 'damage', sourceId: me, targetId: victim.id, amount: 40,
+      crit: false, damageType: 'physical', abilityId: null,
+    }, 0.6);
+    const nothing = await probe({ t: 'leash', mobId: me }, 0.4);
+    // And put it back, so nothing downstream inherits a teleported creature.
+    const farAway = await probe({
+      t: 'damage', sourceId: me, targetId: victim.id, amount: 40,
+      crit: false, damageType: 'physical', abilityId: null,
+    }, 0.4);
+    victim.pos = home;
+    const restored = await probe({
+      t: 'damage', sourceId: me, targetId: victim.id, amount: 40,
+      crit: false, damageType: 'physical', abilityId: null,
+    }, 0.4);
+    void farAway;
+
+    // The live path, checked only for existing and running — its loudness is
+    // what is untrustworthy here, not its wiring.
+    const a = g.audio;
+    a.start();
+    const meter = a.meter();
+
+    return {
+      ok: level.peak > 0.05 && swing.peak > 0.005 && hit.peak > 0.02,
+      level: level.peak,
+      swing: swing.peak,
+      hit: hit.peak,
+      crit: crit.peak,
+      near: near.peak,
+      silence: nothing.peak,
+      acrossTheZone: restored.peak,
+      liveMeter: meter,
+      volume: a.level,
+    };
+  });
+
   // What a frame costs, measured where a player actually stands.
   //
   // At the spawn point looking into the zone, not at some waypoint the run
@@ -436,7 +507,16 @@ async function main() {
     player.pos.z = host.pos.z;
     g.world.submit(player.id, { t: 'target', id: host.id });
     g.world.submit(player.id, { t: 'autoAttack', on: true });
-    await new Promise((r) => setTimeout(r, 1500));
+    // Held on one point of health until a swing actually lands, rather than
+    // sleeping a fixed 1.5s and hoping. A missed swing or a swing timer that
+    // has not come round left this reporting "the bounty paid nothing" when
+    // the bounty was simply still standing — the same trap `closeToTarget` and
+    // KILL_HELPER were both written to close.
+    const until = Date.now() + 9000;
+    while (!host.dead && Date.now() < until) {
+      host.health = 1;
+      await new Promise((r) => setTimeout(r, 100));
+    }
     return { ok: host.dead && (host.corpseGold ?? 0) > 0, name: spec.name, kind: spec.bounty, gold: host.corpseGold };
   });
 
@@ -656,7 +736,32 @@ async function main() {
   }, KILL_HELPER);
   await wait(600);
   await page.screenshot({ path: join(OUT, '15b-adventurers.png') });
-  const crowdUi = await page.evaluate(() => ({
+  const crowdUi = await page.evaluate(() => {
+    // Say something on purpose rather than waiting to overhear one.
+    //
+    // Chatter runs on a shared floor with a minimum gap between lines, so
+    // whether a bubble happens to be up when this samples is a coin toss — and
+    // this check has been flipping between runs for exactly that reason. What
+    // it is actually for is "does a line render over the speaker's head", so
+    // it now makes a line and looks.
+    const g = window.__game;
+    const near = [...g.world.entities.values()]
+      .filter((e) => e.kind === 'npc')
+      .sort((a, b) => {
+        const p = g.world.player.pos;
+        return (
+          Math.hypot(a.pos.x - p.x, a.pos.z - p.z) - Math.hypot(b.pos.x - p.x, b.pos.z - p.z)
+        );
+      })[0];
+    if (near) {
+      near.pos = { x: g.world.player.pos.x + 6, z: g.world.player.pos.z + 2 };
+      g.hud.handleEvents(
+        [{ t: 'chat', entityId: near.id, name: near.name, classId: near.classId ?? 'ranger', text: 'quiet out here' }],
+        g.rig.camera,
+      );
+      g.hud.update(g.rig.camera);
+    }
+    return {
     plates: [...document.querySelectorAll('.nameplate.adventurer')].filter(
       (n) => n.style.display !== 'none',
     ).length,
@@ -666,13 +771,13 @@ async function main() {
     chatLines: [...document.querySelectorAll('#log .log-chat')].map((n) => n.textContent),
     // Selecting somebody you cannot fight must not offer you a health bar.
     hpHidden: (() => {
-      const g = window.__game;
       const person = [...g.world.entities.values()].find((e) => e.kind === 'npc');
       if (!person) return false;
       g.world.submit(g.world.player.id, { t: 'target', id: person.id });
       return true;
     })(),
-  }));
+    };
+  });
   await wait(400);
   const crowdTarget = await page.evaluate(() => ({
     name: document.querySelector('#target-name')?.textContent ?? '',
@@ -1178,6 +1283,12 @@ async function main() {
     // 2,627 was the number before the scatter was instanced and entities
     // stopped drawing through the fog. 700 is a ceiling with room in it, not a
     // target — if this fails, something started drawing per-object again.
+    ['the game makes a sound', sound.ok === true],
+    ['a swing, a hit and a level-up all sound different', sound.swing !== sound.hit && sound.hit !== sound.level],
+    ['a crit is louder than an ordinary hit', sound.crit > sound.near],
+    ['an event with no sound makes none', sound.silence === 0],
+    ['a fight across the zone is inaudible', sound.acrossTheZone === 0],
+    ['the live audio graph is wired', sound.liveMeter !== null],
     ['a frame is under 700 draw calls', frame.drawCalls < 700],
     ['a frame is under 400k triangles', frame.triangles < 400000],
     // 50ms is one tick of world time. Anything approaching that is a sim that
@@ -1228,6 +1339,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('map:', JSON.stringify(mapState), 'closed:', mapClosed);
+  console.log('sound:', JSON.stringify(sound));
   console.log('frame:', JSON.stringify(frame));
   console.log('art:', JSON.stringify(art), JSON.stringify(artOff));
   console.log('sky:', skies.map((x) => JSON.stringify(x)).join(' '), '| clock:', clockShown);
