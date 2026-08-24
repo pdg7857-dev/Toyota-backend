@@ -148,6 +148,40 @@ async function main() {
   await wait(1500);
   await page.screenshot({ path: join(OUT, '01-spawn.png') });
 
+  // What a frame costs, measured where a player actually stands.
+  //
+  // At the spawn point looking into the zone, not at some waypoint the run
+  // teleported to halfway through: a probe pointed at empty sky reports
+  // twenty-one draw calls and proves nothing.
+  //
+  // Balance is measured rather than guessed in this project and performance is
+  // no different: a zone with six hundred creatures and three kilometres of
+  // streamed scenery in it went to 2,627 draw calls a frame without anybody
+  // noticing, because nothing in the suite could see a draw call. Printed as
+  // well as bounded, because a number that only fails is a number nobody
+  // watches drift.
+  const frame = await page.evaluate(() => {
+    const g = window.__game;
+    const r = g.rig.renderer;
+    let objects = 0;
+    g.rig.scene.traverse(() => objects++);
+
+    const t0 = performance.now();
+    for (let i = 0; i < 120; i++) g.world.tick();
+    const tickMs = (performance.now() - t0) / 120;
+
+    r.render(g.rig.scene, g.rig.camera);
+    return {
+      entities: g.world.entities.size,
+      objects,
+      drawCalls: r.info.render.calls,
+      triangles: r.info.render.triangles,
+      tickMs: +tickMs.toFixed(2),
+    };
+  });
+
+
+
   // Target the nearest ordinary creature, then walk to it.
   //
   // This used to hold 'w' for five seconds and press Tab, which assumed the
@@ -1141,6 +1175,14 @@ async function main() {
     ['it carried something', (wyrmDead.carried ?? []).length > 0],
     ['a front changed hands', realm.ok],
     ['the new holder garrisons the ground', realm.garrisonAfter !== realm.garrisonBefore],
+    // 2,627 was the number before the scatter was instanced and entities
+    // stopped drawing through the fog. 700 is a ceiling with room in it, not a
+    // target — if this fails, something started drawing per-object again.
+    ['a frame is under 700 draw calls', frame.drawCalls < 700],
+    ['a frame is under 400k triangles', frame.triangles < 400000],
+    // 50ms is one tick of world time. Anything approaching that is a sim that
+    // cannot keep up with itself.
+    ['a sim tick costs under 5ms', frame.tickMs < 5],
     ['a dropped-in model replaces the capsule', art.ok === true],
     ['it was a capsule before', art.before === false],
     ['the capsule is hidden underneath it', art.capsuleHidden === true],
@@ -1186,6 +1228,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('map:', JSON.stringify(mapState), 'closed:', mapClosed);
+  console.log('frame:', JSON.stringify(frame));
   console.log('art:', JSON.stringify(art), JSON.stringify(artOff));
   console.log('sky:', skies.map((x) => JSON.stringify(x)).join(' '), '| clock:', clockShown);
   console.log('death:', JSON.stringify(death), JSON.stringify(deathUi), JSON.stringify(reclaimed));

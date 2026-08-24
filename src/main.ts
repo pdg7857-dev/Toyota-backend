@@ -52,7 +52,13 @@ async function boot(): Promise<void> {
   const rig = new SceneRig(container, world.zone);
   // Sampled through the rig rather than captured, so it follows the zone the
   // player is actually standing in after travel.
-  const views = new ViewManager(rig.scene, world, (x, z) => rig.heightAt(x, z));
+  const views = new ViewManager(
+    rig.scene,
+    world,
+    (x, z) => rig.heightAt(x, z),
+    // The fog is the horizon, and the weather moves it.
+    () => ((rig.scene.fog as { far?: number } | null)?.far ?? 500) * 1.08,
+  );
   const emit = (cmd: Command): void => {
     world.submit(world.playerId, cmd);
   };

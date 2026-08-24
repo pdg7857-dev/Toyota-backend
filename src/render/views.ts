@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { AnimStateMachine } from './anim.js';
 import { CLASSES } from '../content/zone.js';
 import { getMount } from '../content/mounts.js';
@@ -93,20 +94,32 @@ export class EntityView {
           : { color: CLASSES[entity.classId ?? 'warrior'].color, height: 1.8, radius: 0.42 };
 
     this.builtHeight = view.height;
-    const geo = new THREE.CapsuleGeometry(view.radius, Math.max(0.1, view.height - view.radius * 2), 4, 12);
+    // Body and facing wedge merged into one geometry, not two meshes.
+    //
+    // With six hundred creatures in a zone that difference is 191 draw calls a
+    // frame against 382 — and the wedge exists only because a capsule has no
+    // readable front, so it was never a separate thing conceptually either.
+    const capsule = new THREE.CapsuleGeometry(
+      view.radius,
+      Math.max(0.1, view.height - view.radius * 2),
+      4,
+      12,
+    );
+    capsule.translate(0, view.height / 2, 0);
+    const noseGeo = new THREE.ConeGeometry(view.radius * 0.42, view.radius * 1.5, 8);
+    noseGeo.rotateX(Math.PI / 2);
+    noseGeo.translate(0, view.height * 0.62, view.radius * 1.05);
+    const geo = mergeGeometries([capsule, noseGeo]) ?? capsule;
+    if (geo !== capsule) {
+      capsule.dispose();
+      noseGeo.dispose();
+    }
+
     this.material = new THREE.MeshStandardMaterial({ color: view.color, roughness: 0.7, metalness: 0.05 });
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.castShadow = true;
-    this.mesh.position.y = view.height / 2;
 
-    // Facing wedge — with capsules there is otherwise no way to read direction.
-    const noseGeo = new THREE.ConeGeometry(view.radius * 0.42, view.radius * 1.5, 8);
-    noseGeo.rotateX(Math.PI / 2);
-    const nose = new THREE.Mesh(noseGeo, this.material);
-    nose.position.set(0, view.height * 0.62, view.radius * 1.05);
-    nose.castShadow = true;
-
-    this.body.add(this.mesh, nose);
+    this.body.add(this.mesh);
     this.group.add(this.body);
 
     const ringGeo = new THREE.RingGeometry(view.radius * 1.3, view.radius * 1.6, 24);
@@ -395,6 +408,13 @@ export class ViewManager {
     private readonly scene: THREE.Scene,
     private readonly world: World,
     private readonly groundAt: (x: number, z: number) => number = () => 0,
+    /**
+     * How far you can actually see, which is the fog and therefore the
+     * weather. Read through a thunk rather than captured: mist cuts it to a
+     * third, and a range that did not follow it would keep drawing a field of
+     * creatures nobody can see.
+     */
+    private readonly visibleRange: () => number = () => 500,
   ) {}
 
   /** Draw the danger zone for a winding-up AoE. */
@@ -504,9 +524,19 @@ export class ViewManager {
 
   update(alpha: number, dtMs: number): void {
     const targetId = this.world.player.targetId;
+    const player = this.world.player;
+    // Beyond the fog nothing is visible, but three.js will happily keep drawing
+    // it: the frustum culls what is off screen, not what is behind a wall of
+    // grey. On a zone with six hundred creatures in it that is most of them.
+    const range = this.visibleRange();
     for (const entity of this.world.entities.values()) {
       const view = this.views.get(entity.id);
       if (!view) continue;
+      const far = Math.hypot(entity.pos.x - player.pos.x, entity.pos.z - player.pos.z) > range;
+      if (far) {
+        view.group.visible = false;
+        continue;
+      }
       const baseColor =
         entity.kind === 'mob'
           ? getMob(entity.defId!).view.color

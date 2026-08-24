@@ -89,6 +89,13 @@ export class SceneRig {
   /** The zone being streamed, kept for the cell builders. */
   private zone!: ZoneDef;
   private clearingList: Clearing[] = [];
+  /**
+   * This theme's scatter, flattened into instanceable parts.
+   *
+   * Built once per zone and shared by every cell — which is the whole point.
+   * Aligned by index with `theme.props`.
+   */
+  private propParts: PropPart[][] = [];
   /** Cell key -> the scenery standing in it. Built and dropped as you walk. */
   private cells = new Map<string, THREE.Group>();
   /**
@@ -188,6 +195,7 @@ export class SceneRig {
     this.sun.shadow.camera.updateProjectionMatrix();
 
     this.zone = zone;
+    this.propParts = theme.props.map((spec) => propParts(spec));
     this.structures = this.siteStructures(zone);
     this.clearingList = this.clearings(zone);
     this.height = new HeightField(theme.terrain, this.clearingList);
@@ -234,6 +242,15 @@ export class SceneRig {
     this.scene.add(this.zoneRoot);
     this.motes = null;
     this.water = null;
+    // The shared scatter belongs to the zone being torn down, and `disposeTree`
+    // was told to leave it alone — so it is freed here instead.
+    for (const parts of this.propParts) {
+      for (const part of parts) {
+        part.geometry.dispose();
+        part.material.dispose();
+      }
+    }
+    this.propParts = [];
     this.structures = [];
     this.cells.clear();
     this.tileAt = { x: Infinity, z: Infinity };
@@ -454,6 +471,17 @@ export class SceneRig {
     }
   }
 
+  /**
+   * Fill one cell with scenery, as instanced meshes.
+   *
+   * This used to clone a `Group` per prop, which is the obvious thing and
+   * costs 2,627 draw calls a frame at the density this game runs at — a reed
+   * alone is seven meshes, and there are fifty-five of them per reference
+   * patch. One `InstancedMesh` per prop part per cell turns a cell's worth of
+   * trees into two draws, and because an instanced mesh has one bounding
+   * sphere the frustum culls a whole cell at a time rather than a tree at a
+   * time.
+   */
   private addCellScatter(group: THREE.Group, x0: number, z0: number): void {
     const blocked = (x: number, z: number): boolean =>
       this.clearingList.some((c) => Math.hypot(x - c.x, z - c.z) < c.r);
@@ -461,31 +489,57 @@ export class SceneRig {
     // not be able to shift a gameplay roll, and this runs as you walk.
     const rng = mulberry(hash(`${this.zone.id}:${x0}:${z0}`));
     const limit = this.zone.halfSize;
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const euler = new THREE.Euler();
+    const scaleV = new THREE.Vector3();
+    const world = new THREE.Matrix4();
 
-    for (const spec of this.theme.props) {
+    for (const [index, spec] of this.theme.props.entries()) {
       // `count` is authored against a reference patch, so a theme table written
       // for a small zone keeps meaning the same thing on a large one.
       const expected = (spec.count * CELL_SIZE * CELL_SIZE) / REFERENCE_AREA;
       const n = Math.floor(expected) + (rng() < expected % 1 ? 1 : 0);
       if (n <= 0) continue;
-      const built = buildProp(spec);
+      const parts = this.propParts[index];
+      if (!parts || parts.length === 0) continue;
+
+      // Place first, draw second: the count an InstancedMesh is built with is
+      // fixed, and how many of the n candidates survive water and clearings is
+      // not knowable until they have all been tried.
+      const placed: THREE.Matrix4[] = [];
       for (let i = 0; i < n; i++) {
         const x = x0 + rng() * CELL_SIZE;
         const z = z0 + rng() * CELL_SIZE;
+        const spin = rng() * Math.PI * 2;
+        const jitter = rng() * 2 - 1;
+        const lean = rng() * 2 - 1;
         if (Math.abs(x) > limit * 0.98 || Math.abs(z) > limit * 0.98) continue;
         if (blocked(x, z)) continue;
         // Reeds stand in the shallows; nothing else grows under a lake.
         if (spec.kind !== 'reed' && this.height.underwater(x, z)) continue;
-        const scale = spec.scale * (1 + (rng() * 2 - 1) * (spec.jitter ?? 0.4) * 0.5);
-        const prop = built.clone();
-        prop.position.set(x, this.height.at(x, z), z);
-        prop.scale.setScalar(scale);
-        prop.rotation.y = rng() * Math.PI * 2;
+        const scale = spec.scale * (1 + jitter * (spec.jitter ?? 0.4) * 0.5);
         // Lean stones and dead wood slightly; nothing in a wild place is plumb.
-        if (spec.kind === 'standingStone' || spec.kind === 'deadTree') {
-          prop.rotation.z = (rng() * 2 - 1) * 0.12;
+        const tilt = spec.kind === 'standingStone' || spec.kind === 'deadTree' ? lean * 0.12 : 0;
+        pos.set(x, this.height.at(x, z), z);
+        euler.set(0, spin, tilt, 'YXZ');
+        quat.setFromEuler(euler);
+        scaleV.setScalar(scale);
+        placed.push(new THREE.Matrix4().compose(pos, quat, scaleV));
+      }
+      if (placed.length === 0) continue;
+
+      for (const part of parts) {
+        const mesh = new THREE.InstancedMesh(part.geometry, part.material, placed.length);
+        for (let i = 0; i < placed.length; i++) {
+          world.copy(placed[i]!).multiply(part.matrix);
+          mesh.setMatrixAt(i, world);
         }
-        group.add(prop);
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.computeBoundingSphere();
+        group.add(mesh);
       }
     }
   }
@@ -779,11 +833,53 @@ function buildSnow(): THREE.Points {
 function disposeTree(root: THREE.Object3D): void {
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
-    if (mesh.geometry) mesh.geometry.dispose();
+    // Scatter geometry and materials belong to the zone, not to the cell that
+    // happens to be drawing them: every cell's trees are instances of the same
+    // two meshes. Freeing them when one cell scrolls off would take the trees
+    // out of every other cell at the same time.
+    if (mesh.geometry && !mesh.geometry.userData.shared) mesh.geometry.dispose();
     const mat = mesh.material as THREE.Material | THREE.Material[] | undefined;
-    if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
-    else mat?.dispose();
+    const free = (m: THREE.Material): void => {
+      if (!m.userData.shared) m.dispose();
+    };
+    if (Array.isArray(mat)) mat.forEach(free);
+    else if (mat) free(mat);
   });
+}
+
+/**
+ * One drawable piece of a prop: geometry, material, and where it sits inside
+ * the prop. Harvested from `buildProp` rather than authored separately, so the
+ * shapes stay written once and instancing is a thing done *to* them.
+ */
+interface PropPart {
+  geometry: THREE.BufferGeometry;
+  material: THREE.Material;
+  /** The part's transform inside the prop — a crown four metres up a trunk. */
+  matrix: THREE.Matrix4;
+}
+
+/**
+ * Flatten a prop into its parts, once per zone.
+ *
+ * This is what makes instancing possible without rewriting every shape: build
+ * the prop exactly as before, walk it, and keep the meshes. Geometry and
+ * material are then shared by every copy in the zone rather than cloned per
+ * copy — which is also why `disposeTree` has to be told to leave them alone.
+ */
+function propParts(spec: PropSpec): PropPart[] {
+  const root = buildProp(spec);
+  root.updateMatrixWorld(true);
+  const parts: PropPart[] = [];
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const material = mesh.material as THREE.Material;
+    mesh.geometry.userData.shared = true;
+    material.userData.shared = true;
+    parts.push({ geometry: mesh.geometry, material, matrix: mesh.matrixWorld.clone() });
+  });
+  return parts;
 }
 
 /**

@@ -930,10 +930,44 @@ height the creature was authored at, that it is still clickable and that a clip
 is playing — then deletes it. Committing a fake wolf would put a grey box in
 the shipped game.
 
+## What a frame costs
+
+Balance is measured rather than guessed here, and performance is no different —
+but nothing in the suite could see a draw call, so a zone with six hundred
+creatures and three kilometres of streamed scenery quietly reached **2,627 draw
+calls a frame**. `smoke` now prints and bounds the number, measured at the
+spawn point looking into the zone rather than at whatever the run happened to
+teleport to (a probe pointed at empty sky reports twenty-one and proves
+nothing).
+
+Three changes took it to ~235:
+
+- **Scatter is instanced.** It used to clone a `Group` per prop, and a reed is
+  seven meshes. `buildProp` still authors the shapes exactly as before;
+  `propParts` walks the result and harvests geometry, material and offset, and
+  a cell draws one `InstancedMesh` per part. Because an instanced mesh has one
+  bounding sphere, the frustum now culls a whole cell at a time rather than a
+  tree at a time.
+- **A creature is one mesh.** The facing wedge is merged into the capsule at
+  build time. It only exists because a capsule has no readable front, so it was
+  never a separate thing conceptually either.
+- **Nothing draws through the fog.** The frustum culls what is off screen, not
+  what is behind a wall of grey. `ViewManager` hides anything past the fog, and
+  reads that distance through a thunk because mist cuts it to a third.
+
+The consequence worth remembering: **scatter geometry and materials belong to
+the zone, not to the cell drawing them.** `disposeTree` skips anything marked
+`userData.shared`, and `disposeZone` frees it — otherwise one cell scrolling
+off the edge takes the trees out of every other cell at the same time.
+
+The sim tick is ~1ms against a 50ms budget, so the simulation is not the
+problem and adding creatures is cheap. It is the renderer that has to be
+watched.
+
 ## Verifying a change
 
 ```bash
-npm run verify        # typecheck + 222 unit and balance tests
+npm run verify        # typecheck + 266 unit and balance tests
 npm run build && npm run preview &
 npm run smoke         # real browser, plays the game, writes screenshots/
 ```
