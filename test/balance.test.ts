@@ -118,6 +118,14 @@ interface Encounter {
   /** Taught skills the character knows; defaults to everything for the level. */
   learned?: string[];
   /**
+   * Skill ranks to give them.
+   *
+   * Defaults to what a player would actually have spent by this level. Pass
+   * `{}` for a comparison where ranks are noise rather than signal — a kit
+   * against another kit, or a class against another class.
+   */
+  ranks?: Record<string, number>;
+  /**
    * Fight it with nothing but the rotation.
    *
    * Every other measurement in this suite asks "can a player clear this", and

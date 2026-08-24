@@ -1,0 +1,383 @@
+<title>Emerald Isle Bestiary</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500;600&display=swap" />
+<style>
+  /* Peat, lichen, iron and a little gold — the moor's own palette. */
+  :root {
+    --ground: #f2efe6; --raised: #ffffff; --edge: #ddd6c4; --ink: #24211b;
+    --soft: #6a6355; --gold: #8a6a20; --gold-bright: #b28c2c;
+    --heather: #6b4f7a; --blood: #9a3b2c; --shade: rgba(36, 33, 27, 0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme='light']) {
+      --ground: #16150f; --raised: #1e1d16; --edge: #35322a; --ink: #ece7d8;
+      --soft: #9d9583; --gold: #d9b355; --gold-bright: #f0cd78;
+      --heather: #b79ac8; --blood: #e07a63; --shade: rgba(0, 0, 0, 0.3);
+    }
+  }
+  :root[data-theme='dark'] {
+    --ground: #16150f; --raised: #1e1d16; --edge: #35322a; --ink: #ece7d8;
+    --soft: #9d9583; --gold: #d9b355; --gold-bright: #f0cd78;
+    --heather: #b79ac8; --blood: #e07a63; --shade: rgba(0, 0, 0, 0.3);
+  }
+  body {
+    background: var(--ground); color: var(--ink);
+    font-family: Inter, system-ui, -apple-system, sans-serif;
+    line-height: 1.55; margin: 0; padding: 0 20px 80px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+  header { padding: 56px 0 28px; border-bottom: 2px solid var(--ink); }
+  h1 {
+    font-family: Spectral, Georgia, serif; font-weight: 600;
+    font-size: clamp(34px, 6vw, 54px); line-height: 1.05; margin: 0 0 10px;
+    text-wrap: balance; letter-spacing: -0.015em;
+  }
+  .standfirst {
+    font-family: Spectral, Georgia, serif; font-size: 17px; font-style: italic;
+    color: var(--soft); max-width: 62ch; margin: 0;
+  }
+  .brief {
+    background: var(--raised); border: 1px solid var(--edge);
+    border-left: 3px solid var(--gold); border-radius: 3px;
+    padding: 18px 22px; margin: 28px 0 44px; font-size: 14.5px;
+  }
+  .brief h2 {
+    font-family: Inter, sans-serif; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.09em; color: var(--gold); margin: 0 0 10px;
+  }
+  .brief p { margin: 0 0 10px; max-width: 68ch; }
+  .brief p:last-child { margin-bottom: 0; }
+  .brief strong { color: var(--ink); font-weight: 600; }
+  h2.zone {
+    font-family: Spectral, Georgia, serif; font-size: 27px; font-weight: 600;
+    margin: 52px 0 4px; padding-top: 22px; border-top: 1px solid var(--edge);
+  }
+  h2.zone .meta { font-family: Inter, sans-serif; }
+  .zone-note { color: var(--soft); font-size: 14px; margin: 0 0 22px; max-width: 66ch; }
+  .beast {
+    display: grid; grid-template-columns: 26px 1fr; gap: 0 16px;
+    padding: 17px 0; border-top: 1px solid var(--edge);
+  }
+  /* The colour the game currently paints it, as a starting point for the art. */
+  .swatch {
+    width: 26px; height: 26px; border-radius: 3px;
+    border: 1px solid var(--shade); margin-top: 3px;
+  }
+  .beast-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin-bottom: 5px; }
+  .beast-name { font-family: Spectral, Georgia, serif; font-size: 19px; font-weight: 600; }
+  .meta {
+    font-size: 12px; color: var(--soft); font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em; font-weight: 400;
+  }
+  .stars { color: var(--gold-bright); letter-spacing: -1px; }
+  .tag {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 2px 7px; border-radius: 2px; border: 1px solid currentColor; font-weight: 600;
+  }
+  .tag.boss { color: var(--blood); }
+  .tag.elite { color: var(--heather); }
+  .tag.dragon { color: var(--gold); background: var(--shade); }
+  .tag.mount { color: var(--soft); }
+  .beast p { margin: 0; font-size: 14.5px; max-width: 72ch; }
+  .beast .silhouette { color: var(--soft); font-size: 13px; margin-top: 5px; }
+  .beast .silhouette b { color: var(--ink); font-weight: 600; }
+  footer {
+    margin-top: 60px; padding-top: 22px; border-top: 2px solid var(--ink);
+    font-size: 13.5px; color: var(--soft); max-width: 70ch;
+  }
+  footer p { margin: 0 0 12px; }
+  footer code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+    background: var(--shade); padding: 1px 5px; border-radius: 2px; color: var(--ink);
+  }
+  @media (max-width: 560px) {
+    .beast { grid-template-columns: 18px 1fr; gap: 0 11px; }
+    .swatch { width: 18px; height: 18px; }
+  }
+</style>
+
+<div class="wrap">
+<header>
+  <h1>The Bestiary of Dal Riata</h1>
+  <p class="standfirst">Fifty-one creatures, in the order a player meets them. Every one is already in the game with a level, a difficulty rating and a colour — what is missing is a face.</p>
+</header>
+
+<div class="brief">
+  <h2>Art direction — read this first</h2>
+  <p><strong>The world is grounded.</strong> This is Ireland and western Scotland in a century nobody dates: wildlife, outlaws, clansmen and soldiers. No goblins, no orcs, no trolls, no wyverns. If a thing would look out of place in a hill fog at dusk, it does not belong here.</p>
+  <p><strong>Dragons are the one exception, and that is the entire point.</strong> Put griffons and trolls in the same hills and a dragon is the biggest monster on a list. Leave it as the only impossible thing in Dal Riata and it is an event. There are four. They should not look like they come from the same world as everything else on this page.</p>
+  <p><strong>Difficulty is read from the silhouette.</strong> ★1–★4 are ordinary creatures of rising danger, ★5 is a boss and ★6 an elite. A player has to tell a ★4 from a ★2 across a field, before any nameplate resolves — so danger goes into mass, posture and horn, not into colour saturation or glow.</p>
+  <p><strong>Named rares are the same creature, lit gold.</strong> Sixteen rare variants exist, one per camp — the game renders them 25% taller and tinted gold. They want a recognisable dress-up of the base creature (a scarred pelt, a broken antler, a bleached hide), never a new animal.</p>
+  <p><strong>The swatch is the current colour, not a requirement.</strong> Each entry shows what the game paints it now and its height in metres, which is the scale the camera is framed for. A person is about 1.8.</p>
+</div>
+
+<h2 class="zone">The Fenmarch <span class="meta">levels 1–25 · open moor, low hills, standing water</span></h2>
+<p class="zone-note">Wet, green, unremarkable country. Everything here is either an animal minding its own business or a person who has decided the road is theirs. This zone teaches the player what the world is, so nothing in it should be strange.</p>
+
+<div class="beast"><div class="swatch" style="background:#a08a6a"></div><div>
+<div class="beast-head"><span class="beast-name">Moor Hare</span><span class="meta">Lv 1 · <span class="stars">★</span> · 0.7m</span></div>
+<p>A big upland hare, sandy-brown with a paler belly, ears laid flat along its back. The first living thing the player kills, so it has to read as harmless and slightly pathetic — the moment of "oh, I am the danger here" that the rest of the game spends a hundred levels taking back.</p>
+<p class="silhouette"><b>Silhouette:</b> low, round, long-eared. Nothing sharp on it anywhere.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#8a6b4f"></div><div>
+<div class="beast-head"><span class="beast-name">Mossback Boar</span><span class="meta">Lv 3 · <span class="stars">★</span> · 1.1m</span></div>
+<p>A wild pig gone shaggy, with a crust of moss and peat worked into the bristles along its spine — it beds down in the wet and never quite dries out. Small tusks, bad eyes, a very short temper. The first creature that hits back hard enough to be remembered.</p>
+<p class="silhouette"><b>Silhouette:</b> front-heavy wedge, head low and forward, hindquarters small.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#5c7a3f"></div><div>
+<div class="beast-head"><span class="beast-name">Fen Adder</span><span class="meta">Lv 5 · <span class="stars">★★</span> · 0.55m</span></div>
+<p>A thick marsh viper, olive-green with a black zigzag down the back, coiled on a tussock where the ground goes soft. Almost invisible until it moves, which is the danger of it — the player should feel they walked into this one rather than chose it.</p>
+<p class="silhouette"><b>Silhouette:</b> a coil, then a strike. Barely reads as a creature until it is one.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#5a5f68"></div><div>
+<div class="beast-head"><span class="beast-name">Bog Wolf</span><span class="meta">Lv 8 · <span class="stars">★★</span> · 1.2m</span></div>
+<p>Lean grey-brown wolf, legs mud-black to the knee from working wet ground. Ribs showing — these are hungry animals in poor country, not the fat wolves of a fairy tale. They watch for a while before committing, so the model needs a wary stand as well as a charge.</p>
+<p class="silhouette"><b>Silhouette:</b> long-legged, deep-chested, head carried level with the spine.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#7a5b3a"></div><div>
+<div class="beast-head"><span class="beast-name">Moor Stag</span><span class="meta">Lv 11 · <span class="stars">★★★</span> · 1.9m</span></div>
+<p>Red deer stag in hard antler, chest-deep in heather, steam off its back. The first creature in the game that is genuinely large, and the first a player at level is right to be nervous of. The antlers are its whole threat — they should be the widest thing on screen when it turns side-on.</p>
+<p class="silhouette"><b>Silhouette:</b> tall and narrow head-on, enormously wide in profile. The turn is the reveal.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#6b6152"></div><div>
+<div class="beast-head"><span class="beast-name">Outlaw Bowman</span><span class="meta">Lv 13 · <span class="stars">★★</span> · 1.75m</span></div>
+<p>The first human enemy. A thin man in a hooded oiled-wool cloak the colour of wet bracken, a short yew bow, a quiver of ragged arrows. Deliberately not a soldier: no mail, no shield, boots that do not match. He holds the Road Watch because nobody has taken it off him yet.</p>
+<p class="silhouette"><b>Silhouette:</b> upright, narrow, the bow breaking the outline diagonally.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#7d5b45"></div><div>
+<div class="beast-head"><span class="beast-name">Outlaw Reaver</span><span class="meta">Lv 16 · <span class="stars">★★★</span> · 1.85m</span></div>
+<p>The bowman's big brother: leather over a padded jack, a long single-edged blade, an iron cap with the rust showing. Broader in the shoulder and slower on his feet. Same faction, same browns and dull irons — the player should read him as "the same people, worse news".</p>
+<p class="silhouette"><b>Silhouette:</b> square-shouldered, blade held low and out.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#4a3728"></div><div>
+<div class="beast-head"><span class="beast-name">Marsh Bear</span><span class="meta">Lv 19 · <span class="stars">★★★★</span> · 2.2m</span></div>
+<p>A dark bog-brown bear, water-matted, mud to the shoulder. The Fenmarch's warning shot: the first ★4 a player meets, and it should look like a mistake to have pulled. Heavy in the forequarters, small-eyed, head hung low between the shoulder blades.</p>
+<p class="silhouette"><b>Silhouette:</b> a mass. Wider than it is tall until it rears, and then it is the tallest thing on the moor.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#9a8258"></div><div>
+<div class="beast-head"><span class="beast-name">Fen Lynx</span><span class="meta">Lv 21 · <span class="stars">★★★</span> · 1.15m</span></div>
+<p>Tawny lynx with heavy black ear-tufts and a bobbed tail, spotted along the flanks. Fast and light where the bear is heavy — the two should not read as the same kind of threat at all. Comes off a rock or out of bracken rather than across open ground.</p>
+<p class="silhouette"><b>Silhouette:</b> compressed, coiled, hindquarters higher than the shoulder.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#6e4436"></div><div>
+<div class="beast-head"><span class="beast-name">Outlaw Marauder</span><span class="meta">Lv 23 · <span class="stars">★★★★</span> · 1.95m</span></div>
+<p>Cadfael's best, holding the Southern Marsh. A mail shirt taken off somebody who needed it more, a shield with a repainted device, an axe. Where the reaver is a robber, this one has been a soldier — the posture is the difference, and it should be legible without reading the nameplate.</p>
+<p class="silhouette"><b>Silhouette:</b> shield breaking the body-line, weight on the back foot.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#8c4a3a"></div><div>
+<div class="beast-head"><span class="beast-name">Cadfael, the Outlaw Chief</span><span class="meta">Lv 20 · <span class="stars">★★★★★</span> · 2.1m</span><span class="tag boss">Boss</span></div>
+<p>The first boss. A big man in a red-brown cloak over good mail he did not pay for, a heavy cleaver, grey coming into the beard. He winds up a wide swing the player has to walk out of, and he binds his own wounds mid-fight — so he needs a readable telegraph pose and a kneeling, one-handed staunching animation.</p>
+<p class="silhouette"><b>Silhouette:</b> human, but a head taller than his own men and twice as wide in the cloak.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#33251a"></div><div>
+<div class="beast-head"><span class="beast-name">Old Scar</span><span class="meta">Lv 25 · <span class="stars">★★★★★★</span> · 3.2m</span><span class="tag elite">Elite</span></div>
+<p>The thing in the southern marsh. An enormous old bear, nearly black with wet, one eye gone and the long white seam across the muzzle that gave it the name. Fought alone on empty ground with nothing else on screen. It is not a monster — it is an animal that has got much too old and much too big, which is worse.</p>
+<p class="silhouette"><b>Silhouette:</b> the Marsh Bear at half again the size, and slower with it.</p></div></div>
+
+<h2 class="zone">Ardmoor <span class="meta">levels 20–40 · high crags, terraced shelves, cold grey light</span></h2>
+<p class="zone-note">Up out of the wet into thin soil and cold stone. The people here are clans rather than outlaws — they hold this ground because it has always been theirs, and they dress like it: check-woven wool, bronze, lime-stiffened hair.</p>
+
+<div class="beast"><div class="swatch" style="background:#9c8f7a"></div><div>
+<div class="beast-head"><span class="beast-name">Crag Goat</span><span class="meta">Lv 20 · <span class="stars">★</span> · 1.1m</span></div>
+<p>Feral upland goat, dirty cream and grey, horns swept back and curling. Stands on things it should not be able to stand on. Comic until it charges, which is the joke the zone opens with.</p>
+<p class="silhouette"><b>Silhouette:</b> blocky body on absurdly thin legs, always on a ledge.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#6b6f78"></div><div>
+<div class="beast-head"><span class="beast-name">Hill Wolf</span><span class="meta">Lv 23 · <span class="stars">★★</span> · 1.2m</span></div>
+<p>The Bog Wolf's highland cousin: heavier coat, more grey and slate in it, better fed. Same animal, better country. Keeping them visually related across zones is what makes the world feel like one place rather than four themed levels.</p>
+<p class="silhouette"><b>Silhouette:</b> as the Bog Wolf, thicker through the neck and ruff.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#7a6350"></div><div>
+<div class="beast-head"><span class="beast-name">Cattle Raider</span><span class="meta">Lv 26 · <span class="stars">★★</span> · 1.85m</span></div>
+<p>A clansman on the take — bare-legged, a rough check cloak pinned at the shoulder, a light spear and a knife. Cattle-raiding is a career here, not a crime. He should look like he can run all day, because that is what the job is.</p>
+<p class="silhouette"><b>Silhouette:</b> lean, spear vertical, cloak breaking one shoulder.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#8a7654"></div><div>
+<div class="beast-head"><span class="beast-name">Moor Eagle</span><span class="meta">Lv 29 · <span class="stars">★★★</span> · 1.0m</span></div>
+<p>A golden eagle that has decided the player is competition. Brown-gold, hackles up, wings half-open for balance on the ground. Fights from the air and lands to finish, so it needs both — and the ground pose should look wrong, the way a landed raptor does.</p>
+<p class="silhouette"><b>Silhouette:</b> small at rest, enormous with the wings out. The span is the threat.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#8c5f42"></div><div>
+<div class="beast-head"><span class="beast-name">Clan Axeman</span><span class="meta">Lv 32 · <span class="stars">★★★</span> · 1.95m</span></div>
+<p>The clans' line infantry. A long-hafted axe, a small round shield, bronze at the throat and wrist, hair limed into a pale stiff crest. He holds the High Shelves, and when that front changes hands these are the men who appear or vanish from the posts.</p>
+<p class="silhouette"><b>Silhouette:</b> the axe-haft doubles his width; the crest gives him a distinctive head shape at any distance.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#4f3b2a"></div><div>
+<div class="beast-head"><span class="beast-name">Highland Bear</span><span class="meta">Lv 35 · <span class="stars">★★★★</span> · 2.3m</span></div>
+<p>Bigger and paler than the Marsh Bear, silvered along the shoulders, built for cold rather than wet. Same species reading, one zone on — a player who learned to fear the marsh bear should recognise the shape immediately and correctly.</p>
+<p class="silhouette"><b>Silhouette:</b> the marsh bear with a pronounced shoulder hump.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#9c4a38"></div><div>
+<div class="beast-head"><span class="beast-name">Clan Berserker</span><span class="meta">Lv 38 · <span class="stars">★★★★</span> · 2.0m</span></div>
+<p>Stripped to the waist in weather that does not permit it, woad-blue spirals over the chest and arms, two axes, no shield at all. The one creature in Ardmoor that has decided defence is somebody else's problem — and he should look genuinely unwell rather than heroic.</p>
+<p class="silhouette"><b>Silhouette:</b> arms wide, weapons out to both sides. No vertical line anywhere on him.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#a5623f"></div><div>
+<div class="beast-head"><span class="beast-name">Aonghus the Cattle-Lord</span><span class="meta">Lv 30 · <span class="stars">★★★★★</span> · 2.2m</span><span class="tag boss">Boss</span></div>
+<p>Holds the cattle-fold with his axemen posted around it. A heavy man in a saffron tunic and a gold torc, carrying a war-axe he clearly uses for work as well as war. Rich by the standards of this hillside, and it shows in the metal on him.</p>
+<p class="silhouette"><b>Silhouette:</b> broad and low-slung. The torc and the axe-head are the two gold points on the model.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#b04a4a"></div><div>
+<div class="beast-head"><span class="beast-name">Muireann of the Nine Scars</span><span class="meta">Lv 40 · <span class="stars">★★★★★★</span> · 2.15m</span><span class="tag elite">Elite</span></div>
+<p>Someone who has survived nine things that should have killed them and counts them out loud. Dark red-brown leathers, a long straight blade in each hand, the scars deliberate and visible on the arms and face. Faster than any boss so far — the elite here is not the biggest thing in the zone, it is the best.</p>
+<p class="silhouette"><b>Silhouette:</b> narrow, bladed, always turned side-on. The opposite of Aonghus in every line.</p></div></div>
+
+<h2 class="zone">The Sunken Wood <span class="meta">levels 38–70 · a drowned forest, standing water, glowing fungus</span></h2>
+<p class="zone-note">A third of this zone is under water. Trees stand dead in it, the fungus on them gives off a weak green light, and the people are wreckers and smugglers who use the flooding as cover. The palette goes cold and desaturated — this is the first place that feels wrong.</p>
+
+<div class="beast"><div class="swatch" style="background:#4a6b5c"></div><div>
+<div class="beast-head"><span class="beast-name">Blackwater Eel</span><span class="meta">Lv 42 · <span class="stars">★★</span> · 0.7m</span></div>
+<p>A heavy freshwater eel, blue-black with a pale underside, that comes up out of the shallows at anything wading. Long enough to be startling when the whole body follows the head out.</p>
+<p class="silhouette"><b>Silhouette:</b> a line. Reads as a ripple until it is not.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#6d6455"></div><div>
+<div class="beast-head"><span class="beast-name">Wrecker Scavenger</span><span class="meta">Lv 46 · <span class="stars">★★</span> · 1.85m</span></div>
+<p>Someone who lives off what the water gives up. Oilskins, a gutting knife, a sack, salt crusted on everything. Not a warrior — they fight because they were found somewhere they should not be, and should look more furtive than dangerous.</p>
+<p class="silhouette"><b>Silhouette:</b> hunched, weighed down on one side by the sack.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#a8a294"></div><div>
+<div class="beast-head"><span class="beast-name">Marsh Heron</span><span class="meta">Lv 50 · <span class="stars">★★★</span> · 2.1m</span></div>
+<p>A grey heron scaled well past reasonable — chest-high to a person, still and patient in the shallows, and then unreasonably fast. The beak is a spear and should be modelled as one. Nothing about it is fantastical except how big it is.</p>
+<p class="silhouette"><b>Silhouette:</b> a vertical line with a kink in it. Unmistakable at any distance.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#5f5344"></div><div>
+<div class="beast-head"><span class="beast-name">Smuggler Enforcer</span><span class="meta">Lv 54 · <span class="stars">★★★</span> · 1.95m</span></div>
+<p>The muscle that keeps the causeway trade quiet. Dark waxed coat, a cudgel and a long knife, a lantern hooded down to a slit. Holds the Drowned Causeway, and guards Fiachra besides.</p>
+<p class="silhouette"><b>Silhouette:</b> broad and squared by the coat. The lantern is the one point of warm light in the zone.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#4f5f6b"></div><div>
+<div class="beast-head"><span class="beast-name">Tidewatch Marauder</span><span class="meta">Lv 58 · <span class="stars">★★★</span> · 1.85m</span></div>
+<p>Deepwood's garrison: a wrecker who has graduated to armour, plates of salvaged scale sewn onto leather, green with verdigris. Everything worn came off something that sank.</p>
+<p class="silhouette"><b>Silhouette:</b> irregular and patched — no two plates the same size.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#3f5a4a"></div><div>
+<div class="beast-head"><span class="beast-name">Great Pike</span><span class="meta">Lv 62 · <span class="stars">★★★★</span> · 1.3m</span></div>
+<p>Two metres of freshwater pike, olive and gold-flecked, jaw like a bear trap. It should be visibly a fish out of its element on land and no less dangerous for it — the horror is that it can reach you at all.</p>
+<p class="silhouette"><b>Silhouette:</b> all head and jaw, tapering to nothing.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#6b6d70"></div><div>
+<div class="beast-head"><span class="beast-name">Grey Seal Bull</span><span class="meta">Lv 66 · <span class="stars">★★★★</span> · 1.9m</span></div>
+<p>An enormous bull seal hauled out and defending it. Mottled grey, scarred neck, a head like a horse's and a mouth nothing like one. Slow on land and appallingly strong. Anyone who has been near a real one knows why this is a ★4.</p>
+<p class="silhouette"><b>Silhouette:</b> a boulder with a neck. Rears to nearly twice its resting height.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#4a6b7a"></div><div>
+<div class="beast-head"><span class="beast-name">Fiachra the Wrecker</span><span class="meta">Lv 55 · <span class="stars">★★★★★</span> · 2.25m</span><span class="tag boss">Boss</span></div>
+<p>The one who decides which ships find the channel. Blue-grey sea-coat, a boarding axe, a lamp on a chain at the belt — the same lamp used to put boats on the rocks. Weathered to the point of looking part-drowned.</p>
+<p class="silhouette"><b>Silhouette:</b> long coat to the ankle, so they read as a column with an axe.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#2f4a3d"></div><div>
+<div class="beast-head"><span class="beast-name">Old Cauldron, the Drowned Pike</span><span class="meta">Lv 70 · <span class="stars">★★★★★★</span> · 2.4m</span><span class="tag elite">Elite</span></div>
+<p>The pike that has been in the deep pool since before the wood drowned. Dark green-black, pale scarring along the flank, algae on the back. Named for the pool, not for itself. Plainly the same animal as the Great Pike and plainly much, much older.</p>
+<p class="silhouette"><b>Silhouette:</b> the Great Pike at twice the length and half the speed.</p></div></div>
+
+<h2 class="zone">Caer Dubh <span class="meta">levels 66–100 · violet Otherworld twilight, lit stones, crystal</span></h2>
+<p class="zone-note">The last zone, and the only one that is not quite the world. Permanent violet dusk, standing stones that glow faintly, crystal in the rock. The people are a real army — the Blackshields — and the contrast is deliberate: disciplined soldiers in a place that should not exist.</p>
+
+<div class="beast"><div class="swatch" style="background:#51453a"></div><div>
+<div class="beast-head"><span class="beast-name">Fort Mastiff</span><span class="meta">Lv 72 · <span class="stars">★★</span> · 1.25m</span></div>
+<p>A war-dog off the fort's chains: brindle, cropped ears, a broad studded collar. Trained, which makes it worse than a wolf — it does not hesitate and it does not break off.</p>
+<p class="silhouette"><b>Silhouette:</b> heavy square head, thick neck, low centre of gravity.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#6b6152"></div><div>
+<div class="beast-head"><span class="beast-name">Warband Levy</span><span class="meta">Lv 76 · <span class="stars">★★</span> · 1.85m</span></div>
+<p>A conscript. Quilted jack, a spear, a helmet slightly too big, no enthusiasm whatsoever. The Blackshields' cannon fodder, and they should look like someone who would rather be elsewhere.</p>
+<p class="silhouette"><b>Silhouette:</b> the spear is the only strong line; the person is unremarkable on purpose.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#3d4148"></div><div>
+<div class="beast-head"><span class="beast-name">Blackshield Spearman</span><span class="meta">Lv 80 · <span class="stars">★★★</span> · 1.95m</span></div>
+<p>The real army. Matte black-lacquered shield, mail, a closed helm, a long spear — the first enemy in the game that is properly, uniformly equipped, and that uniformity is the point. They hold the Black Road.</p>
+<p class="silhouette"><b>Silhouette:</b> the shield is a hard black rectangle. In a line of them the effect should be a wall.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#6d5f4a"></div><div>
+<div class="beast-head"><span class="beast-name">Siege Engineer</span><span class="meta">Lv 84 · <span class="stars">★★★</span> · 1.85m</span></div>
+<p>Leather apron over mail, tools on a belt, a heavy maul. Here to take walls down and extremely annoyed to be fighting a person instead. Grease and burn marks; the least ceremonial thing in the zone.</p>
+<p class="silhouette"><b>Silhouette:</b> asymmetric — tool-belt one side, maul the other.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#453a30"></div><div>
+<div class="beast-head"><span class="beast-name">Warhound Alpha</span><span class="meta">Lv 88 · <span class="stars">★★★★</span> · 1.4m</span></div>
+<p>The mastiff that killed the other mastiffs. Scarred to the bone across the muzzle, one ear gone, collar broken and still hanging. No handler any more.</p>
+<p class="silhouette"><b>Silhouette:</b> the Fort Mastiff, heavier through the chest, with the broken collar swinging.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#33373d"></div><div>
+<div class="beast-head"><span class="beast-name">Blackshield Champion</span><span class="meta">Lv 93 · <span class="stars">★★★★</span> · 2.05m</span></div>
+<p>Their best line-breaker: a two-handed sword, no shield despite the name, a helm with a horsehair crest gone dull violet in this light. Holds the Gatehouse. Where the spearman is a wall, this one is what comes through it.</p>
+<p class="silhouette"><b>Silhouette:</b> the sword doubles their height when raised, which is the telegraph.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#2b2f35"></div><div>
+<div class="beast-head"><span class="beast-name">Fort Warden</span><span class="meta">Lv 97 · <span class="stars">★★★★</span> · 2.0m</span></div>
+<p>The last ordinary creature in the game. Full harness, closed helm with a narrow slit, a mace and a tower shield — no skin visible anywhere, which is deliberate: by this point the player is killing something whose face they cannot see.</p>
+<p class="silhouette"><b>Silhouette:</b> a sealed shape. Every edge is armour.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#3a3f4a"></div><div>
+<div class="beast-head"><span class="beast-name">Ruadhán the Blackshield</span><span class="meta">Lv 85 · <span class="stars">★★★★★</span> · 2.3m</span><span class="tag boss">Boss</span></div>
+<p>The commander. Black harness with a single red device, a war-hammer, a cloak too clean for the field. The only enemy in the game who is plainly a professional at what they do, and should be styled like an officer rather than a champion.</p>
+<p class="silhouette"><b>Silhouette:</b> upright, still, weight even. They do not posture.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#1f2228"></div><div>
+<div class="beast-head"><span class="beast-name">Donnchadh, Lord of Caer Dubh</span><span class="meta">Lv 100 · <span class="stars">★★★★★★</span> · 2.6m</span><span class="tag elite">Elite</span></div>
+<p>The end of the game. Very tall, in black harness so dark it takes no highlight, with the violet light of the place catching only the edges. The brief is restraint: no glow, no floating parts, no effects. Frightening because it is a person in armour standing in a doorway, and everything around them is unearthly while they are not.</p>
+<p class="silhouette"><b>Silhouette:</b> the tallest human shape in the game, and the least decorated.</p></div></div>
+
+<h2 class="zone">The Dragons <span class="meta">one per zone · the only impossible thing in Dal Riata</span></h2>
+<p class="zone-note">Four, and they are the exception the whole world is built around. They live in world state rather than in any zone's spawn list: they sleep for half an hour, wake, work their territory, and drive the garrison off whatever ground they land on. They cannot be tamed, farmed or camped. They should not look like they belong to the same bestiary as everything above.</p>
+
+<div class="beast"><div class="swatch" style="background:#6f8f5a"></div><div>
+<div class="beast-head"><span class="beast-name">Saorla, the Fen Wyrm</span><span class="meta">Lv 25 · <span class="stars">★★★★★★</span> · 4.2m</span><span class="tag dragon">Dragon</span></div>
+<p>The first one a player ever sees, and it has to land like a different game starting. Long and low rather than tall — a bog-green serpentine body, short heavy limbs, wings that look too small and are not. Moss and peat-water staining along the belly. The smallest of the four and still four metres at the shoulder.</p>
+<p class="silhouette"><b>Silhouette:</b> horizontal, snake-backed, head carried low and forward. Nothing about her says "heraldic".</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#8e9aa6"></div><div>
+<div class="beast-head"><span class="beast-name">Crannach of the Cold Shelves</span><span class="meta">Lv 40 · <span class="stars">★★★★★★</span> · 4.6m</span><span class="tag dragon">Dragon</span></div>
+<p>Stone-grey and slate-blue, built for the crags — heavier in the shoulder than Saorla, with a ridged back that reads as another shelf of rock when at rest. Frost in the joints of the scales. It roosts on high ground and the clans do not go up there.</p>
+<p class="silhouette"><b>Silhouette:</b> hunched and angular. Mistakable for terrain until it moves.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#4a7a68"></div><div>
+<div class="beast-head"><span class="beast-name">Oanach, the Drowned Worm</span><span class="meta">Lv 70 · <span class="stars">★★★★★★</span> · 5.0m</span><span class="tag dragon">Dragon</span></div>
+<p>Sea-green going black, with the fins and flattened tail of something that spends most of its life under water. Weed and barnacle growth along the flanks. It comes up out of the flooded wood rather than down out of the sky, and the animation set should be built around that entrance.</p>
+<p class="silhouette"><b>Silhouette:</b> eel-like, finned, wings folded flat and wet against the body.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#7a4a6b"></div><div>
+<div class="beast-head"><span class="beast-name">Vharok, Last of the Ashen</span><span class="meta">Lv 100 · <span class="stars">★★★★★★</span> · 5.6m</span><span class="tag dragon">Dragon</span></div>
+<p>The biggest and oldest thing in the game. Ash-violet, burned-looking, with scarring across the wings that has never healed and never will. He carries the best weapon in the game because he is the only thing you cannot get one from by camping, buying, questing or planning. The name is the brief: he is the last of them.</p>
+<p class="silhouette"><b>Silhouette:</b> the only creature in the game that is genuinely enormous. Wings ragged and incomplete.</p></div></div>
+
+<h2 class="zone">The Mounts <span class="meta">eight, in three families · caught, never bought</span></h2>
+<p class="zone-note">You cannot buy or loot a mount. You beat one down below a quarter health and then <em>stop</em>, and it either lets you take it or it does not. Three families in rarity order: horses, dire wolves, and one unicorn. All of them ignore the player until provoked — a herd is a place you go, not a thing that happens to you.</p>
+
+<div class="beast"><div class="swatch" style="background:#8a7355"></div><div>
+<div class="beast-head"><span class="beast-name">Moor Cob</span><span class="meta">Lv 12 · Fenmarch · 1.9m</span><span class="tag mount">Horse</span></div>
+<p>Short, shaggy, feathered at the fetlock, unimpressed by everything. The first mount most players will own and the least glamorous animal in the game.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#6d5a44"></div><div>
+<div class="beast-head"><span class="beast-name">Hill Courser</span><span class="meta">Lv 32 · Ardmoor · 2.05m</span><span class="tag mount">Horse</span></div>
+<p>Bred by the clans for running people down, and it has not forgotten. Rangy, dark bay, wild-eyed.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#4f5a4a"></div><div>
+<div class="beast-head"><span class="beast-name">Drowned Wood Destrier</span><span class="meta">Lv 58 · Sunken Wood · 2.2m</span><span class="tag mount">Horse</span></div>
+<p>Heavy, patient, and entirely unbothered by standing water or shouting. Dark and mud-green, built like a plough horse that went to war.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#d8d2e4"></div><div>
+<div class="beast-head"><span class="beast-name">The Ashen Grey</span><span class="meta">Lv 96 · Caer Dubh · 2.35m</span><span class="tag mount">Horse</span></div>
+<p>One horse, in the whole of Caer Dubh, that the twilight does not seem to touch. Pale grey going white, unmarked. It runs alone. Nobody has ridden it; several have tried.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#554b45"></div><div>
+<div class="beast-head"><span class="beast-name">Fenmarch Dire Wolf</span><span class="meta">Lv 24 · Fenmarch · 1.75m</span><span class="tag mount">Dire wolf</span></div>
+<p>Half again the size of the bog wolves, and it watched you for a while before you saw it. Ridden with a rope harness, never a saddle — nobody has worked out how to make one fit.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#6b6a63"></div><div>
+<div class="beast-head"><span class="beast-name">Crag Dire Wolf</span><span class="meta">Lv 40 · Ardmoor · 1.85m</span><span class="tag mount">Dire wolf</span></div>
+<p>Grey on grey rock. The clans do not hunt these and will tell you why at length.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#3f4a44"></div><div>
+<div class="beast-head"><span class="beast-name">Drowned Dire Wolf</span><span class="meta">Lv 68 · Sunken Wood · 1.95m</span><span class="tag mount">Dire wolf</span></div>
+<p>It swims better than you walk, and it has been following the boat for an hour. Slick-coated, webbed between the toes.</p></div></div>
+
+<div class="beast"><div class="swatch" style="background:#f0ecf7"></div><div>
+<div class="beast-head"><span class="beast-name">The Pale of Caer Dubh</span><span class="meta">Lv 98 · Caer Dubh · 2.4m</span><span class="tag mount">Unicorn</span></div>
+<p>The only impossible thing in Dal Riata that does not have wings, and the rarest thing a player can own — one attempt in twenty-five. White going faintly iridescent in the violet light, a single spiralled horn, and no tack of any kind. It has let nobody near it, which is not the same as nobody having tried. It should look like it belongs with the dragons rather than with the horses.</p>
+<p class="silhouette"><b>Silhouette:</b> a horse's line, refined until it is slightly wrong.</p></div></div>
+
+<footer>
+  <p><strong>Sixteen named rares are not listed separately.</strong> Each is a variant of a camp creature above — <em>Mirefang the Bog Wolf</em>, <em>Ashenhide the Marsh Bear</em> — rendered 25% larger and lit gold. They want a recognisable dress-up of the base model rather than their own.</p>
+  <p>Every creature here is already in the game with a level, a rating, a palette and a height, generated from <code>src/content/mobs.ts</code>. The descriptions are the part that was missing.</p>
+</footer>
+</div>
