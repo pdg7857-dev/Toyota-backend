@@ -4,6 +4,7 @@ import { isBoss } from '../sim/types.js';
 import type { ZoneDef } from '../content/zone.js';
 import type { HeightField, ZoneTheme } from '../content/terrain.js';
 import type { StructureDef } from '../content/structures.js';
+import { clockOf, type WeatherKind } from '../content/daylight.js';
 import { getMob } from '../content/mobs.js';
 import { getVendor } from '../content/vendors.js';
 import { FACTIONS, holdingsIn } from '../content/factions.js';
@@ -52,6 +53,15 @@ function levelColour(diff: number): string {
   return '#8a8f86';
 }
 
+/** One word each, because it goes under a 178px circle. */
+const WEATHER_WORD: Record<WeatherKind, string> = {
+  clear: 'clear',
+  overcast: 'overcast',
+  rain: 'rain',
+  mist: 'mist',
+  snow: 'snow',
+};
+
 interface MapDeps {
   heightOf: () => HeightField;
   themeOf: () => ZoneTheme;
@@ -87,6 +97,7 @@ export class MapView {
       <div id="minimap">
         <canvas id="minimap-canvas" width="${MINIMAP_SIZE * 2}" height="${MINIMAP_SIZE * 2}"></canvas>
         <div id="minimap-zone"></div>
+        <div id="minimap-clock"></div>
         <div id="minimap-key">M</div>
       </div>
       <div id="map-panel" class="map-hidden">
@@ -311,6 +322,15 @@ export class MapView {
 
     const zoneEl = this.root.querySelector<HTMLElement>('#minimap-zone')!;
     zoneEl.textContent = this.world.zone.name;
+    // The clock and the sky go on the minimap because that is already where a
+    // player looks to ask "where am I and what is going on" — a second panel
+    // for two short strings is a second thing to find.
+    const light = this.world.daylight();
+    const weather = this.world.weather();
+    const clockEl = this.root.querySelector<HTMLElement>('#minimap-clock')!;
+    clockEl.textContent =
+      clockOf(light) + (weather.kind === 'clear' ? '' : ` · ${WEATHER_WORD[weather.kind]}`);
+    clockEl.classList.toggle('dark', light.dark);
   }
 
   /**

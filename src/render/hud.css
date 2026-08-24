@@ -369,13 +369,13 @@ canvas { display: block; }
   position: absolute;
   /* Below the minimap, which owns the top-right corner. A panel that overlaps
      the map is a panel you close to navigate and reopen to read. */
-  top: 246px;
+  top: 262px;
   right: 14px;
   /* Wide enough for the backpack's paper doll: four slots across, plus a
      three-column bag under it. The panel used to be a list and 268px was
      plenty; a grid needs the room or it renders off the side of the screen. */
   width: 344px;
-  max-height: calc(100vh - 356px);
+  max-height: calc(100vh - 372px);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1257,3 +1257,16 @@ canvas { display: block; }
   text-align: center;
   line-height: 1.5;
 }
+
+#minimap-clock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -32px;
+  text-align: center;
+  font-size: 11px;
+  color: #9a9384;
+  text-shadow: 0 1px 3px #000;
+}
+
+#minimap-clock.dark { color: #7f93b4; }

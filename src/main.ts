@@ -134,6 +134,12 @@ async function boot(): Promise<void> {
     const playerView = views.get(world.playerId);
     if (playerView) rig.updateCamera(playerView.group.position);
 
+    // The sky follows the world clock, which is sim state — so it survives a
+    // save and a fortnight's catch-up without the renderer holding a clock of
+    // its own. Set before the camera update so the shadow frustum picks up the
+    // new sun height in the same frame.
+    rig.setSky(world.daylight(), world.weather());
+
     hud.update(rig.camera);
     map.update(dtMs);
     rig.render();

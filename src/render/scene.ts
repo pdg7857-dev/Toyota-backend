@@ -6,6 +6,7 @@ import type { Clearing, PropSpec, ZoneTheme } from '../content/terrain.js';
 import type { ZoneDef } from '../content/zone.js';
 import { holdingStructure, structuresFor, type StructureDef, type StructureKind } from '../content/structures.js';
 import type { Vec2 } from '../sim/types.js';
+import { NIGHT_FLOOR, type Daylight, type Weather } from '../content/daylight.js';
 
 /**
  * How much ground the moving terrain tile covers, and at what resolution.
@@ -43,6 +44,17 @@ const SHADOW_HALF = 150;
 
 /** Half-width of the box the ambient motes drift in. */
 const MOTE_SPAN = 90;
+
+/** How big a box of weather follows the player, and how tall. */
+const PRECIP_HALF = 42;
+const PRECIP_TOP = 34;
+
+/** What the light turns into at the bottom of the night. */
+const MOONLIGHT = new THREE.Color(0x8ea8d8);
+
+/** How long a raindrop's streak is, and how far it leans. */
+const RAIN_STREAK = 1.6;
+const RAIN_SLANT = 0.22;
 
 /**
  * Scene, lighting, terrain and the follow camera.
@@ -89,6 +101,16 @@ export class SceneRig {
   /** Where the ground tile is currently centred, snapped to the vertex grid. */
   private tileAt = { x: Infinity, z: Infinity };
   private motesAt = { x: Infinity, z: Infinity };
+  /** Rain or snow. Rebuilt when the kind changes, moved every frame. */
+  private precip: THREE.Points | THREE.LineSegments | null = null;
+  private precipKind = '';
+  private skyColor = new THREE.Color();
+  private fogColor = new THREE.Color();
+  private nightSky = new THREE.Color(0x0d1420);
+  /** Where the sun sits above the ground right now. Set by `setSky`. */
+  private sunHeight = 0;
+  /** Last camera focus, so weather can follow the player without being told. */
+  private lastFocus = new THREE.Vector3();
 
   /**
    * Camera orbit state, driven by right-drag and scroll.
@@ -194,7 +216,7 @@ export class SceneRig {
     this.recentreMotes(x, z, force);
     // Keep the shadow frustum on the player, and the sun's direction fixed.
     const dir = this.theme.sun.position;
-    this.sun.position.set(x + dir[0], dir[1], z + dir[2]);
+    this.sun.position.set(x + dir[0], this.sunHeight || dir[1], z + dir[2]);
     this.sun.target.position.set(x, 0, z);
     this.sun.target.updateMatrixWorld();
   }
@@ -549,6 +571,7 @@ export class SceneRig {
 
   /** Orbit the camera around a focus point. */
   updateCamera(focus: THREE.Vector3): void {
+    this.lastFocus.copy(focus);
     const p = Math.max(0.15, Math.min(1.35, this.pitch));
     const horiz = Math.cos(p) * this.distance;
     const x = focus.x - Math.sin(this.yaw) * horiz;
@@ -562,9 +585,125 @@ export class SceneRig {
 
   /** Drift the motes. Purely decorative, so frame time is the only budget. */
   update(dtMs: number): void {
-    if (!this.motes) return;
-    this.motes.rotation.y += dtMs * 0.000018;
-    this.motes.position.y = Math.sin(performance.now() * 0.0004) * 0.35;
+    if (this.motes) {
+      this.motes.rotation.y += dtMs * 0.000018;
+      this.motes.position.y = Math.sin(performance.now() * 0.0004) * 0.35;
+    }
+    if (this.precip) this.fallPrecipitation(dtMs);
+  }
+
+  /**
+   * Put the sun where the hour says, and the weather over the top of it.
+   *
+   * Every number here is a *multiplier on the theme*, never a replacement for
+   * it: Caer Dubh at noon is still violet twilight and the Fenmarch at
+   * midnight is still a moor. A day cycle that overwrote the palette would
+   * make four zones that look like one zone at four times of day.
+   */
+  setSky(light: Daylight, weather: Weather): void {
+    const theme = this.theme;
+    // 0 at midnight, 1 at noon, so the two lights can be moved independently.
+    // They have to be: what makes night read as night is losing the *sun*, and
+    // what keeps it playable is keeping the *ambient*.
+    //
+    // Weather dims by a fraction of the day rather than by subtracting from
+    // the light, which is how a first attempt had rain at half past seven in
+    // the morning rendering as midnight.
+    const gloom = weather.kind === 'clear' ? 0 : weather.intensity * 0.3;
+    const day = ((light.light - NIGHT_FLOOR) / (1 - NIGHT_FLOOR)) * (1 - gloom);
+    const dark = 1 - day;
+
+    // Directional light nearly goes out. Flat ground and no shadows are most
+    // of what a person actually reads as "it is night".
+    this.sun.intensity = theme.sun.intensity * (0.2 + 0.8 * day);
+    // Ambient never drops below half, and turns the colour of moonlight rather
+    // than simply dimming. This line is what keeps the rule in
+    // `content/daylight.ts`: night is a mood, not a legibility problem.
+    this.hemi.intensity = theme.hemisphere.intensity * (0.5 + 0.5 * day);
+    this.hemi.color.setHex(theme.hemisphere.sky).lerp(MOONLIGHT, dark * 0.8);
+    this.sun.color.setHex(theme.sun.color).lerp(MOONLIGHT, dark * 0.85);
+
+    // Sky and fog move toward night colour rather than to black, so a horizon
+    // still exists to read silhouettes against.
+    this.skyColor.setHex(theme.sky).lerp(this.nightSky, dark * 0.88);
+    this.fogColor.setHex(theme.fog.color).lerp(this.nightSky, dark * 0.88);
+    (this.scene.background as THREE.Color).copy(this.skyColor);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.color.copy(this.fogColor);
+    // Mist is the only weather that changes how far you can see, and it does
+    // it hard — that is the whole point of it as a thing that happens to you.
+    const closeness =
+      weather.kind === 'mist' ? 1 - weather.intensity * 0.62 : 1 - weather.intensity * 0.18;
+    fog.near = theme.fog.near * closeness;
+    fog.far = theme.fog.far * closeness;
+
+    // The sun rides lower morning and evening, which is most of what sells the
+    // hour before anything else does.
+    this.sunHeight = theme.sun.position[1] * (0.3 + day * 0.7);
+
+    this.setPrecipitation(weather);
+  }
+
+  /**
+   * One buffer of weather that follows the camera and wraps.
+   *
+   * Rain over three kilometres of ground is not a thing anybody can afford;
+   * rain in a forty-metre box around the player is indistinguishable from it
+   * and costs two thousand vertices.
+   */
+  private setPrecipitation(weather: Weather): void {
+    const wants = weather.kind === 'rain' || weather.kind === 'snow' ? weather.kind : '';
+    if (wants !== this.precipKind) {
+      if (this.precip) {
+        this.precip.geometry.dispose();
+        (this.precip.material as THREE.Material).dispose();
+        this.scene.remove(this.precip);
+        this.precip = null;
+      }
+      this.precipKind = wants;
+      if (wants) {
+        this.precip = wants === 'rain' ? buildRain() : buildSnow();
+        this.precip.frustumCulled = false;
+        this.scene.add(this.precip);
+      }
+    }
+    if (this.precip) {
+      (this.precip.material as THREE.Material & { opacity: number }).opacity =
+        0.15 + weather.intensity * (this.precipKind === 'rain' ? 0.4 : 0.6);
+    }
+  }
+
+  private fallPrecipitation(dtMs: number): void {
+    const pos = this.precip!.geometry.attributes.position as THREE.BufferAttribute;
+    const rain = this.precipKind === 'rain';
+    const fall = (rain ? 42 : 6) * (dtMs / 1000);
+    const drift = (rain ? 2.5 : 3.5) * (dtMs / 1000);
+    // Rain is line segments: two vertices per drop that must move together, or
+    // the streaks stretch to the ground and the sky fills with white bars.
+    const stride = rain ? 2 : 1;
+    for (let i = 0; i < pos.count; i += stride) {
+      let y = pos.getY(i) - fall;
+      let x = pos.getX(i) + drift;
+      if (y < 0) {
+        y += PRECIP_TOP;
+        x = (Math.random() * 2 - 1) * PRECIP_HALF;
+      }
+      if (x > PRECIP_HALF) x -= PRECIP_HALF * 2;
+      pos.setX(i, x);
+      pos.setY(i, y);
+      if (rain) {
+        pos.setX(i + 1, x - RAIN_SLANT);
+        pos.setY(i + 1, y - RAIN_STREAK);
+        pos.setZ(i + 1, pos.getZ(i));
+      }
+    }
+    pos.needsUpdate = true;
+    // Follows the player, snapped so drops do not slide sideways when you walk.
+    this.precip!.position.set(
+      Math.round(this.lastFocus.x),
+      this.lastFocus.y,
+      Math.round(this.lastFocus.z),
+    );
   }
 
   private onResize(): void {
@@ -576,6 +715,64 @@ export class SceneRig {
   render(): void {
     this.renderer.render(this.scene, this.camera);
   }
+}
+
+/**
+ * Rain is line segments, not points.
+ *
+ * The first version used a point cloud and rendered as a field of large white
+ * squares hanging in the air — which is what a screen-facing quad of constant
+ * world size looks like up close, and reads as neither rain nor snow. Rain is
+ * a streak; the only cheap way to draw a streak is a line.
+ */
+function buildRain(): THREE.LineSegments {
+  const drops = 1800;
+  const pos = new Float32Array(drops * 6);
+  for (let i = 0; i < drops; i++) {
+    const x = (Math.random() * 2 - 1) * PRECIP_HALF;
+    const y = Math.random() * PRECIP_TOP;
+    const z = (Math.random() * 2 - 1) * PRECIP_HALF;
+    pos[i * 6] = x;
+    pos[i * 6 + 1] = y;
+    pos[i * 6 + 2] = z;
+    pos[i * 6 + 3] = x - RAIN_SLANT;
+    pos[i * 6 + 4] = y - RAIN_STREAK;
+    pos[i * 6 + 5] = z;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  return new THREE.LineSegments(
+    geo,
+    new THREE.LineBasicMaterial({
+      color: 0xa8bcd0,
+      transparent: true,
+      opacity: 0.4,
+      depthWrite: false,
+    }),
+  );
+}
+
+function buildSnow(): THREE.Points {
+  const flakes = 1400;
+  const pos = new Float32Array(flakes * 3);
+  for (let i = 0; i < flakes; i++) {
+    pos[i * 3] = (Math.random() * 2 - 1) * PRECIP_HALF;
+    pos[i * 3 + 1] = Math.random() * PRECIP_TOP;
+    pos[i * 3 + 2] = (Math.random() * 2 - 1) * PRECIP_HALF;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  return new THREE.Points(
+    geo,
+    new THREE.PointsMaterial({
+      color: 0xf2f6ff,
+      size: 0.17,
+      transparent: true,
+      opacity: 0.8,
+      depthWrite: false,
+      sizeAttenuation: true,
+    }),
+  );
 }
 
 /** Free every geometry and material under an object, before dropping it. */

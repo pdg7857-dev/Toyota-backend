@@ -51,6 +51,14 @@ import {
   xpToNext,
 } from './formulas.js';
 import { BOSS_STARS, isBoss } from './types.js';
+import {
+  DAY_LENGTH_MS,
+  NIGHT_AGGRO,
+  daylightAt,
+  weatherAt,
+  type Daylight,
+  type Weather,
+} from '../content/daylight.js';
 import type {
   ActiveEffect,
   AwayReport,
@@ -210,6 +218,19 @@ export class World {
   zone: ZoneDef;
   rng: Rng;
   tickCount = 0;
+  /**
+   * Milliseconds of world time elapsed. Drives the sun and the weather.
+   *
+   * Sim state rather than a renderer clock, because time of day is one of the
+   * things that genuinely is about elapsed time — the same argument territory
+   * drift and the dragons' routine are made on. `catchUp` advances it, so
+   * coming back after a fortnight puts you down at a different hour, which is
+   * the cheapest proof the world did not pause when you closed the tab.
+   *
+   * Started part-way into the morning so a new character does not arrive at
+   * midnight in a game whose first instruction is to go and look at a beast.
+   */
+  worldTimeMs = DAY_LENGTH_MS * 0.34;
   entities = new Map<EntityId, Entity>();
   playerId: EntityId = 0;
 
@@ -970,9 +991,23 @@ export class World {
   /** Faction guards notice a hated enemy from further off. */
   private aggroRadiusFor(mob: Entity, player: Entity): number {
     const def = getMob(mob.defId!);
-    const base = def.aggroRadius;
+    // In the dark, everything notices you from further off. This is the whole
+    // gameplay consequence of the day cycle, and one is enough: it makes
+    // crossing a zone at night a decision, it is legible without a tooltip,
+    // and it costs nothing to explain.
+    const base = def.aggroRadius * (this.daylight().dark ? NIGHT_AGGRO : 1);
     if (!def.factionId) return base;
     return this.standingWith(player, def.factionId) <= HOSTILE_AT ? base * 1.6 : base;
+  }
+
+  /** Where the sun is. Pure function of world time — see `content/daylight.ts`. */
+  daylight(): Daylight {
+    return daylightAt(this.worldTimeMs);
+  }
+
+  /** What the sky is doing over the zone you are standing in. */
+  weather(): Weather {
+    return weatherAt(this.zone.id, this.worldTimeMs);
   }
 
   /**
@@ -1336,6 +1371,7 @@ export class World {
     this.queue = [];
     for (const { actorId, cmd } of pending) this.applyCommand(actorId, cmd);
 
+    this.worldTimeMs += TICK_MS;
     this.tickTerritory();
     this.tickDragons();
     this.tickAdventurers();
@@ -1401,6 +1437,10 @@ export class World {
       this.tickTerritory(AWAY_STEP_MS);
       this.tickDragons(AWAY_STEP_MS);
     }
+    // The sun keeps moving too. It is elapsed time and nothing else, so it
+    // takes the whole span rather than only the part that divides evenly into
+    // AWAY_STEP_MS — the remainder is still time that passed.
+    this.worldTimeMs += away;
     this.catchingUp = false;
     this.events = live;
 
@@ -3151,6 +3191,7 @@ export class World {
       version: SAVE_VERSION,
       seed: this.rng.state,
       tickCount: this.tickCount,
+      worldTimeMs: this.worldTimeMs,
       nextId: this.nextId,
       playerId: this.playerId,
       zoneId: this.zone.id,
@@ -3168,6 +3209,7 @@ export class World {
       version: number;
       seed: number;
       tickCount: number;
+      worldTimeMs?: number;
       nextId: number;
       playerId: EntityId;
       zoneId?: string;
@@ -3189,6 +3231,9 @@ export class World {
     world.entities.clear();
     world.rng = Rng.fromState(data.seed);
     world.tickCount = data.tickCount;
+    // An unstamped save is one written before the sun moved. Leave it at the
+    // fresh-world morning rather than dropping the player into midnight.
+    if (typeof data.worldTimeMs === 'number') world.worldTimeMs = data.worldTimeMs;
     world.nextId = data.nextId;
     world.playerId = data.playerId;
     if (data.control) world.control = { ...world.control, ...data.control };

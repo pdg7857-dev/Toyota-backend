@@ -43,6 +43,13 @@ import {
 } from '../src/content/adventurers.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { grindMobFor, killsForLevel } from './pace.js';
+import {
+  DAY_LENGTH_MS,
+  NIGHT_FLOOR,
+  clockOf,
+  daylightAt,
+  weatherAt,
+} from '../src/content/daylight.js';
 import { ITEMS, canEquip, gearSetFor, getItem } from '../src/content/items.js';
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
 import {
@@ -3462,5 +3469,113 @@ describe('death costs something', () => {
       expect(lostKills / levelKills, `a death at ${level} is mispriced`).toBeLessThan(0.5);
     }
     console.log('\nWHAT A DEATH COSTS\n' + rows.join('\n'));
+  });
+});
+
+describe('the sun moves, and so does the weather', () => {
+  it('never lets a zone get too dark to fight in', () => {
+    // The rule that outranks the atmosphere. Caer Dubh was once authored at
+    // true dusk and shipped with the mobs as black shapes on a black hill; a
+    // day cycle is a much better way to make that mistake, because it only
+    // happens for a few minutes at a time and only to whoever was online.
+    let darkest = 1;
+    for (let ms = 0; ms < DAY_LENGTH_MS; ms += DAY_LENGTH_MS / 240) {
+      const light = daylightAt(ms);
+      expect(light.light, `light at ${clockOf(light)}`).toBeGreaterThanOrEqual(NIGHT_FLOOR);
+      expect(light.light).toBeLessThanOrEqual(1);
+      darkest = Math.min(darkest, light.light);
+    }
+    // And it has to actually get dark, or the whole cycle is decoration.
+    expect(darkest, 'midnight is as bright as noon').toBeLessThan(0.7);
+  });
+
+  it('runs a whole day and names every part of it', () => {
+    const seen = new Set<string>();
+    const rows: string[] = [];
+    for (let i = 0; i < 24; i++) {
+      const light = daylightAt((DAY_LENGTH_MS * i) / 24);
+      seen.add(light.phase);
+      rows.push(`  ${clockOf(light)}  ${light.phase.padEnd(6)} light ${light.light.toFixed(2)}`);
+    }
+    console.log('\nA DAY IN THE FENMARCH\n' + rows.join('\n'));
+    expect([...seen].sort()).toEqual(['dawn', 'day', 'dusk', 'night']);
+  });
+
+  it('keeps the clock in the sim, so a fortnight away moves it', () => {
+    const ticked = new World({ seed: 1, zone: emptyZone(), classId: 'warrior' });
+    const caught = new World({ seed: 1, zone: emptyZone(), classId: 'warrior' });
+    const twoHours = 2 * 60 * 60 * 1000;
+
+    ticked.advance(twoHours);
+    caught.catchUp(twoHours);
+    // Same rule, coarser step — the same argument territory drift is made on.
+    expect(caught.worldTimeMs).toBeCloseTo(ticked.worldTimeMs, -2);
+    expect(caught.daylight().phase).toBe(ticked.daylight().phase);
+  });
+
+  it('remembers what time it is across a save', () => {
+    const world = new World({ seed: 2, zone: emptyZone(), classId: 'warrior' });
+    world.advance(60000);
+    const at = world.worldTimeMs;
+    const back = World.deserialize(world.serialize(), FENMARCH);
+    expect(back.worldTimeMs).toBe(at);
+  });
+
+  it('never spends the fight\'s random stream on the sky', () => {
+    // Same rule the roaming creatures run under, and for the same reason: an
+    // ambient system that draws from `World.rng` turns every balance figure in
+    // the suite into a measurement of the scenery.
+    const world = new World({ seed: 3, zone: emptyZone(), classId: 'warrior' });
+    const before = world.rng.state;
+    world.advance(DAY_LENGTH_MS / 4);
+    expect(world.daylight().phase).not.toBe(daylightAt(0).phase);
+    expect(world.rng.state).toBe(before);
+  });
+
+  it('makes the dark a reason to be somewhere else', () => {
+    // The one gameplay consequence, and one is enough: it makes crossing a
+    // zone at night a decision, and it needs no tooltip to explain.
+    const day = new World({ seed: 4, zone: duelZone('bog_wolf', 26), classId: 'warrior' });
+    const night = new World({ seed: 4, zone: duelZone('bog_wolf', 26), classId: 'warrior' });
+    const radius = getMob('bog_wolf').aggroRadius;
+    const mob = (w: World) => [...w.entities.values()].find((e) => e.kind === 'mob')!;
+    // Stand just outside what it would notice by day, and inside what it
+    // notices in the dark.
+    for (const [world, t] of [
+      [day, DAY_LENGTH_MS * 0.5],
+      [night, DAY_LENGTH_MS * 0.02],
+    ] as Array<[World, number]>) {
+      world.worldTimeMs = t;
+      mob(world).pos = { x: radius * 1.15, z: 0 };
+      mob(world).spawnPos = { x: radius * 1.15, z: 0 };
+      world.advance(2000);
+    }
+    expect(day.daylight().dark).toBe(false);
+    expect(night.daylight().dark).toBe(true);
+    expect(mob(day).aiState, 'it saw you in broad daylight from too far').toBe('idle');
+    expect(mob(night).aiState, 'the dark changed nothing').not.toBe('idle');
+  });
+
+  it('gives every zone weather that changes, and never the same weather forever', () => {
+    const rows: string[] = [];
+    for (const zoneId of Object.keys(ZONES)) {
+      const kinds = new Map<string, number>();
+      for (let ms = 0; ms < DAY_LENGTH_MS * 8; ms += 30000) {
+        const w = weatherAt(zoneId, ms);
+        kinds.set(w.kind, (kinds.get(w.kind) ?? 0) + 1);
+        expect(w.intensity).toBeGreaterThanOrEqual(0);
+        expect(w.intensity).toBeLessThanOrEqual(1);
+      }
+      const total = [...kinds.values()].reduce((a, b) => a + b, 0);
+      const share = [...kinds.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, n]) => `${k} ${Math.round((n / total) * 100)}%`)
+        .join(', ');
+      rows.push(`  ${zoneId.padEnd(10)} ${share}`);
+      expect(kinds.size, `${zoneId} has one kind of sky`).toBeGreaterThan(2);
+      // And it is the same every time, from nothing but the clock.
+      expect(weatherAt(zoneId, 12345678)).toEqual(weatherAt(zoneId, 12345678));
+    }
+    console.log('\nEIGHT DAYS OF SKY\n' + rows.join('\n'));
   });
 });

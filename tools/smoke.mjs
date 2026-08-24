@@ -765,6 +765,12 @@ async function main() {
       owed: player.xpDebt ?? 0,
       level: player.level,
       xp: player.xp,
+      hp: Math.round(player.health),
+      killer: killer.name,
+      killerAi: killer.aiState,
+      killerGap: +Math.hypot(killer.pos.x - player.pos.x, killer.pos.z - player.pos.z).toFixed(1),
+      killerRange: +g.world.statsOf(killer).attackRange.toFixed(1),
+      mounted: player.mounted ?? null,
       spot: player.deathSpot ? { ...player.deathSpot.pos } : null,
     };
   });

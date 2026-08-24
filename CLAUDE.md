@@ -608,6 +608,40 @@ The bar draws the debt as ground still to make up, sitting *ahead* of where you
 are — not as a bite taken out behind you. It has never taken anything away, and
 the bar must not imply that it has.
 
+## The sun goes round, and the sky does things
+
+Time of day is **sim state** (`World.worldTimeMs`), not a renderer clock, for
+the same reason territory drift and the dragons' routine are: it is genuinely
+about elapsed time. `catchUp` advances it, so a fortnight away puts you down at
+a different hour — the cheapest possible proof the world did not pause when you
+closed the tab. Twenty-four minutes to the day, tuned against the grind rather
+than realism: a real-time cycle means most players never see night.
+
+Weather is a **hash of (zone, spell number)** rather than a stored roll. It is
+therefore free across a save, free across a fortnight's catch-up, and — the
+part that matters — it cannot draw from `World.rng`. Roaming creatures learned
+the same lesson: anything ambient that touches the combat stream turns every
+balance figure in the suite into a measurement of the scenery.
+
+Two rules hold it together:
+
+- **Night is a mood, never a legibility problem.** `NIGHT_FLOOR` is a floor on
+  the light multiplier and a test walks the whole cycle against it. The
+  renderer spends the darkness on the *sun* — which is what a person actually
+  reads as night — while holding the *ambient* above half and turning it the
+  colour of moonlight. Caer Dubh already shipped once as black shapes on a
+  black hill; a cycle is a much better way to make that mistake, because it
+  only happens for a few minutes and only to whoever was online.
+- **One gameplay consequence, and one is enough.** In the dark everything
+  notices you from `NIGHT_AGGRO` further off. That makes crossing a zone at
+  night a decision, and it needs no tooltip. Everything else about weather and
+  the hour is atmosphere, and atmosphere is allowed to be atmosphere.
+
+Every number the renderer applies is a *multiplier on the theme*, never a
+replacement: Caer Dubh at noon is still violet twilight and the Fenmarch at
+midnight is still a moor. A cycle that overwrote the palette would turn four
+zones into one zone at four times of day.
+
 ## The map
 
 Three kilometres of ground, and until now the only navigation in the game was
