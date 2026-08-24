@@ -333,7 +333,14 @@ async function main() {
 
   const goldBefore = await page.evaluate(() => window.__game.world.player.gold);
   // Sell the first thing in the bags column.
-  await page.click('#vendor-bags .vendor-row');
+  //
+  // Clicked in-page rather than through Playwright's actionability checks: the
+  // bags column scrolls, and a row below the fold is "not visible" to a real
+  // click for thirty seconds before the run dies — which reports as "selling
+  // paid no gold" and has nothing to do with selling.
+  const row = page.locator('#vendor-bags .vendor-row').first();
+  await row.scrollIntoViewIfNeeded().catch(() => {});
+  await row.dispatchEvent('click');
   await wait(400);
   const goldAfter = await page.evaluate(() => window.__game.world.player.gold);
   const soldSomething = goldAfter > goldBefore;
@@ -1236,6 +1243,89 @@ async function main() {
 
   await browser.close();
 
+  // The three boss mechanics, and the shapes that make them beatable.
+  //
+  // Checked on the renderer's own objects rather than by eye: a cone drawn
+  // pointing the wrong way, or a hazard patch that never appears, is invisible
+  // to every assertion about the simulation and to a screenshot taken at the
+  // wrong moment.
+  const shapes = await page.evaluate(async () => {
+    const g = window.__game;
+    const out = {};
+    for (const [zone, bossId, want] of [
+      ['ardmoor', 'aonghus', 'aonghus_cleave'],
+      ['reach', 'old_cauldron', 'old_cauldron_hazard'],
+      ['ardmoor', 'muireann', 'muireann_fixate'],
+    ]) {
+      g.world.player.level = g.mobOf(bossId).level + 1;
+      if (g.world.zone.id !== zone) g.world.travelTo(zone);
+      await new Promise((r) => setTimeout(r, 500));
+      const boss = [...g.world.entities.values()].find((e) => e.kind === 'mob' && e.defId === bossId);
+      if (!boss) { out[want] = { ok: false, why: 'boss missing' }; continue; }
+
+      g.world.player.pos = { x: boss.pos.x + 5, z: boss.pos.z };
+      // Keep both standing from a timer, not from inside the wait loop: the
+      // fight otherwise finishes while the check is looking the other way.
+      if (window.__pin) clearInterval(window.__pin);
+      window.__pin = setInterval(() => {
+        g.world.player.health = g.world.statsOf(g.world.player).maxHealth;
+        g.world.player.dead = false;
+        boss.health = g.world.statsOf(boss).maxHealth;
+      }, 30);
+      g.world.submit(g.world.player.id, { t: 'target', id: boss.id });
+
+      // For a hazard, wait for it to *land* — the patch is the thing being
+      // checked and it does not exist until the cast resolves. Breaking as
+      // soon as the cast started reported zero patches every time.
+      const until = Date.now() + 40000;
+      while (Date.now() < until) {
+        if (want.endsWith('hazard')) {
+          if (g.world.hazards.length) break;
+        } else if (boss.cast?.id === want) break;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      // One frame for the renderer to build the patch it was just told about.
+      await new Promise((r) => setTimeout(r, 120));
+
+      const rings = g.views.telegraphs ?? [];
+      const cone = rings.find((r) => r.cone);
+      let aim = null;
+      if (cone) {
+        cone.group.updateMatrixWorld(true);
+        const fwd = new cone.group.position.constructor(0, 0, 1).applyQuaternion(cone.group.quaternion);
+        const dx = g.world.player.pos.x - boss.pos.x;
+        const dz = g.world.player.pos.z - boss.pos.z;
+        const len = Math.hypot(dx, dz) || 1;
+        aim = +((fwd.x * dx + fwd.z * dz) / len).toFixed(2);
+      }
+      out[want] = {
+        ok: true,
+        rings: rings.length,
+        cone: !!cone,
+        aimedAtPlayer: aim,
+        stamped: rings.some((r) => !!r.at),
+        patches: (g.views.hazardPatches ?? []).length,
+        hazards: g.world.hazards.length,
+      };
+      clearInterval(window.__pin);
+      window.__pin = null;
+    }
+    return out;
+  });
+  await wait(300);
+  await page.screenshot({ path: join(OUT, '21-boss-mechanics.png') });
+  // Put the run back where it found it: this block travels, levels up and
+  // parks the player next to a boss, and everything after it assumes an
+  // ordinary character in the Fenmarch. Sited late for the same reason —
+  // early, it wrecked twenty checks downstream that had nothing to do with it.
+  await page.evaluate(async () => {
+    const g = window.__game;
+    if (window.__pin) { clearInterval(window.__pin); window.__pin = null; }
+    if (g.world.zone.id !== 'fenmarch') g.world.travelTo('fenmarch');
+    await new Promise((r) => setTimeout(r, 500));
+  });
+  await wait(400);
+
   const checks = [
     ['canvas present', state.canvas],
     // Exact kit contents are a unit-test concern; here we only care that the
@@ -1283,6 +1373,10 @@ async function main() {
     // 2,627 was the number before the scatter was instanced and entities
     // stopped drawing through the fog. 700 is a ceiling with room in it, not a
     // target — if this fails, something started drawing per-object again.
+    ['a cleave draws a cone', shapes.aonghus_cleave?.cone === true],
+    ['and points it at the player', (shapes.aonghus_cleave?.aimedAtPlayer ?? 0) > 0.9],
+    ['a hazard leaves a patch on the ground', (shapes.old_cauldron_hazard?.patches ?? 0) > 0],
+    ['a fixate stamps its circle on a spot, not on the caster', shapes.muireann_fixate?.stamped === true],
     ['the game makes a sound', sound.ok === true],
     ['a swing, a hit and a level-up all sound different', sound.swing !== sound.hit && sound.hit !== sound.level],
     ['a crit is louder than an ordinary hit', sound.crit > sound.near],
@@ -1339,6 +1433,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('map:', JSON.stringify(mapState), 'closed:', mapClosed);
+  console.log('shapes:', JSON.stringify(shapes));
   console.log('sound:', JSON.stringify(sound));
   console.log('frame:', JSON.stringify(frame));
   console.log('art:', JSON.stringify(art), JSON.stringify(artOff));

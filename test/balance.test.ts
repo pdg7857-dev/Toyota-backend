@@ -418,6 +418,107 @@ describe('boss fights are decided by play, not just stats', () => {
   const scarGear = ['cadfaels_cleaver', 'bearhide_cuirass', 'bearhide_helm', 'fenhide_leggings', 'outlaws_signet'];
   const fullKit = ['strike', 'rend', 'rally', 'bulwark', 'sunder', 'onslaught'];
 
+  it('gives every boss a different fight, not the same fight with a new name', () => {
+    // The regression this exists for shipped and sat there: six of the eight
+    // bosses were generated from one `bossKit` helper and ran slam → mend →
+    // enrage, identically, with only the telegraph text differing. Every
+    // assertion in this file passed the whole time, because each of them was
+    // true of each boss individually. Printing the kits side by side is what
+    // makes "these are the same fight" visible at all.
+    const rows: string[] = [];
+    const signatures = new Map<string, string[]>();
+
+    for (const zone of Object.values(ZONES)) {
+      for (const spawn of zone.spawns) {
+        const def = MOBS[spawn.mobId]!;
+        if (def.stars < BOSS_STARS || def.dragon) continue;
+        const kinds = (def.abilities ?? []).map((a) => a.kind);
+        rows.push(`  ${def.name.padEnd(30)} ★${def.stars} (${String(def.level).padStart(3)})  ${kinds.join(', ')}`);
+        signatures.set(def.id, kinds);
+
+        // Every boss must have something answered by *moving*. A boss whose
+        // whole kit is answered by standing still and pressing buttons is a
+        // stat block with a cooldown.
+        const dodgeable = kinds.filter((k) => k === 'heavySlam' || k === 'cleave' || k === 'fixate' || k === 'hazard');
+        expect(dodgeable.length, `${def.name} has nothing to dodge`).toBeGreaterThan(0);
+        // And no boss repeats an ability kind — two cooldowns on one mechanic
+        // is one mechanic that fires more often, not two mechanics.
+        expect(new Set(kinds).size, `${def.name} repeats an ability kind`).toBe(kinds.length);
+      }
+    }
+
+    console.log('\nWHAT EACH BOSS ACTUALLY DOES\n' + rows.sort().join('\n'));
+
+    // The check with teeth: no two bosses may be answered by exactly the same
+    // set of moves. They can share a piece; they cannot share the whole kit.
+    const seen = new Map<string, string>();
+    for (const [id, kinds] of signatures) {
+      const signature = [...kinds].sort().join('+');
+      const twin = seen.get(signature);
+      expect(twin === undefined, `${id} is the same fight as ${twin}`).toBe(true);
+      seen.set(signature, id);
+    }
+    expect(signatures.size).toBe(8);
+  });
+
+  it('makes playing well decide every boss in the game, not just the first two', () => {
+    // One encounter per boss, at the level its zone expects, played badly and
+    // played properly. Printed, because the gap between the two columns *is*
+    // the mechanic — a boss where they match has a telegraph nobody needs to
+    // read, and a boss where standing still wins has one that does nothing.
+    const bosses = Object.values(ZONES)
+      .flatMap((zone) => zone.spawns)
+      .map((sp) => MOBS[sp.mobId]!)
+      .filter((def) => def.stars >= BOSS_STARS && !def.dragon)
+      .sort((a, b) => a.level - b.level);
+
+    const rows: string[] = [];
+    for (const def of bosses) {
+      // One level of headroom: nobody fights a ★5 the minute they ding into
+      // its level, and at exactly the boss's level with no potions the fight
+      // is a coin flip by design. Two levels over is too far the other way —
+      // dodging then costs more uptime than the telegraphs cost health, which
+      // reads as "the mechanic does not matter" when what is being measured is
+      // a player who has outgrown the fight.
+      const level = def.level + 1;
+      const shared = {
+        level,
+        gear: gearSetFor('warrior', level),
+        mobId: def.id,
+        skills: skillBarFor('warrior')
+          .filter((sk) => sk.reqLevel <= level && !sk.taughtBy)
+          .map((sk) => sk.id),
+        noPotions: true,
+      };
+      const stand = runEncounter({ ...shared, name: `${def.name} standing`, dodge: false });
+      const play = runEncounter({ ...shared, name: `${def.name} playing`, dodge: true });
+      const row =
+        `  ${def.name.padEnd(30)} lv${String(level).padStart(3)}  ` +
+        `standing ${(stand.winRate * 100).toFixed(0).padStart(3)}% hp ${(stand.medianHealthLeft * 100).toFixed(0).padStart(3)}%  ` +
+        `playing ${(play.winRate * 100).toFixed(0).padStart(3)}% hp ${(play.medianHealthLeft * 100).toFixed(0).padStart(3)}%  ` +
+        `hit/dodged ${play.slamsTaken}/${play.slamsDodged} vs ${stand.slamsTaken}/${stand.slamsDodged}`;
+      // Printed as it goes, so a failure part-way through still shows every
+      // fight measured before it rather than only the message.
+      console.log(row);
+      rows.push(row);
+
+      // The mechanics have to fire and have to be beatable.
+      expect(play.slamsDodged, `${def.name}'s telegraphs never got dodged`).toBeGreaterThan(0);
+      // Winnable at all, played properly and with nothing to drink. How
+      // *comfortably* is the hand-tuned tests' business a few cases down; what
+      // this one guards is that the mechanic exists and can be beaten.
+      expect(play.winRate, `${def.name} is unwinnable played well`).toBeGreaterThan(0.4);
+      // And playing well has to be better on both counts. Not necessarily the
+      // difference between a win and a loss — some of these are generous — but
+      // never worse, which is what a decorative telegraph looks like.
+      expect(play.winRate, `${def.name} rewards ignoring it`).toBeGreaterThanOrEqual(stand.winRate);
+      expect(play.medianHealthLeft, `${def.name} punishes dodging`).toBeGreaterThan(
+        stand.medianHealthLeft,
+      );
+    }
+    console.log('\nEVERY BOSS, PLAYED BADLY AND PLAYED WELL\n' + rows.join('\n'));
+  });
+
   it('Cadfael ★5 (20): dodging the telegraphs decides the fight', () => {
     const stand = runEncounter({
       name: 'lv22 vs Cadfael, standing in it',

@@ -65,6 +65,7 @@ type Voice =
   | 'playerDeath'
   | 'telegraph'
   | 'enrage'
+  | 'hazard'
   | 'interrupt'
   | 'quest'
   | 'learn'
@@ -249,6 +250,9 @@ export class GameAudio {
           // it is a warning, and a warning you might not hear is not one.
           this.play('telegraph', 1);
           break;
+        case 'hazard':
+          this.play('hazard', this.gainFor(ev.sourceId));
+          break;
         case 'enraged':
           this.play('enrage', this.gainFor(ev.entityId));
           break;
@@ -412,6 +416,12 @@ export class GameAudio {
         break;
       case 'enrage':
         this.tone(t, gain * 0.5, 0.6, 110, 220, 'sawtooth', 900);
+        break;
+      case 'hazard':
+        // A wet, low churn — not a bang. The ground did not explode, it went
+        // bad, and it is going to stay bad.
+        this.noiseShot(t, gain * 0.4, 0.7, 'lowpass', 700, 180);
+        this.tone(t, gain * 0.3, 0.55, 80, 55, 'triangle', 400);
         break;
       case 'interrupt':
         this.noiseShot(t, gain * 0.5, 0.14, 'bandpass', 3200, 1600);

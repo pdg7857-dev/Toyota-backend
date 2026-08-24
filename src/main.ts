@@ -190,9 +190,25 @@ async function boot(): Promise<void> {
           views.get(ev.sourceId)?.anim.request('idle');
           break;
         case 'telegraph':
-          // The danger circle is the whole reason the ability is dodgeable —
-          // it has to be on screen for the entire wind-up.
-          views.addTelegraph(ev.sourceId, ev.radius, ev.durationMs);
+          // The danger shape is the whole reason the ability is dodgeable —
+          // it has to be on screen for the entire wind-up, and it has to be
+          // the *right* shape: a circle means "get further away", a wedge
+          // means "get round the side", and they are not interchangeable.
+          views.addTelegraph(
+            ev.sourceId,
+            ev.radius,
+            ev.durationMs,
+            ev.shape === 'cone' && ev.facing !== undefined && ev.arc !== undefined
+              ? { facing: ev.facing, arc: ev.arc }
+              : undefined,
+            ev.at,
+          );
+          break;
+        case 'hazard':
+          views.addHazard(ev.id, ev.at, ev.radius, ev.durationMs);
+          break;
+        case 'hazardGone':
+          views.removeHazard(ev.id);
           break;
         case 'damage':
           views.get(ev.targetId)?.onDamaged();

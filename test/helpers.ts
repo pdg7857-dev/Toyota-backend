@@ -217,6 +217,33 @@ export function levelPlayer(world: World, opts: LevelOptions): Entity {
   }
   world.tick();
 
+  // Put the world back to "the fight has not started".
+  //
+  // That tick exists only to drain the equip queue, but a tick is a tick: the
+  // duel's mob aggros in it and *starts casting its first ability*, and those
+  // events go in the bin because nobody is listening yet. The fight then
+  // begins with a telegraph already half wound up that the harness never saw,
+  // so it never dodges it and eats it every single time.
+  //
+  // That is worth spelling out because of how it reads from the outside: every
+  // boss in the suite showed exactly one telegraph taken and — for the short
+  // fights, where the only cast is the swallowed one — zero dodged, which
+  // looks precisely like "the new mechanics are undodgeable" and is in fact
+  // the harness starting the fight a beat late. Six other bugs in this file
+  // have had the same shape.
+  for (const e of world.entities.values()) {
+    if (e.kind !== 'mob') continue;
+    e.cast = null;
+    e.castAt = null;
+    e.abilityCooldowns = {};
+    e.abilityLockouts = {};
+    e.firedAbilities = [];
+    e.aiState = 'idle';
+    e.targetId = null;
+    e.threat = {};
+    e.health = world.statsOf(e).maxHealth;
+  }
+
   const stats = world.statsOf(player);
   player.health = stats.maxHealth;
   player.energy = stats.maxEnergy;
@@ -281,10 +308,25 @@ export interface FightOptions {
   timeoutSec?: number;
 }
 
+/**
+ * A telegraphed ability winding up, and everything needed to beat it.
+ *
+ * Carries the *shape* because the three shapes have three different answers,
+ * and a harness that only knows one of them measures a bad player. The first
+ * version knew only "run away from the caster", which is right for a slam,
+ * useless against a cone (running back keeps you in the arc for its whole
+ * length) and beside the point for anything aimed at the ground.
+ */
 interface PendingSlam {
   sourceId: number;
   radius: number;
   remainingMs: number;
+  shape: 'circle' | 'cone';
+  /** Where a circle actually is, when it is not on the caster. */
+  at?: { x: number; z: number };
+  /** A cone's aim and width. */
+  facing?: number;
+  arc?: number;
 }
 
 /**
@@ -394,21 +436,67 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
 
     if (opts.dodge) {
       const source = pending ? world.entity(pending.sourceId) : undefined;
-      if (pending && source) {
-        // Clear the circle with a margin, then hold still.
+      if (pending && source && pending.shape === 'cone') {
+        // A cone is beaten by going *round* it, not back from it: it reaches
+        // twice as far as a slam and running down its length keeps you inside
+        // the whole way. Strafe perpendicular to where it is aimed, picking
+        // whichever side you are already nearer to.
+        const aim = pending.facing ?? source.facing;
         const dx = player.pos.x - source.pos.x;
         const dz = player.pos.z - source.pos.z;
-        const d = Math.hypot(dx, dz) || 1;
+        let off = Math.atan2(dx, dz) - aim;
+        while (off > Math.PI) off -= Math.PI * 2;
+        while (off < -Math.PI) off += Math.PI * 2;
+        const side = off >= 0 ? 1 : -1;
+        // Perpendicular to the aim, in world space.
+        move(Math.cos(aim) * side, -Math.sin(aim) * side);
+      } else if (pending && source) {
+        // A circle: clear it with a margin, then hold still. It might be on the
+        // caster or stamped on the ground where you were standing — a `fixate`
+        // is beaten by moving off your own mark, which running from the caster
+        // does not reliably do.
+        const centre = pending.at ?? source.pos;
+        let dx = player.pos.x - centre.x;
+        let dz = player.pos.z - centre.z;
+        let d = Math.hypot(dx, dz);
+        // Standing exactly on the mark — which is the *normal* case for a
+        // `fixate`, since it stamps the ground under your feet — leaves no
+        // direction to run in. A real player just picks one. Without this the
+        // harness stands perfectly still inside every circle aimed at it and
+        // reports the ability as undodgeable.
+        if (d < 0.4) {
+          dx = player.pos.x - source.pos.x;
+          dz = player.pos.z - source.pos.z;
+          d = Math.hypot(dx, dz);
+          if (d < 0.4) {
+            dx = 1;
+            dz = 0;
+            d = 1;
+          }
+        }
         if (d < pending.radius + 1.5) move(dx / d, dz / d);
         else move(0, 0);
       } else {
-        // Nothing incoming: close back to weapon range.
-        const dx = mob.pos.x - player.pos.x;
-        const dz = mob.pos.z - player.pos.z;
-        const d = Math.hypot(dx, dz) || 1;
-        const reach = world.statsOf(player).attackRange;
-        if (d > reach * 0.85) move(dx / d, dz / d);
-        else move(0, 0);
+        // Nothing incoming. Standing in a patch is the one thing worth fixing
+        // before closing back in: a hazard is the only ability whose damage
+        // outlives its telegraph, so a harness that ignores it is one that
+        // stands in the fire for fourteen seconds and calls the boss too hard.
+        const standing = world.hazards.find(
+          (h) => Math.hypot(player.pos.x - h.at.x, player.pos.z - h.at.z) < h.radius + 1,
+        );
+        if (standing) {
+          const dx = player.pos.x - standing.at.x;
+          const dz = player.pos.z - standing.at.z;
+          const d = Math.hypot(dx, dz) || 1;
+          move(dx / d, dz / d);
+        } else {
+          const dx = mob.pos.x - player.pos.x;
+          const dz = mob.pos.z - player.pos.z;
+          const d = Math.hypot(dx, dz) || 1;
+          const reach = world.statsOf(player).attackRange;
+          if (d > reach * 0.85) move(dx / d, dz / d);
+          else move(0, 0);
+        }
       }
     }
 
@@ -416,7 +504,15 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
 
     for (const ev of events) {
       if (ev.t === 'telegraph' && ev.radius > 0) {
-        pending = { sourceId: ev.sourceId, radius: ev.radius, remainingMs: ev.durationMs };
+        pending = {
+          sourceId: ev.sourceId,
+          radius: ev.radius,
+          remainingMs: ev.durationMs,
+          shape: ev.shape ?? 'circle',
+          ...(ev.at ? { at: { ...ev.at } } : {}),
+          ...(ev.facing !== undefined ? { facing: ev.facing } : {}),
+          ...(ev.arc !== undefined ? { arc: ev.arc } : {}),
+        };
       } else if (ev.t === 'dodged' && ev.targetId === player.id) {
         slamsDodged++;
       } else if (ev.t === 'interrupted' && ev.sourceId === player.id) {

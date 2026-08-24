@@ -67,6 +67,7 @@ import type {
   ActorCommand,
   Attributes,
   Command,
+  DamageType,
   DerivedStats,
   Entity,
   EntityId,
@@ -184,7 +185,7 @@ function roamHash(a: number, b: number): number {
 const COMBAT_TIMEOUT_MS = 6000;
 
 /** Save format version. Bump when the Entity shape changes. */
-const SAVE_VERSION = 9;
+const SAVE_VERSION = 10;
 
 /**
  * How big a step `catchUp` takes through the time you were away.
@@ -242,6 +243,27 @@ export class World {
    * `content/factions.ts`. Authoritative sim state, so it serializes with
    * everything else and a server could own it unchanged.
    */
+  /**
+   * Patches of dangerous ground, from `hazard` abilities.
+   *
+   * World state rather than an entity, because a hazard is not a thing that
+   * can be targeted, killed, healed or walked into by anything except the
+   * player — modelling it as an entity would put it in every loop that
+   * iterates creatures and every one of those loops would then need to skip it.
+   */
+  hazards: Array<{
+    id: number;
+    sourceId: EntityId;
+    at: Vec2;
+    radius: number;
+    remainingMs: number;
+    tickMs: number;
+    sinceTickMs: number;
+    power: number;
+    damageType: DamageType;
+  }> = [];
+  private nextHazardId = 1;
+
   control: Record<string, number> = {};
   /** Which faction currently holds each holding. Derived, but cached so a flip is an event. */
   controller: Record<string, FactionId> = {};
@@ -1377,6 +1399,7 @@ export class World {
     this.tickAdventurers();
     this.tickCooldowns();
     this.tickEffects();
+    this.tickHazards();
     this.tickCasts();
     this.tickAi();
     this.tickMobAbilities();
@@ -1533,6 +1556,40 @@ export class World {
     }
   }
 
+  /**
+   * Ground patches bite whoever is standing in them, then expire.
+   *
+   * A hazard tick never breaks a cast, for the same reason a damage-over-time
+   * tick does not: standing in a patch would silently disable casting, and no
+   * player would ever attribute that to the ground they are standing on.
+   */
+  private tickHazards(): void {
+    if (this.hazards.length === 0) return;
+    const keep: typeof this.hazards = [];
+    for (const hazard of this.hazards) {
+      hazard.remainingMs -= TICK_MS;
+      hazard.sinceTickMs += TICK_MS;
+      if (hazard.sinceTickMs >= hazard.tickMs) {
+        hazard.sinceTickMs -= hazard.tickMs;
+        const player = this.player;
+        if (!player.dead && dist(player.pos.x, player.pos.z, hazard.at.x, hazard.at.z) <= hazard.radius) {
+          this.applyDamage(
+            hazard.sourceId,
+            player,
+            Math.round(hazard.power),
+            false,
+            hazard.damageType,
+            null,
+            'never',
+          );
+        }
+      }
+      if (hazard.remainingMs > 0) keep.push(hazard);
+      else this.events.push({ t: 'hazardGone', id: hazard.id });
+    }
+    this.hazards = keep;
+  }
+
   private tickCasts(): void {
     for (const e of this.entities.values()) {
       if (!e.cast || e.dead) continue;
@@ -1588,7 +1645,13 @@ export class World {
           e.targetId = target.id;
           const d = dist(e.pos.x, e.pos.z, target.pos.x, target.pos.z);
           e.aiState = d <= this.statsOf(e).attackRange ? 'attacking' : 'chasing';
-          e.facing = Math.atan2(target.pos.x - e.pos.x, target.pos.z - e.pos.z);
+          // A casting mob is rooted, and that has to include which way it is
+          // pointing. This used to re-aim every tick regardless, so a `cleave`
+          // tracked the player through its whole wind-up and the cone drawn on
+          // the ground was a lie — the balance harness dodged it perfectly and
+          // was hit every single time, which is exactly the shape of failure
+          // the telegraph rule exists to prevent.
+          if (!e.cast) e.facing = Math.atan2(target.pos.x - e.pos.x, target.pos.z - e.pos.z);
           break;
         }
         case 'returning': {
@@ -1652,6 +1715,7 @@ export class World {
   /** Send a mob home, drop its threat, and clean up anything it called in. */
   private leashMob(mob: Entity): void {
     mob.roamGoal = null;
+    mob.castAt = null;
     mob.aiState = 'returning';
     mob.targetId = null;
     mob.threat = {};
@@ -1708,6 +1772,19 @@ export class World {
         e.abilityCooldowns[ability.id] = ability.cooldownMs;
 
         if (ability.castMs > 0) {
+          // Ground-targeted abilities stamp their landing spot now, while the
+          // player is standing on it. That stamp is the whole mechanic: the
+          // circle on the ground is a promise about where this will land, and
+          // re-aiming at resolution would break it.
+          const aimed = ability.kind === 'fixate' || ability.kind === 'hazard';
+          const mark = this.entities.get(e.targetId ?? -1);
+          e.castAt = aimed && mark ? { ...mark.pos } : null;
+          // A cleave is aimed the same way but at a direction rather than a
+          // point, and the mob is rooted, so its facing at cast time is the
+          // arc that lands.
+          if (ability.kind === 'cleave' && mark) {
+            e.facing = Math.atan2(mark.pos.x - e.pos.x, mark.pos.z - e.pos.z);
+          }
           e.cast = {
             kind: 'ability',
             id: ability.id,
@@ -1731,6 +1808,11 @@ export class World {
             radius: ability.radius ?? 0,
             durationMs: ability.castMs,
             text: ability.telegraphText,
+            shape: ability.kind === 'cleave' ? 'cone' : 'circle',
+            ...(e.castAt ? { at: { ...e.castAt } } : {}),
+            ...(ability.kind === 'cleave'
+              ? { facing: e.facing, arc: ((ability.arcDegrees ?? 100) * Math.PI) / 180 }
+              : {}),
           });
         } else {
           this.resolveMobAbility(e, ability.id);
@@ -1786,6 +1868,93 @@ export class World {
             'always',
           );
         }
+        break;
+      }
+      case 'cleave': {
+        // Aimed where the mob was facing when the cast began — it is rooted
+        // through the wind-up, so the arc drawn is the arc that lands. Running
+        // straight back keeps you inside it; the answer is to go round.
+        const radius = ability.radius ?? 9;
+        const arc = ((ability.arcDegrees ?? 100) * Math.PI) / 180;
+        for (const target of [...this.entities.values()]) {
+          if (target.kind !== 'player' || target.dead) continue;
+          const dx = target.pos.x - mob.pos.x;
+          const dz = target.pos.z - mob.pos.z;
+          const d = Math.hypot(dx, dz);
+          const bearing = Math.atan2(dx, dz);
+          let off = Math.abs(bearing - mob.facing);
+          if (off > Math.PI) off = Math.PI * 2 - off;
+          if (d > radius || off > arc / 2) {
+            this.events.push({ t: 'dodged', sourceId: mob.id, targetId: target.id, abilityId });
+            continue;
+          }
+          const result = resolveAttack(this.rng, stats, this.statsOf(target), {
+            levelDiff: mob.level - target.level,
+            attackerLevel: mob.level,
+            weaponMultiplier: ability.damageMultiplier ?? 2.6,
+            flatPower: 0,
+            alwaysHits: true,
+          });
+          this.applyDamage(mob.id, target, result.amount, result.crit, stats.damageType, abilityId, 'always');
+        }
+        break;
+      }
+      case 'fixate': {
+        // The circle is already on the ground where the target was standing
+        // when the cast began — see `tickMobAbilities`, which stamps it there.
+        // Landing it back on the target's *current* position would make this
+        // undodgeable, which is the one thing a telegraph must never be.
+        const radius = ability.radius ?? 5;
+        const at = mob.castAt ?? mob.pos;
+        for (const target of [...this.entities.values()]) {
+          if (target.kind !== 'player' || target.dead) continue;
+          if (dist(at.x, at.z, target.pos.x, target.pos.z) > radius) {
+            this.events.push({ t: 'dodged', sourceId: mob.id, targetId: target.id, abilityId });
+            continue;
+          }
+          const result = resolveAttack(this.rng, stats, this.statsOf(target), {
+            levelDiff: mob.level - target.level,
+            attackerLevel: mob.level,
+            weaponMultiplier: ability.damageMultiplier ?? 3,
+            flatPower: 0,
+            alwaysHits: true,
+          });
+          this.applyDamage(mob.id, target, result.amount, result.crit, stats.damageType, abilityId, 'always');
+        }
+        // The charge ends *short* of the mark, at about weapon range, not on
+        // it. Landing exactly on the mark put the boss inside the player when
+        // they had not moved — two bodies at one point, after which every
+        // distance in the fight is zero, "run away from the boss" has no
+        // direction to run in, and the player is welded to it for the rest of
+        // the fight. It is also how a charge should look: it closes, it does
+        // not merge.
+        const back = Math.atan2(mob.pos.x - at.x, mob.pos.z - at.z);
+        const standoff = Math.max(1.5, this.statsOf(mob).attackRange * 0.85);
+        mob.pos = { x: at.x + Math.sin(back) * standoff, z: at.z + Math.cos(back) * standoff };
+        mob.facing = Math.atan2(at.x - mob.pos.x, at.z - mob.pos.z);
+        break;
+      }
+      case 'hazard': {
+        const at = mob.castAt ?? mob.pos;
+        const radius = ability.radius ?? 5;
+        const durationMs = ability.hazardMs ?? 12000;
+        // Per-tick damage is a fraction of a swing, not a fraction of a slam.
+        // A patch is a space you lose, not a burst you eat.
+        const power =
+          ((stats.damageMin + stats.damageMax) / 2) * (ability.hazardMultiplier ?? 0.45);
+        const id = this.nextHazardId++;
+        this.hazards.push({
+          id,
+          sourceId: mob.id,
+          at: { ...at },
+          radius,
+          remainingMs: durationMs,
+          tickMs: ability.hazardTickMs ?? 1000,
+          sinceTickMs: 0,
+          power,
+          damageType: stats.damageType,
+        });
+        this.events.push({ t: 'hazard', id, sourceId: mob.id, at: { ...at }, radius, durationMs });
         break;
       }
       case 'enrage': {
@@ -2844,6 +3013,9 @@ export class World {
     }
     this.zone = zone;
     this.lastCombatTick.clear();
+    // Ground the player is no longer standing on cannot still be burning them.
+    for (const hazard of this.hazards) this.events.push({ t: 'hazardGone', id: hazard.id });
+    this.hazards = [];
 
     player.pos = { ...zone.playerStart };
     player.targetId = null;
@@ -3200,6 +3372,8 @@ export class World {
       control: this.control,
       controller: this.controller,
       dragons: this.dragons,
+      hazards: this.hazards,
+      nextHazardId: this.nextHazardId,
       entities: [...this.entities.values()],
     });
   }
@@ -3214,6 +3388,8 @@ export class World {
       playerId: EntityId;
       zoneId?: string;
       control?: Record<string, number>;
+      hazards?: World['hazards'];
+      nextHazardId?: number;
       controller?: Record<string, FactionId>;
       dragons?: Record<string, DragonState>;
       entities: Entity[];
@@ -3234,6 +3410,8 @@ export class World {
     // An unstamped save is one written before the sun moved. Leave it at the
     // fresh-world morning rather than dropping the player into midnight.
     if (typeof data.worldTimeMs === 'number') world.worldTimeMs = data.worldTimeMs;
+    if (Array.isArray(data.hazards)) world.hazards = data.hazards;
+    if (typeof data.nextHazardId === 'number') world.nextHazardId = data.nextHazardId;
     world.nextId = data.nextId;
     world.playerId = data.playerId;
     if (data.control) world.control = { ...world.control, ...data.control };

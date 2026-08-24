@@ -420,12 +420,18 @@ const OLD_SCAR_ABILITIES: MobAbilityDef[] = [
     telegraphText: 'Old Scar rears up to slam the ground!',
   },
   {
+    // A lunge, not a second slam. This was a `heavySlam` with a smaller radius
+    // and a shorter cast, which is the same mechanic on a second cooldown — a
+    // player who has learned to back away from Ground Shake has already
+    // learned this too, and the ★6 of the first zone should teach something.
+    // As a cone, backing off keeps you in it and the answer is to go round.
     id: 'savage_maul',
     name: 'Savage Maul',
-    kind: 'heavySlam',
+    kind: 'cleave',
     cooldownMs: 15000,
     castMs: 1300,
-    radius: 4.5,
+    radius: 9,
+    arcDegrees: 95,
     damageMultiplier: 2.6,
     interruptible: false,
     telegraphText: 'Old Scar lunges into a savage maul!',
@@ -535,41 +541,136 @@ function generated(spec: GeneratedMobSpec): MobDef {
 }
 
 /** A boss kit: one telegraphed AoE, one interruptible heal, one enrage. */
-function bossKit(name: string, radius: number, slamText: string, healText: string): MobAbilityDef[] {
-  return [
-    {
-      id: `${name}_slam`,
-      name: 'Crushing Blow',
-      kind: 'heavySlam',
-      cooldownMs: 19000,
-      castMs: 2100,
-      radius,
-      damageMultiplier: 3.4,
-      interruptible: false,
-      telegraphText: slamText,
-    },
-    {
-      id: `${name}_mend`,
-      name: 'Second Wind',
-      kind: 'mend',
-      cooldownMs: 32000,
-      castMs: 2600,
-      healFraction: 0.11,
-      interruptible: true,
-      telegraphText: healText,
-    },
-    {
-      id: `${name}_enrage`,
-      name: 'Last Stand',
-      kind: 'enrage',
-      cooldownMs: 0,
-      castMs: 0,
-      healthThreshold: 0.3,
-      enrageDamageMultiplier: 1.45,
-      telegraphText: `${slamText.split(' ')[0]} fights with everything left!`,
-    },
-  ];
+/**
+ * The pieces a boss fight is assembled from.
+ *
+ * Every boss used to get the same three — slam, mend, enrage — with only the
+ * telegraph text differing, which meant six of the eight were one fight with
+ * six names. "Bosses must be decided by play, not stats" was true and also
+ * hollow: they were all decided by the *same* play.
+ *
+ * These are the parts, and `BOSS_KITS` below decides who gets which. The rule
+ * for adding one: **it must have a different answer**. Two abilities that both
+ * mean "move away from the boss" are one ability with two cooldowns.
+ */
+function slam(name: string, radius: number, text: string, every = 19000): MobAbilityDef {
+  return {
+    id: `${name}_slam`,
+    name: 'Crushing Blow',
+    kind: 'heavySlam',
+    cooldownMs: every,
+    castMs: 2100,
+    radius,
+    damageMultiplier: 3.4,
+    interruptible: false,
+    telegraphText: text,
+  };
 }
+
+/**
+ * Long and narrow where a slam is short and round.
+ *
+ * The reach is deliberately about twice a slam's, and the arc about a third of
+ * a circle: backing straight off keeps you inside it for a long time, so the
+ * answer is to go round the side. That is what makes it a second mechanic
+ * rather than a bigger slam.
+ */
+function cleave(name: string, reach: number, text: string, every = 11000): MobAbilityDef {
+  return {
+    id: `${name}_cleave`,
+    name: 'Sweeping Arc',
+    kind: 'cleave',
+    // More often than a slam. A cleave is one sidestep to beat, so a long
+    // cooldown makes it a rounding error: Aonghus's whole fight is 23 seconds
+    // and at 16s his signature move landed 1.4 times, which cost less health
+    // than going round it cost damage. A telegraph that fires twice a fight
+    // is not a mechanic.
+    cooldownMs: every,
+    castMs: 1800,
+    radius: reach,
+    arcDegrees: 110,
+    // Harder than a slam, not softer. A cleave is *easier* to beat once you
+    // know it — one sidestep rather than a sprint out of a radius — but going
+    // round costs uptime, and at 2.8x it cost more damage than it saved: the
+    // survey showed dodging Aonghus leaving you worse off than standing in it,
+    // which is a telegraph that exists to be ignored.
+    damageMultiplier: 3.6,
+    interruptible: false,
+    telegraphText: text,
+  };
+}
+
+/**
+ * Lands where you were standing, not where you are.
+ *
+ * The exact inverse of a slam — this one punishes *standing still*, so a fight
+ * carrying both has no safe spot to park in. That pairing is the point; a boss
+ * with only this can be beaten by strafing on autopilot.
+ */
+function fixate(name: string, radius: number, text: string): MobAbilityDef {
+  return {
+    id: `${name}_fixate`,
+    name: 'Run Down',
+    kind: 'fixate',
+    cooldownMs: 21000,
+    castMs: 1900,
+    radius,
+    damageMultiplier: 3.1,
+    interruptible: false,
+    telegraphText: text,
+  };
+}
+
+/**
+ * A patch of ground that keeps hurting after it lands.
+ *
+ * The only ability whose consequence outlives its cast, and the only one that
+ * makes an arena smaller over a long fight. Per-tick damage is a fraction of a
+ * swing rather than a fraction of a slam: it is space you lose, not burst you
+ * eat, and a patch that hits like a slam is just an undodgeable slam.
+ */
+function hazard(name: string, radius: number, text: string, every = 17000): MobAbilityDef {
+  return {
+    id: `${name}_hazard`,
+    name: 'Foul Ground',
+    kind: 'hazard',
+    cooldownMs: every,
+    castMs: 1700,
+    radius,
+    hazardMs: 14000,
+    hazardTickMs: 1000,
+    hazardMultiplier: 0.5,
+    interruptible: false,
+    telegraphText: text,
+  };
+}
+
+function mend(name: string, text: string): MobAbilityDef {
+  return {
+    id: `${name}_mend`,
+    name: 'Second Wind',
+    kind: 'mend',
+    cooldownMs: 32000,
+    castMs: 2600,
+    healFraction: 0.11,
+    interruptible: true,
+    telegraphText: text,
+  };
+}
+
+function enrage(name: string, text: string): MobAbilityDef {
+  return {
+    id: `${name}_enrage`,
+    name: 'Last Stand',
+    kind: 'enrage',
+    cooldownMs: 0,
+    castMs: 0,
+    healthThreshold: 0.3,
+    enrageDamageMultiplier: 1.45,
+    telegraphText: text,
+  };
+}
+
 
 /**
  * Loot for a generated mob: one merchant good, a couple of tier-appropriate
@@ -1034,7 +1135,11 @@ Object.assign(MOBS, {
     stars: 5,
     archetype: 'brute',
     lootTableId: 'aonghus_loot',
-    abilities: bossKit('aonghus', 6, 'Aonghus swings his great axe in a wide arc!', 'Aonghus is catching his breath — cut him off!'),
+    abilities: [
+      cleave('aonghus', 12, 'Aonghus swings his great axe in a wide arc!'),
+      mend('aonghus', 'Aonghus is catching his breath — cut him off!'),
+      enrage('aonghus', 'Aonghus fights with everything left!'),
+    ],
     view: { color: 0xa5623f, height: 2.2, radius: 0.65 },
   }),
   muireann: generated({
@@ -1044,7 +1149,11 @@ Object.assign(MOBS, {
     stars: 6,
     archetype: 'skirmisher',
     lootTableId: 'muireann_loot',
-    abilities: bossKit('muireann', 7, 'Muireann winds up a killing sweep!', 'Muireann is binding her wounds — stop her!'),
+    abilities: [
+      slam('muireann', 7, 'Muireann winds up a killing sweep!'),
+      fixate('muireann', 5, 'Muireann picks you out of the pack and comes!'),
+      enrage('muireann', 'Muireann stops counting her wounds!'),
+    ],
     view: { color: 0xb04a4a, height: 2.15, radius: 0.6 },
   }),
   fiachra: generated({
@@ -1054,7 +1163,11 @@ Object.assign(MOBS, {
     stars: 5,
     archetype: 'brute',
     lootTableId: 'fiachra_loot',
-    abilities: bossKit('fiachra', 7, 'Fiachra heaves his anchor overhead!', 'Fiachra is patching himself up — interrupt him!'),
+    abilities: [
+      fixate('fiachra', 6, "Fiachra hurls his anchor at where you're standing!"),
+      mend('fiachra', 'Fiachra is patching himself up — interrupt him!'),
+      enrage('fiachra', 'Fiachra fights like the tide is going out!'),
+    ],
     view: { color: 0x4a6b7a, height: 2.25, radius: 0.68 },
   }),
   old_cauldron: generated({
@@ -1064,7 +1177,11 @@ Object.assign(MOBS, {
     stars: 6,
     archetype: 'beast',
     lootTableId: 'old_cauldron_loot',
-    abilities: bossKit('old_cauldron', 8, 'Old Cauldron thrashes the shallows!', 'Old Cauldron sinks to mend — cut it off!'),
+    abilities: [
+      hazard('old_cauldron', 6, 'Old Cauldron churns the water black!'),
+      slam('old_cauldron', 8, 'Old Cauldron thrashes the shallows!'),
+      enrage('old_cauldron', 'Old Cauldron boils over!'),
+    ],
     view: { color: 0x2f4a3d, height: 2.4, radius: 1.1 },
   }),
   ruadhan: generated({
@@ -1074,7 +1191,11 @@ Object.assign(MOBS, {
     stars: 5,
     archetype: 'brute',
     lootTableId: 'ruadhan_loot',
-    abilities: bossKit('ruadhan', 7, 'Ruadhán raises his shield to crush the ground!', 'Ruadhán is being tended — stop it!'),
+    abilities: [
+      cleave('ruadhan', 13, 'Ruadhán sweeps his shield in a long arc!'),
+      hazard('ruadhan', 5, 'Ruadhán drives his blade into the ground and it festers!'),
+      mend('ruadhan', 'Ruadhán is being tended — stop it!'),
+    ],
     view: { color: 0x3a3f4a, height: 2.3, radius: 0.7 },
   }),
   donnchadh: generated({
@@ -1084,7 +1205,19 @@ Object.assign(MOBS, {
     stars: 6,
     archetype: 'brute',
     lootTableId: 'donnchadh_loot',
-    abilities: bossKit('donnchadh', 8, 'Donnchadh brings his greatsword down like a falling tower!', 'Donnchadh is drawing on his last reserves — interrupt him!'),
+    // Three mechanics, not four. The first attempt gave the last boss in the
+    // game every ability there is, on the reasoning that a capstone should
+    // test everything — and it produced a fight nobody can win, because four
+    // telegraphs on eleven-to-twenty-one second cooldowns means you are
+    // always moving and therefore never attacking. The cooldowns are longer
+    // than the mid-game bosses' for the same reason: what makes this hard is
+    // that each answer is different, not that there is no gap between them.
+    abilities: [
+      cleave('donnchadh', 14, 'Donnchadh carves a long arc through the dark!', 16000),
+      slam('donnchadh', 8, 'Donnchadh brings his greatsword down like a falling tower!', 23000),
+      hazard('donnchadh', 6, 'The ground under Donnchadh will not hold!', 21000),
+      enrage('donnchadh', 'Donnchadh, Lord of Caer Dubh, stops holding back!'),
+    ],
     view: { color: 0x1f2228, height: 2.6, radius: 0.9 },
   }),
 } satisfies Record<string, MobDef>);

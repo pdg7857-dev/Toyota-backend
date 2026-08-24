@@ -773,6 +773,40 @@ And for the interrupt — Priest vs Cadfael at 22, both dodging:
 
 If you add a boss, add a telegraph, and add both comparisons to the tests.
 
+### Four mechanics, four different answers
+
+Six of the eight bosses used to be generated from one `bossKit` helper and ran
+slam → mend → enrage identically, with only the telegraph text differing. Every
+assertion in the suite passed the whole time, because each was true of each
+boss *individually*: "decided by play, not stats" was true, and they were all
+decided by the **same** play.
+
+The rule for adding an ability kind is that **it must have a different
+answer**. Two abilities that both mean "move away from the boss" are one
+ability with two cooldowns.
+
+| Kind | The answer | Why it is not one of the others |
+|---|---|---|
+| `heavySlam` | Get out of the circle | Distance is safety |
+| `cleave` | Get out of the *arc* | Long and narrow: running away keeps you in it, so you go round |
+| `fixate` | Keep moving | Lands where you *were*; the exact inverse of a slam, so a fight with both has no safe spot to park |
+| `hazard` | Move out and stay out | The only one whose consequence outlives its cast — it makes the arena smaller |
+| `mend` / `summon` | Interrupt it | — |
+| `enrage` | Nothing; it is the timer | — |
+
+Two tests hold it: one prints every boss's kit side by side and fails if any
+two share a signature or if one repeats a kind, and one runs every boss played
+badly and played well and fails if the gap ever closes. The printed table is
+the part that matters — "these are the same fight" is invisible to any
+assertion made one boss at a time.
+
+`fixate` and `hazard` stamp `Entity.castAt` when the cast *begins*. That stamp
+is the mechanic: the circle on the ground is a promise about where this will
+land, and re-aiming at resolution would make the telegraph decorative. For the
+same reason a casting mob no longer re-aims its **facing** — it used to track
+the player through the whole wind-up, which made every cone undodgeable while
+looking perfectly fine.
+
 ## Balance is measured, not guessed
 
 When a balance test fails, **fix the game, not the threshold.** Widening a bound
@@ -781,6 +815,12 @@ tests caught their absence:
 
 - **Global cooldown** (`GCD_MS`) — without it the optimal opener was "press
   every skill on the same tick", and fights collapsed to ~2 seconds.
+- **The setup tick starting the fight** — `levelPlayer` ticks once to drain the
+  equip queue, and a tick is a tick: the duel's mob aggroed in it and started
+  casting, with those events going in the bin because nobody was listening yet.
+  Every fight then began with a telegraph already half wound up that the
+  harness never saw, so it never dodged it and ate it every time. It read
+  exactly like "the new mechanics are undodgeable".
 - **Cast pushback instead of cast cancellation** — damage used to cancel an
   interruptible cast outright, which meant a mob swinging every 1.6s made a 1.8s
   heal impossible and silently deleted every sustain class. Damage now delays a

@@ -243,9 +243,49 @@ export interface SkillDef {
 // losable based on what the player does, which is the whole point of a boss.
 // --------------------------------------------------------------------------
 
+/**
+ * What a boss can do to you, and — the part that matters — what you do back.
+ *
+ * Every kind here exists because it has a *different answer*. A boss whose
+ * whole kit is answered the same way is a boss with one mechanic and several
+ * names for it, which is what six of the eight had before these were added.
+ *
+ * | Kind | The answer |
+ * |---|---|
+ * | `heavySlam` | Get out of the circle. Distance is safety. |
+ * | `cleave` | Get out of the *arc*. Backing away does not help. |
+ * | `fixate` | Keep moving. The circle lands where you were standing. |
+ * | `hazard` | Move out, and stay out — this one does not end when it lands. |
+ * | `mend` / `summon` | Interrupt it. |
+ * | `enrage` | Nothing. It is the timer telling you to finish. |
+ */
 export type MobAbilityKind =
   /** Wind-up AoE centred on the caster. Escape the radius before it lands. */
   | 'heavySlam'
+  /**
+   * Wind-up cone in front of the caster, aimed when the cast begins.
+   *
+   * Deliberately long and narrow where a slam is short and round: running
+   * *away* from a cleave keeps you in it, and the answer is to go round the
+   * side. Two abilities that both say "move" but disagree about which way are
+   * two mechanics; two that both say "move back" are one.
+   */
+  | 'cleave'
+  /**
+   * Marks where the target is standing, then lands there.
+   *
+   * The exact inverse of a slam: a slam punishes being near the boss, this
+   * punishes standing still. Together they mean a fight has no safe spot to
+   * park in, which is the whole reason to have both.
+   */
+  | 'fixate'
+  /**
+   * Leaves a patch of ground that keeps hurting after it lands.
+   *
+   * The only ability whose consequence outlives its cast. It is what turns an
+   * arena from a circle you dodge inside into a space that gets smaller.
+   */
+  | 'hazard'
   /** One-shot self-buff below a health threshold. */
   | 'enrage'
   /** Calls in adds that despawn when the summoner resets or dies. */
@@ -260,8 +300,15 @@ export interface MobAbilityDef {
   cooldownMs: number;
   /** Telegraph window. 0 is instant and undodgeable — use sparingly. */
   castMs: number;
-  /** heavySlam: damage radius in world units. */
+  /** heavySlam / cleave / fixate / hazard: damage radius in world units. */
   radius?: number;
+  /** cleave: total width of the arc, in degrees. */
+  arcDegrees?: number;
+  /** hazard: how long the patch lingers after it lands, and how often it bites. */
+  hazardMs?: number;
+  hazardTickMs?: number;
+  /** hazard: multiplier on the mob's damage, per tick. Much lower than a slam. */
+  hazardMultiplier?: number;
   /** heavySlam: multiplier on the mob's normal weapon damage. */
   damageMultiplier?: number;
   /** enrage: fires once when health drops below this fraction (0–1). */
@@ -633,6 +680,16 @@ export interface Entity {
   abilityLockouts?: Record<string, number>;
   /** Health-threshold abilities that have already fired this life. */
   firedAbilities?: string[];
+  /**
+   * Where a ground-targeted ability is aimed, stamped when its cast began.
+   *
+   * A `fixate` or a `hazard` marks the spot the target was standing on and
+   * lands *there*, not wherever they have got to by the time it resolves.
+   * Landing it on the current position would make the telegraph decorative,
+   * and a telegraph you cannot beat is the one thing this game says a boss
+   * must never have.
+   */
+  castAt?: Vec2 | null;
   /** Set on adds; they are removed when their summoner dies or resets. */
   summonedBy?: EntityId;
   /** Corpse loot, generated at death, claimed by `loot` command. */
@@ -703,7 +760,21 @@ export type SimEvent =
       radius: number;
       durationMs: number;
       text: string;
+      /**
+       * What to draw. A circle sits on the caster unless `at` says otherwise;
+       * a cone is drawn from the caster along `facing`.
+       */
+      shape?: 'circle' | 'cone';
+      /** Where the danger is, when it is not on the caster. */
+      at?: Vec2;
+      /** cone: the direction it is aimed, fixed when the cast began. */
+      facing?: number;
+      /** cone: total width of the arc, in radians. */
+      arc?: number;
     }
+  /** A patch of dangerous ground appeared, or expired. */
+  | { t: 'hazard'; id: number; sourceId: EntityId; at: Vec2; radius: number; durationMs: number }
+  | { t: 'hazardGone'; id: number }
   /** The player was outside the radius when a telegraphed ability landed. */
   | { t: 'dodged'; sourceId: EntityId; targetId: EntityId; abilityId: string }
   | { t: 'enraged'; entityId: EntityId; abilityId: string }

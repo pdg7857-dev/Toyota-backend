@@ -496,6 +496,9 @@ export class Hud {
             if (target) this.float(camera, target, 'dodged!', 'dodge');
           }
           break;
+        case 'hazard':
+          this.log('The ground itself turns against you.', 'log-danger');
+          break;
         case 'enraged': {
           const mob = this.world.entity(ev.entityId);
           if (mob) this.log(`${mob.name} is enraged!`, 'log-danger');

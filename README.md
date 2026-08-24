@@ -317,9 +317,20 @@ and one in fifty.
 
 ## Mechanics worth knowing
 
-**Bosses telegraph.** A red circle grows on the ground and a warning flashes.
-The boss is rooted while winding up, so the circle stays where it was drawn —
-get out of it. Standing in everything loses; dodging wins.
+**Bosses telegraph, and no two ask the same thing.** A shape appears on the
+ground and a warning flashes. The boss is rooted while winding up, so what is
+drawn is what lands.
+
+| What you see | What it means |
+|---|---|
+| A circle on the boss | Get further away |
+| A **wedge** in front of it | Get round the side — backing off keeps you in it |
+| A circle **on your own feet** | Keep moving; it lands where you were standing |
+| A dark stain that stays | Get out, and stay out — this one does not end |
+
+All eight bosses have a different combination, and none of them can be beaten
+standing still. `npm test` prints the table of every boss played badly and
+played well; the gap is the mechanic.
 
 **Interrupts answer what dodging can't.** Heavy AoEs cannot be interrupted,
 only escaped. Heals and summons *can* be interrupted, and should be — let

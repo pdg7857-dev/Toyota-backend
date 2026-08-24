@@ -334,31 +334,120 @@ function lerpAngle(a: number, b: number, t: number): number {
  * to see the radius and judge whether they are clear of it. It fills from the
  * centre outwards over the cast so the remaining time is readable at a glance.
  */
+/**
+ * Dangerous ground, drawn as a slowly churning stain rather than a red circle.
+ *
+ * Deliberately unlike a telegraph: a telegraph is bright, growing and about to
+ * happen, and this is dull, static and already happening. A player has to be
+ * able to tell "get out of the way" from "do not stand there" without reading
+ * anything.
+ */
+class HazardPatch {
+  readonly group = new THREE.Group();
+  private readonly fill: THREE.Mesh;
+  private readonly rim: THREE.Mesh;
+  private elapsed = 0;
+  private ending = false;
+
+  constructor(
+    readonly id: number,
+    radius: number,
+    private readonly durationMs: number,
+  ) {
+    const fillGeo = new THREE.CircleGeometry(radius, 36);
+    fillGeo.rotateX(-Math.PI / 2);
+    this.fill = new THREE.Mesh(
+      fillGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0x3d1a2a,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+      }),
+    );
+
+    const rimGeo = new THREE.RingGeometry(radius * 0.88, radius, 36);
+    rimGeo.rotateX(-Math.PI / 2);
+    this.rim = new THREE.Mesh(
+      rimGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0x9a4a3a,
+        transparent: true,
+        opacity: 0.7,
+        depthWrite: false,
+      }),
+    );
+    this.rim.position.y = 0.01;
+    this.group.add(this.fill, this.rim);
+  }
+
+  /** The sim decides when it is gone; this just fades it out. */
+  expire(): void {
+    this.ending = true;
+  }
+
+  update(dtMs: number): boolean {
+    this.elapsed += dtMs;
+    this.group.rotation.y += dtMs * 0.00022;
+    const life = this.ending ? 0 : 1 - Math.min(1, this.elapsed / this.durationMs);
+    // Fades over the last fifth, so it stops being dangerous visibly rather
+    // than vanishing between two frames.
+    const fade = Math.min(1, life / 0.2);
+    (this.fill.material as THREE.MeshBasicMaterial).opacity = 0.5 * fade;
+    (this.rim.material as THREE.MeshBasicMaterial).opacity = 0.65 * fade;
+    return fade > 0.01;
+  }
+
+  dispose(): void {
+    this.fill.geometry.dispose();
+    this.rim.geometry.dispose();
+    (this.fill.material as THREE.Material).dispose();
+    (this.rim.material as THREE.Material).dispose();
+  }
+}
+
 class TelegraphRing {
   readonly group = new THREE.Group();
   private readonly fill: THREE.Mesh;
   private readonly rim: THREE.Mesh;
+  /** The faint full-size wedge under a cone's fill. Circles use the rim instead. */
+  private bounds: THREE.Mesh | null = null;
   private elapsed = 0;
 
   constructor(
     readonly sourceId: EntityId,
     readonly radius: number,
     readonly durationMs: number,
+    /**
+     * A cone rather than a circle, and where it is aimed.
+     *
+     * Drawn as a wedge because the answer to it is different: a circle says
+     * "get further away", a wedge says "get round the side", and a player who
+     * cannot tell them apart at a glance has been given one mechanic wearing
+     * two hats.
+     */
+    readonly cone?: { facing: number; arc: number },
+    /** Ground-anchored telegraphs sit here instead of on the caster. */
+    readonly at?: { x: number; z: number },
   ) {
-    const fillGeo = new THREE.CircleGeometry(1, 40);
+    const fillGeo = cone
+      ? new THREE.CircleGeometry(1, 40, -cone.arc / 2 - Math.PI / 2, cone.arc)
+      : new THREE.CircleGeometry(1, 40);
     fillGeo.rotateX(-Math.PI / 2);
     this.fill = new THREE.Mesh(
       fillGeo,
       new THREE.MeshBasicMaterial({
-        color: 0xff2a1a,
+        color: 0xff3a24,
         transparent: true,
-        opacity: 0.42,
+        opacity: 0.6,
         depthWrite: false,
       }),
     );
     this.fill.position.y = 0.05;
 
-    const rimGeo = new THREE.RingGeometry(radius * 0.95, radius, 48);
+    const rimGeo = cone
+      ? new THREE.RingGeometry(radius * 0.95, radius, 48, 1, -cone.arc / 2 - Math.PI / 2, cone.arc)
+      : new THREE.RingGeometry(radius * 0.95, radius, 48);
     rimGeo.rotateX(-Math.PI / 2);
     this.rim = new THREE.Mesh(
       rimGeo,
@@ -372,14 +461,46 @@ class TelegraphRing {
     this.rim.position.y = 0.06;
 
     this.group.add(this.fill, this.rim);
+
+    // A faint full-size shape under the growing fill.
+    //
+    // A circle gets its extent from the rim: a bright ring at the edge, on
+    // screen from the first frame. A cone's rim is a thin arc twelve metres
+    // away, usually behind the camera — so with only a fill that grows from
+    // the caster's feet, the first readable frame of a cleave is the one where
+    // it is already too late to leave. The outline says how far it reaches
+    // immediately; the fill still says when.
+    if (cone) {
+      const boundsGeo = new THREE.CircleGeometry(radius, 40, -cone.arc / 2 - Math.PI / 2, cone.arc);
+      boundsGeo.rotateX(-Math.PI / 2);
+      this.bounds = new THREE.Mesh(
+        boundsGeo,
+        new THREE.MeshBasicMaterial({
+          color: 0xff7a4a,
+          transparent: true,
+          opacity: 0.3,
+          depthWrite: false,
+        }),
+      );
+      this.bounds.position.y = 0.04;
+      this.group.add(this.bounds);
+    }
+
+    // A cone is aimed once, when the cast begins, and the mob is rooted for
+    // the whole wind-up — so the wedge drawn is the wedge that lands. Rotating
+    // it to follow the caster afterwards would make it a lie.
+    if (cone) this.group.rotation.y = cone.facing;
   }
 
   /** Returns false once the telegraph has run its course and should be removed. */
   update(dtMs: number, center: THREE.Vector3): boolean {
     this.elapsed += dtMs;
     const t = Math.min(1, this.elapsed / this.durationMs);
-    // Sit on the ground under the caster. Boss arenas are levelled by the
-    // height field precisely so this circle reads as a circle.
+    // Sit on the ground under the caster, unless this one was stamped onto a
+    // spot — a `fixate` marks where you were standing and lands there, so
+    // following the caster would put the circle somewhere it will not hit.
+    // Boss arenas are levelled by the height field precisely so this reads as
+    // a flat shape.
     this.group.position.set(center.x, center.y, center.z);
     this.fill.scale.setScalar(Math.max(0.001, this.radius * t));
     // Pulse faster as it approaches detonation.
@@ -394,6 +515,10 @@ class TelegraphRing {
     this.rim.geometry.dispose();
     (this.fill.material as THREE.Material).dispose();
     (this.rim.material as THREE.Material).dispose();
+    this.bounds?.geometry.dispose();
+    if (this.bounds) (this.bounds.material as THREE.Material).dispose();
+    this.bounds?.geometry.dispose();
+    if (this.bounds) (this.bounds.material as THREE.Material).dispose();
   }
 }
 
@@ -403,6 +528,7 @@ class TelegraphRing {
 export class ViewManager {
   private views = new Map<EntityId, EntityView>();
   private telegraphs: TelegraphRing[] = [];
+  private hazardPatches: HazardPatch[] = [];
 
   constructor(
     private readonly scene: THREE.Scene,
@@ -418,11 +544,36 @@ export class ViewManager {
   ) {}
 
   /** Draw the danger zone for a winding-up AoE. */
-  addTelegraph(sourceId: EntityId, radius: number, durationMs: number): void {
+  addTelegraph(
+    sourceId: EntityId,
+    radius: number,
+    durationMs: number,
+    cone?: { facing: number; arc: number },
+    at?: { x: number; z: number },
+  ): void {
     if (radius <= 0) return;
-    const ring = new TelegraphRing(sourceId, radius, durationMs);
+    const ring = new TelegraphRing(sourceId, radius, durationMs, cone, at);
     this.telegraphs.push(ring);
     this.scene.add(ring.group);
+  }
+
+  /**
+   * A patch of ground that keeps hurting after the cast that made it.
+   *
+   * Drawn separately from the telegraphs because it outlives them: a telegraph
+   * is a promise about the next two seconds, a hazard is a fact about the next
+   * fourteen, and the two want to look different for the same reason they play
+   * differently.
+   */
+  addHazard(id: number, at: { x: number; z: number }, radius: number, durationMs: number): void {
+    const patch = new HazardPatch(id, radius, durationMs);
+    patch.group.position.set(at.x, this.groundAt(at.x, at.z) + 0.04, at.z);
+    this.hazardPatches.push(patch);
+    this.scene.add(patch.group);
+  }
+
+  removeHazard(id: number): void {
+    for (const patch of this.hazardPatches) if (patch.id === id) patch.expire();
   }
 
   get all(): IterableIterator<EntityView> {
@@ -473,6 +624,11 @@ export class ViewManager {
       view.dispose();
     }
     this.views.clear();
+    for (const patch of this.hazardPatches) {
+      this.scene.remove(patch.group);
+      patch.dispose();
+    }
+    this.hazardPatches = [];
     for (const ring of this.telegraphs) {
       this.scene.remove(ring.group);
       ring.dispose();
@@ -512,8 +668,13 @@ export class ViewManager {
 
   private updateTelegraphs(dtMs: number): void {
     this.telegraphs = this.telegraphs.filter((ring) => {
-      const source = this.views.get(ring.sourceId);
-      const alive = source ? ring.update(dtMs, source.group.position) : false;
+      // A ground-anchored telegraph stays where it was stamped even if the
+      // caster walks off — that stamp is the promise the mechanic is built on.
+      // One that follows its caster has no anchor and needs the source view.
+      const at = ring.at
+        ? new THREE.Vector3(ring.at.x, this.groundAt(ring.at.x, ring.at.z) + 0.02, ring.at.z)
+        : this.views.get(ring.sourceId)?.group.position;
+      const alive = at ? ring.update(dtMs, at) : false;
       if (!alive) {
         this.scene.remove(ring.group);
         ring.dispose();
@@ -553,5 +714,11 @@ export class ViewManager {
       }
     }
     this.updateTelegraphs(dtMs);
+    this.hazardPatches = this.hazardPatches.filter((patch) => {
+      if (patch.update(dtMs)) return true;
+      this.scene.remove(patch.group);
+      patch.dispose();
+      return false;
+    });
   }
 }
