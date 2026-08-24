@@ -202,6 +202,10 @@ async function boot(): Promise<void> {
     questOf: (questId: string) => getQuest(questId),
     holdingOf: (holdingId: string) => getHolding(holdingId),
     dragons: () => DRAGONS,
+    // Try a model without a rebuild. This is the loop somebody iterating on
+    // art actually wants: export, refresh the file, paste one line, look at it.
+    tryModel: (key: string, def: { file: string; scale?: number; turn?: number; lift?: number } | null) =>
+      views.tryModel(key, def),
     xpToNext: (level: number) => xpToNext(level),
   };
 

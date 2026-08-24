@@ -28,12 +28,12 @@ const WALK_ABOVE = 2.4;
 /**
  * Animation state machine.
  *
- * Right now it drives procedural transforms on placeholder capsules. The
- * important part is the *interface*: sim events call `request()`, and `update()`
- * advances whatever is playing. When rigged glTF models arrive, the body of
- * `applyPlaceholder` is replaced by `THREE.AnimationMixer` actions —
- * `this.actions[state].reset().fadeIn(spec.blendMs / 1000).play()` — and
- * nothing outside this file changes.
+ * With no art it drives procedural transforms on placeholder capsules. Give it
+ * a rigged model through `attachModel` and it crossfades that model's clips
+ * instead, from the same states, driven by the same sim events. Nothing outside
+ * this file knows which of the two is happening — which is the whole point of
+ * the seam, and why dropping a `.glb` into `public/models/` is a content change
+ * rather than a renderer change.
  */
 export class AnimStateMachine {
   private state: AnimState = 'idle';
@@ -41,17 +41,50 @@ export class AnimStateMachine {
   private locomotion: 'idle' | 'walk' | 'run' = 'idle';
   private phase = 0;
 
-  // Populated once real models exist. Kept here so the seam is obvious.
+  // Set once a rigged model arrives. Null means capsules and procedural bob.
   private mixer: THREE.AnimationMixer | null = null;
+  private actions = new Map<AnimState, THREE.AnimationAction>();
+  private playing: THREE.AnimationAction | null = null;
 
   constructor(
     private readonly root: THREE.Object3D,
     private readonly baseHeight: number,
   ) {}
 
-  /** Attach a mixer when a rigged model replaces the placeholder mesh. */
-  attachMixer(mixer: THREE.AnimationMixer): void {
-    this.mixer = mixer;
+  /**
+   * Hand it a model and the clips for each state.
+   *
+   * A state with no clip is simply absent from the map; `play` falls through to
+   * whatever is already running rather than snapping to a T-pose, because a
+   * model with only an idle animation is still an enormous improvement on a
+   * capsule and should not be punished for being incomplete.
+   */
+  attachModel(model: THREE.Object3D, clips: Map<AnimState, THREE.AnimationClip>): void {
+    if (clips.size === 0) return;
+    this.mixer = new THREE.AnimationMixer(model);
+    for (const [state, clip] of clips) {
+      const action = this.mixer.clipAction(clip);
+      if (STATES[state].oneShot) {
+        action.setLoop(THREE.LoopOnce, 1);
+        action.clampWhenFinished = true;
+      }
+      this.actions.set(state, action);
+    }
+    // Reset the procedural transforms: they are baked into the body node and
+    // would otherwise sit under the animation as a permanent lean.
+    this.root.rotation.set(0, 0, 0);
+    this.root.position.y = 0;
+    this.play(this.state);
+  }
+
+  /** Crossfade to a state's clip, if there is one. */
+  private play(state: AnimState): void {
+    const next = this.actions.get(state);
+    if (!next || next === this.playing) return;
+    const blend = STATES[state].blendMs / 1000;
+    next.reset().setEffectiveWeight(1).fadeIn(blend).play();
+    if (this.playing) this.playing.fadeOut(blend);
+    this.playing = next;
   }
 
   get current(): AnimState {
@@ -70,6 +103,7 @@ export class AnimStateMachine {
       unitsPerSecond < STILL ? 'idle' : unitsPerSecond < WALK_ABOVE ? 'walk' : 'run';
     if (!STATES[this.state].oneShot && this.state !== 'cast' && this.state !== 'death') {
       this.state = this.locomotion;
+      this.play(this.state);
     }
   }
 
@@ -81,6 +115,7 @@ export class AnimStateMachine {
     }
     this.state = state;
     this.elapsedMs = 0;
+    this.play(state);
   }
 
   update(dtMs: number): void {
@@ -91,6 +126,7 @@ export class AnimStateMachine {
     if (spec.oneShot && this.state !== 'death' && this.elapsedMs >= spec.durationMs) {
       this.state = this.locomotion;
       this.elapsedMs = 0;
+      this.play(this.state);
     }
 
     if (this.mixer) {
@@ -157,5 +193,13 @@ export class AnimStateMachine {
     this.elapsedMs = 0;
     this.root.rotation.set(0, 0, 0);
     this.root.position.y = 0;
+    // A respawn has to clear the death clip, or a creature comes back lying
+    // down — `clampWhenFinished` is exactly what makes death read, and exactly
+    // what makes this necessary.
+    if (this.mixer) {
+      this.mixer.stopAllAction();
+      this.playing = null;
+      this.play('idle');
+    }
   }
 }

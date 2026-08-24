@@ -14,7 +14,8 @@
     "smoke": "node tools/smoke.mjs",
     "look": "node tools/look.mjs",
     "verify": "npm run typecheck && npm run test",
-    "bundle": "npm run build && node tools/bundle.mjs"
+    "bundle": "npm run build && node tools/bundle.mjs",
+    "models": "node tools/models.mjs"
   },
   "dependencies": {
     "three": "^0.169.0"

@@ -61,6 +61,7 @@ input / HUD click ──> Command ──> World.submit()
 | `src/render/scene.ts` | Builds a zone from its theme. Knows *how*, not *which*. |
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
 | `src/render/map.ts` | The minimap and the map. Both drawn from one relief bitmap. |
+| `src/content/models.ts` | Which creatures have real art, and how it is fitted. |
 | `tools/smoke.mjs` | Boots the real game in Chromium, plays it, screenshots it. |
 | `tools/look.mjs` | Stands the camera somewhere and takes a picture. See below. |
 
@@ -859,15 +860,46 @@ Themes also carry a minimum light level, asserted by test. Caer Dubh was first
 authored at true dusk and shipped with the mobs as black shapes on a black
 hill — atmosphere is not worth a fight you cannot read.
 
-## Animation
+## Animation, and dropping real art in
 
-Currently procedural placeholders on capsules. `render/anim.ts` is the seam:
-sim events call `request(state)`, and `update()` advances whatever is playing.
+`render/anim.ts` is the seam. Sim events call `request(state)`, `update()`
+advances whatever is playing, and it does one of two things: procedural
+transforms on a placeholder capsule, or crossfaded clips from a rigged model.
+**Nothing outside that file knows which** — which is what makes replacing the
+art a content change.
 
-To move to real art, replace the body of `applyPlaceholder()` with
-`THREE.AnimationMixer` actions and call `attachMixer()`. **Nothing outside that
-file changes** — the events that drive animation (`swing`, `castBegin`,
-`damage`, `death`) already fire.
+Put a `.glb` in `public/models/`, add one line to `src/content/models.ts`, and
+that creature stops being a capsule. `npm run models` scans the folder and
+prints the lines to paste. `public/models/README.md` is what to hand somebody
+making the art.
+
+Four rules, each of which is about art arriving from somewhere you do not
+control:
+
+- **Scale is measured, never trusted.** Every model is fitted to the height its
+  creature was authored at, off its own bounding box, and dropped so its feet
+  are on the ground. Art comes in metres, centimetres or arbitrary units; a
+  wolf that renders forty units tall is not a bug anybody enjoys finding, and
+  the person who made the wolf has no way to know it was their exporter.
+- **Clips are matched by name, and fall back.** Anything containing "idle",
+  "walk", "run", "attack", "cast", "hit" or "death" is found; walk borrows run,
+  everything borrows idle. A model with one animation is still an enormous
+  improvement on a capsule and must not be punished for being unfinished.
+- **A missing file changes nothing.** It 404s, one line goes to the console,
+  and the capsule stands. That is what makes it safe to ship with the table
+  empty and to list art that does not exist yet.
+- **The capsule is hidden, not removed.** It carries the entity-id tags the
+  click raycast resolves against, so a model with a hole in its silhouette
+  never becomes unclickable.
+
+`__game.tryModel('mob:bog_wolf', { file: 'models/mob/v7.glb' })` dresses every
+wolf in the zone on the spot, because iterating on art means looking at forty
+versions of a wolf and a manifest you must rebuild to change is one nobody will
+experiment with. It is also how `smoke` proves the pipeline: it writes a tiny
+animated glTF, checks that the capsule went away, that the model came out the
+height the creature was authored at, that it is still clickable and that a clip
+is playing — then deletes it. Committing a fake wolf would put a grey box in
+the shipped game.
 
 ## Verifying a change
 
@@ -911,7 +943,7 @@ debug handle exposed in `main.ts`.
 
 ## Deliberately not built yet
 
-Dialogue, crafting, real art, **gameplay-authoritative terrain**, pathfinding
+Dialogue, crafting, **gameplay-authoritative terrain**, pathfinding
 (mobs walk straight lines) and entity collision. Vendor stock is static too —
 traders never run out and never restock, which wants an inventory model if the
 economy ever grows past four zones.

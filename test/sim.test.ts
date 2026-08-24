@@ -43,6 +43,7 @@ import {
 } from '../src/content/adventurers.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { grindMobFor, killsForLevel } from './pace.js';
+import { MODELS, clipFor } from '../src/content/models.js';
 import {
   DAY_LENGTH_MS,
   NIGHT_FLOOR,
@@ -3577,5 +3578,60 @@ describe('the sun moves, and so does the weather', () => {
       expect(weatherAt(zoneId, 12345678)).toEqual(weatherAt(zoneId, 12345678));
     }
     console.log('\nEIGHT DAYS OF SKY\n' + rows.join('\n'));
+  });
+});
+
+describe('art can be dropped in', () => {
+  it('names a real creature for every model listed', () => {
+    // The failure this exists for is silent: a key with a typo simply never
+    // matches anything, the game never looks for the file, and the creature
+    // stays a capsule with no explanation anywhere.
+    for (const [key, def] of Object.entries(MODELS)) {
+      const [kind, id] = key.split(':');
+      expect(['mob', 'class', 'vendor'], `${key} has an unknown kind`).toContain(kind);
+      if (kind === 'mob') expect(MOBS[id!], `${key} is not a creature`).toBeDefined();
+      if (kind === 'class') expect(PLAYABLE_CLASSES, `${key} is not a class`).toContain(id);
+      if (kind === 'vendor') expect(VENDORS[id!], `${key} is not a trader`).toBeDefined();
+      expect(def.file, `${key} points outside public/models`).toMatch(/^models\//);
+      expect(def.file).toMatch(/\.(glb|gltf)$/);
+      // A model scaled far off the capsule it replaces breaks every measurement
+      // taken against it: nameplate height, telegraph radius, click target.
+      expect(def.scale ?? 1).toBeGreaterThan(0.4);
+      expect(def.scale ?? 1).toBeLessThan(2.5);
+    }
+  });
+
+  it('finds the right clip whatever the exporter called it', () => {
+    const typical = ['Idle', 'Walk_Loop', 'RunFast', 'Attack01', 'Death'];
+    expect(clipFor('idle', typical)).toBe('Idle');
+    expect(clipFor('walk', typical)).toBe('Walk_Loop');
+    expect(clipFor('run', typical)).toBe('RunFast');
+    expect(clipFor('attack', typical)).toBe('Attack01');
+    expect(clipFor('death', typical)).toBe('Death');
+    // No cast clip in the file: fall back to idle rather than to nothing, so a
+    // caster with partial art stands there rather than snapping to a T-pose.
+    expect(clipFor('cast', typical)).toBe('Idle');
+  });
+
+  it('falls back rather than freezing when the art is incomplete', () => {
+    // A model with only an idle is still an enormous improvement on a capsule
+    // and must not be punished for being unfinished.
+    const sparse = ['idle'];
+    for (const state of ['idle', 'walk', 'run', 'attack', 'cast', 'hit', 'death'] as const) {
+      expect(clipFor(state, sparse), `${state} found nothing`).toBe('idle');
+    }
+    // And walk borrows run rather than standing still mid-stride.
+    expect(clipFor('walk', ['run'])).toBe('run');
+    expect(clipFor('run', ['walk'])).toBe('walk');
+    // Nothing at all is nothing at all — the caller keeps the capsule.
+    expect(clipFor('idle', [])).toBeUndefined();
+  });
+
+  it('lets an exporter that names everything Take 001 be told explicitly', () => {
+    const useless = ['Take 001', 'Take 002'];
+    expect(clipFor('idle', useless, { idle: 'Take 002' })).toBe('Take 002');
+    // An override naming a clip that is not in the file is ignored, not
+    // obeyed: a stale manifest entry should degrade, not break.
+    expect(clipFor('idle', useless, { idle: 'Nope' })).toBe('Take 001');
   });
 });

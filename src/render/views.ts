@@ -5,6 +5,8 @@ import { getMount } from '../content/mounts.js';
 import { getMob } from '../content/mobs.js';
 import { getVendor } from '../content/vendors.js';
 import { TICK_MS } from '../sim/formulas.js';
+import { clipFor, modelFor, setModelOverride, type ModelDef, type ModelState } from '../content/models.js';
+import { ModelLibrary } from './models.js';
 import type { Entity, EntityId } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 
@@ -15,6 +17,15 @@ import type { World } from '../sim/world.js';
  * between the last two tick positions, which is exactly what a network client
  * does with snapshots — so this loop already has the right shape for multiplayer.
  */
+/**
+ * One library for the whole game, so a camp of eight wolves fetches one file.
+ *
+ * Module-scoped rather than injected: it holds nothing but a cache, every
+ * `EntityView` wants the same one, and threading it through four constructors
+ * would be ceremony around a map.
+ */
+const MODELS_LIBRARY = new ModelLibrary();
+
 export class EntityView {
   readonly group = new THREE.Group();
   readonly anim: AnimStateMachine;
@@ -41,6 +52,23 @@ export class EntityView {
 
   /** Seconds of red flash remaining after taking damage. */
   private flash = 0;
+  /**
+   * The real model's materials, once it has arrived.
+   *
+   * Kept as a list because the damage flash is the one thing that has to reach
+   * into the art: tinting only the hidden capsule means a creature with a model
+   * takes a hit and shows nothing, and "did that land?" is not a question a
+   * combat game should make you ask.
+   */
+  private modelMaterials: THREE.MeshStandardMaterial[] = [];
+  /** The model currently on, so trying another one replaces rather than stacks. */
+  private dressed: THREE.Object3D | null = null;
+  /** Height this body was authored at, for re-fitting a swapped model. */
+  private readonly builtHeight: number;
+  /** True once real art is standing where the capsule was. */
+  get hasModel(): boolean {
+    return this.dressed !== null;
+  }
   /** Overhead "interact with me" marker; vendors only. */
   private marker: THREE.Mesh | null = null;
   /** The horse under the player, when they are riding one. */
@@ -64,6 +92,7 @@ export class EntityView {
           ? getVendor(entity.vendorId!).view
           : { color: CLASSES[entity.classId ?? 'warrior'].color, height: 1.8, radius: 0.42 };
 
+    this.builtHeight = view.height;
     const geo = new THREE.CapsuleGeometry(view.radius, Math.max(0.1, view.height - view.radius * 2), 4, 12);
     this.material = new THREE.MeshStandardMaterial({ color: view.color, roughness: 0.7, metalness: 0.05 });
     this.mesh = new THREE.Mesh(geo, this.material);
@@ -104,6 +133,20 @@ export class EntityView {
 
     this.anim = new AnimStateMachine(this.body, view.height);
 
+    // And if somebody has made art for this thing, put it on. Asynchronous on
+    // purpose: the capsule is built and standing before the fetch even starts,
+    // so a slow or missing file costs nothing and a creature never fails to
+    // exist because its model did.
+    const kind = entity.kind === 'mob' ? 'mob' : entity.kind === 'vendor' ? 'vendor' : 'class';
+    const modelId =
+      entity.kind === 'mob'
+        ? entity.defId!
+        : entity.kind === 'vendor'
+          ? entity.vendorId!
+          : (entity.classId ?? 'warrior');
+    const def = modelFor(kind, modelId);
+    if (def) void this.dressIn(def, view.height);
+
     // Tag every descendant so a click raycast can resolve back to an entity.
     this.group.userData.entityId = id;
     this.group.traverse((o) => {
@@ -126,6 +169,59 @@ export class EntityView {
     // One tick's ground covered, expressed as a speed: the gait is chosen from
     // how fast the thing is actually going, not from whether it moved at all.
     this.anim.setMoving(Math.hypot(dx, dz) / (TICK_MS / 1000));
+  }
+
+  /**
+   * Swap the capsule for a real model, once it loads.
+   *
+   * The capsule is *hidden*, not removed. It still carries the entity-id tags
+   * the click raycast resolves against and it is the thing every measurement in
+   * this file was written against; a model with a hole in its silhouette would
+   * otherwise become unclickable, which is a worse bug than an ugly wolf.
+   */
+  async dressIn(def: ModelDef, height = this.builtHeight): Promise<void> {
+    const loaded = await MODELS_LIBRARY.get(def, height);
+    if (!loaded) return;
+
+    // Take the previous model off first, so trying a second file replaces the
+    // wolf rather than standing a second wolf inside it.
+    if (this.dressed) {
+      this.body.remove(this.dressed);
+      this.dressed = null;
+      this.modelMaterials = [];
+    }
+    this.mesh.visible = false;
+    for (const child of this.body.children) child.visible = false;
+    this.body.add(loaded.root);
+    this.dressed = loaded.root;
+
+    loaded.root.traverse((o: THREE.Object3D) => {
+      o.userData.entityId = this.id;
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      // Clone the material per entity: art files share one material across
+      // every clone, so flashing one wolf red would flash the whole camp.
+      const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      mesh.material = Array.isArray(mesh.material)
+        ? mats.map((m) => m.clone())
+        : mats[0]!.clone();
+      const mine = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const m of mine) {
+        if ((m as THREE.MeshStandardMaterial).isMeshStandardMaterial) {
+          this.modelMaterials.push(m as THREE.MeshStandardMaterial);
+        }
+      }
+    });
+
+    const names = loaded.clips.map((c) => c.name);
+    const wanted: ModelState[] = ['idle', 'walk', 'run', 'attack', 'cast', 'hit', 'death'];
+    const chosen = new Map<ModelState, THREE.AnimationClip>();
+    for (const state of wanted) {
+      const name = clipFor(state, names, def.clips);
+      const clip = loaded.clips.find((c) => c.name === name);
+      if (clip) chosen.set(state, clip);
+    }
+    this.anim.attachModel(loaded.root, chosen);
   }
 
   onDamaged(): void {
@@ -193,8 +289,10 @@ export class EntityView {
     if (this.flash > 0) {
       this.flash -= dtMs / 1000;
       this.material.color.setHex(0xff5555);
+      for (const m of this.modelMaterials) m.emissive.setHex(0x882222);
     } else {
       this.material.color.setHex(baseColor);
+      for (const m of this.modelMaterials) m.emissive.setHex(0x000000);
     }
     if (this.marker) {
       this.marker.rotation.y += dtMs * 0.0022;
@@ -309,6 +407,34 @@ export class ViewManager {
 
   get all(): IterableIterator<EntityView> {
     return this.views.values();
+  }
+
+  /**
+   * Put a model on everything matching a key, right now.
+   *
+   * Iterating on art means looking at forty versions of a wolf, and a manifest
+   * you have to rebuild to change is one nobody will experiment with. From the
+   * console: `__game.tryModel('mob:bog_wolf', { file: 'models/mob/v7.glb' })`.
+   * The override sticks, so anything that spawns afterwards wears it too.
+   */
+  tryModel(key: string, def: ModelDef | null): number {
+    setModelOverride(key, def);
+    const [kind, id] = key.split(':');
+    let dressed = 0;
+    for (const [entityId, view] of this.views) {
+      const entity = this.world.entity(entityId);
+      if (!entity) continue;
+      const mine =
+        kind === 'mob'
+          ? entity.kind === 'mob' && entity.defId === id
+          : kind === 'vendor'
+            ? entity.kind === 'vendor' && entity.vendorId === id
+            : entity.kind === 'player' && entity.classId === id;
+      if (!mine || !def) continue;
+      dressed++;
+      void view.dressIn(def);
+    }
+    return dressed;
   }
 
   get(id: EntityId): EntityView | undefined {

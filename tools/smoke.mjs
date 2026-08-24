@@ -11,6 +11,7 @@
  */
 import { chromium } from 'playwright';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { removeFixtureModel, writeFixtureModel } from './fixture-model.mjs';
 import { join } from 'node:path';
 
 const URL = process.env.SMOKE_URL ?? 'http://127.0.0.1:4173/?fresh';
@@ -734,6 +735,72 @@ async function main() {
       garrisonAfter,
     };
   });
+  // The art pipeline, proved with a model made on the spot.
+  //
+  // The claim is that a file dropped into `public/models/` replaces a capsule
+  // and plays its clips. Until something has actually done it, every part of
+  // that is a guess — the fit, the clip matching, whether a missing file is
+  // really harmless. Committing a fake wolf would put a grey box in the
+  // shipped game, so one is written here, checked, and deleted.
+  const fixture = join(process.cwd(), 'dist', 'models', 'mob', '__fixture.gltf');
+  writeFixtureModel(fixture);
+  const art = await page.evaluate(async () => {
+    const g = window.__game;
+    const target = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+    if (!target) return { ok: false, why: 'nothing to dress' };
+    const before = g.views.get(target.id)?.hasModel ?? null;
+    const dressed = g.tryModel(`mob:${target.defId}`, { file: 'models/mob/__fixture.gltf' });
+    await new Promise((r) => setTimeout(r, 1800));
+    const view = g.views.get(target.id);
+
+    // Walk the body and find what is actually standing there now.
+    let meshes = 0;
+    let tagged = 0;
+    let fitted = 0;
+    view.group.traverse((o) => {
+      if (o.isMesh && o.visible) meshes++;
+      if (o.userData.entityId === target.id) tagged++;
+    });
+    // How tall the model renders, against the height the creature was authored
+    // at. This is the fit, and it is the thing that goes wrong when art arrives
+    // in centimetres — the failure that makes a wolf forty units tall.
+    const def = g.mobOf(target.defId);
+    if (view.hasModel) {
+      let maxY = 0;
+      view.group.traverse((o) => {
+        if (!o.isMesh || !o.visible) return;
+        o.geometry.computeBoundingBox();
+        const scale = o.getWorldScale(view.group.position.clone()).y;
+        maxY = Math.max(maxY, o.geometry.boundingBox.max.y * scale);
+      });
+      fitted = +maxY.toFixed(2);
+    }
+    return {
+      ok: view.hasModel === true,
+      before,
+      dressed,
+      meshes,
+      tagged,
+      fitted,
+      authored: def.view.height,
+      anim: view.anim.current,
+      capsuleHidden: !view.group.children[0].children[0].visible,
+    };
+  });
+  await wait(400);
+  await page.screenshot({ path: join(OUT, '20-model.png') });
+  // And taking it off again puts the capsule back — the property that makes
+  // shipping with an empty manifest safe.
+  const artOff = await page.evaluate(async () => {
+    const g = window.__game;
+    const target = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+    g.tryModel(`mob:${target.defId}`, null);
+    const missing = g.tryModel(`mob:${target.defId}`, { file: 'models/mob/__nope.glb' });
+    await new Promise((r) => setTimeout(r, 900));
+    return { attempted: missing, stillAlive: !!g.views.get(target.id) };
+  });
+  removeFixtureModel(fixture);
+
   // Day, night and weather. Checked against the lights the renderer actually
   // ended up with, because the only failure that matters here is "night went
   // too dark to play in" and no structural assertion can see that.
@@ -1074,6 +1141,13 @@ async function main() {
     ['it carried something', (wyrmDead.carried ?? []).length > 0],
     ['a front changed hands', realm.ok],
     ['the new holder garrisons the ground', realm.garrisonAfter !== realm.garrisonBefore],
+    ['a dropped-in model replaces the capsule', art.ok === true],
+    ['it was a capsule before', art.before === false],
+    ['the capsule is hidden underneath it', art.capsuleHidden === true],
+    ['the model is fitted to the creature it replaced', Math.abs(art.fitted - art.authored) < art.authored * 0.25],
+    ['the model is clickable', art.tagged > 1],
+    ['its animation is playing', typeof art.anim === 'string'],
+    ['a missing model leaves the creature standing', artOff.stillAlive === true],
     ['the sun crosses the sky', skies[0].light > skies[2].light + 0.2],
     ['and the world actually gets darker', skies[0].sun > skies[2].sun * 2 && skies[0].skyLum > skies[2].skyLum * 2],
     ['night keeps enough ambient to see by', skies[2].ambient >= skies[0].ambient * 0.45],
@@ -1112,6 +1186,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('map:', JSON.stringify(mapState), 'closed:', mapClosed);
+  console.log('art:', JSON.stringify(art), JSON.stringify(artOff));
   console.log('sky:', skies.map((x) => JSON.stringify(x)).join(' '), '| clock:', clockShown);
   console.log('death:', JSON.stringify(death), JSON.stringify(deathUi), JSON.stringify(reclaimed));
   console.log('armour:', JSON.stringify(armour), '| bounty:', JSON.stringify(bounty));
