@@ -42,7 +42,7 @@ import {
   xpForKill,
   xpToNext,
 } from './formulas.js';
-import { isBoss } from './types.js';
+import { BOSS_STARS, isBoss } from './types.js';
 import type {
   ActiveEffect,
   AwayReport,
@@ -71,7 +71,7 @@ import {
   POTION_COOLDOWN_MS,
   consumableDropFor,
 } from '../content/consumables.js';
-import { getLootTable, getMob } from '../content/mobs.js';
+import { STAR_SPREAD, baseMobId, getLootTable, getMob, starVariantId } from '../content/mobs.js';
 import { BOUNTY_SPAWN_CHANCE, RARE_SPAWN_CHANCE } from '../content/rares.js';
 import {
   ADVENTURERS,
@@ -284,12 +284,38 @@ export class World {
    */
   private spawnChoice(baseId: string, summoned: boolean): string {
     const base = getMob(baseId);
-    if (summoned || !base.rareVariant || this.zone.rareSpawns === false) return baseId;
-    // A bounty turns up more often than a signature item: one is spent the
-    // moment you collect it, the other is yours for the rest of the game.
-    const variant = getMob(base.rareVariant);
-    const chance = variant.bounty ? BOUNTY_SPAWN_CHANCE : RARE_SPAWN_CHANCE;
-    return this.rng.chance(chance) ? base.rareVariant : baseId;
+    if (summoned) return baseId;
+    if (base.rareVariant && this.zone.rareSpawns !== false) {
+      // A bounty turns up more often than a signature item: one is spent the
+      // moment you collect it, the other is yours for the rest of the game.
+      const variant = getMob(base.rareVariant);
+      const chance = variant.bounty ? BOUNTY_SPAWN_CHANCE : RARE_SPAWN_CHANCE;
+      if (this.rng.chance(chance)) return base.rareVariant;
+    }
+    return this.starChoice(base);
+  }
+
+  /**
+   * Which rating of a creature this spawn point comes back as.
+   *
+   * A camp is a population, not eight copies: mostly ordinary animals, a few
+   * runts, a few big ones, and occasionally something you have to decide
+   * whether to pull. The weights live in `content/mobs.ts` with the names.
+   *
+   * Off in test arenas along with everything else that rolls — a duel against
+   * a creature whose rating changed with the seed is measuring the wrong thing,
+   * and the roll itself draws from the same `Rng` as the fight.
+   */
+  private starChoice(base: MobDef): string {
+    if (this.zone.starVariants === false) return base.id;
+    if (base.stars >= BOSS_STARS || base.horse || base.rareOf || base.dragon) return base.id;
+    let roll = this.rng.next();
+    for (const { stars, weight } of STAR_SPREAD) {
+      roll -= weight;
+      if (roll > 0) continue;
+      return stars === base.stars ? base.id : starVariantId(base.id, stars);
+    }
+    return base.id;
   }
 
   // ------------------------------------------------------------- territory
@@ -1850,9 +1876,13 @@ export class World {
       // A guard post also re-reads who holds the ground, so a front that
       // flipped while you were standing on it visibly changes hands one
       // respawn at a time rather than all at once.
-      const base = e.holding
-        ? this.garrisonFor({ mobId: getMob(e.defId!).rareOf ?? e.defId!, holding: e.holding })
-        : (getMob(e.defId!).rareOf ?? e.defId!);
+      // Back to the plain creature before re-rolling, through BOTH wrappers.
+      // Unwrapping only the rare left a spawn point that had come back as a
+      // Snarling Bog Wolf re-rolling from *that*, and the second roll asked for
+      // the ★2 rating of a creature that is itself a rating — a variant of a
+      // variant, which is not a creature at all.
+      const plain = baseMobId(getMob(e.defId!).rareOf ?? e.defId!);
+      const base = e.holding ? this.garrisonFor({ mobId: plain, holding: e.holding }) : plain;
       const defId = this.spawnChoice(base, false);
       if (defId !== e.defId) {
         const def = getMob(defId);
@@ -2016,7 +2046,10 @@ export class World {
 
       if (killer && killer.kind === 'player') {
         this.awardXp(killer, xpForKill(def.xp, def.level, killer.level));
-        this.advanceQuests(killer, (o) => (o.kind === 'kill' && o.mobId === def.id ? 1 : 0));
+        // Through the rating, not the id: a quest for eight Bog Wolves counts
+        // the gaunt one and the alpha alike.
+        const killed = baseMobId(def.id);
+        this.advanceQuests(killer, (o) => (o.kind === 'kill' && o.mobId === killed ? 1 : 0));
         this.applyKillPolitics(killer, victim);
       }
     } else {

@@ -28,6 +28,7 @@ export function duelZone(mobId: string, distance = 2.5): ZoneDef {
     // fight does.
     rareSpawns: false,
     adventurers: false,
+    starVariants: false,
   };
 }
 
@@ -56,6 +57,7 @@ export function pullZone(mobId: string, count: number): ZoneDef {
     levelRange: [1, 100],
     rareSpawns: false,
     adventurers: false,
+    starVariants: false,
   };
 }
 
@@ -76,6 +78,7 @@ export function emptyZone(): ZoneDef {
     // fight does.
     rareSpawns: false,
     adventurers: false,
+    starVariants: false,
   };
 }
 
@@ -96,6 +99,7 @@ export function vendorZone(vendorId: string, distance = 2): ZoneDef {
     // fight does.
     rareSpawns: false,
     adventurers: false,
+    starVariants: false,
   };
 }
 

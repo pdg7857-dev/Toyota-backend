@@ -72,7 +72,16 @@ const PACE_LEVELS = [8, 14, 22, 28, 34, 42, 50, 58, 66, 74, 82, 90, 100];
  */
 const PACE_CHECKPOINTS: Array<{ level: number; mobId: string }> = PACE_LEVELS.map((level) => {
   const near = Object.values(MOBS)
-    .filter((m) => (m.stars === 2 || m.stars === 3) && !m.horse && !m.rareOf && !m.dragon)
+    .filter(
+      (m) =>
+        (m.stars === 2 || m.stars === 3) &&
+        !m.horse &&
+        !m.rareOf &&
+        !m.dragon &&
+        // The creature as authored, not one of its ratings. A ★3 rating of a
+        // level-8 creature is a fight a player picks, not the pace of the game.
+        !m.starOf,
+    )
     .sort((a, b) => Math.abs(a.level - level) - Math.abs(b.level - level));
   // ★3 where there is one within a couple of levels. Once a character has
   // spent ninety skill points, a ★2 at their own level dies in three seconds —
@@ -579,9 +588,16 @@ describe('loot scales with difficulty', () => {
    * Wild horses are excluded for the mirror reason: they are worth almost
    * nothing dead ON PURPOSE, because killing one is the mistake. Holding them
    * to "harder mobs pay more" would price the lesson out of the game.
+   *
+   * Star variants are excluded because they are not separate creatures — they
+   * are the same animal at another rating, and their gold and experience come
+   * from the same two functions as everything else here. Including them only
+   * measured `goldForKill` against itself, while adding four times as many
+   * pairs to a dominance check that then tripped over a flavour bonus one
+   * loot table has and another does not.
    */
   const ladder = Object.values(MOBS)
-    .filter((m) => m.stars < BOSS_STARS && !m.rareOf && !m.horse)
+    .filter((m) => m.stars < BOSS_STARS && !m.rareOf && !m.horse && !m.starOf)
     .sort((a, b) => a.level - b.level || a.stars - b.stars);
 
   /** Average gold a kill yields. */
@@ -658,9 +674,13 @@ describe('loot scales with difficulty', () => {
     expect(mean(hardest.map(expectedItemValue))).toBeGreaterThan(
       mean(easiest.map(expectedItemValue)) * 8,
     );
-    // ...while the gear drop rate stays in the same band throughout.
+    // ...while the gear drop RATE climbs far more gently than the value does.
+    // "Better, not more" is now "much better, and a little likelier": a ★4 that
+    // takes four times as long and kills a fifth of the players who pull it
+    // should not pay out as rarely as the ★1 beside it, and the cap keeps the
+    // whole thing rare either way.
     expect(mean(hardest.map(equipmentChance))).toBeLessThan(
-      mean(easiest.map(equipmentChance)) * 2,
+      mean(easiest.map(equipmentChance)) * 4,
     );
   });
 

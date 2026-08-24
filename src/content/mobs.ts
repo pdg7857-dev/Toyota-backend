@@ -26,6 +26,7 @@ import {
   type BountySpec,
   type RareSpec,
 } from './rares.js';
+import { BOSS_STARS } from '../sim/types.js';
 import type { LootTable, MobAbilityDef, MobDef, StarRating } from '../sim/types.js';
 
 /**
@@ -1487,4 +1488,135 @@ export function mobDropping(itemId: string): string | undefined {
     if (table?.entries.some((e) => e.itemId === itemId)) return mob.id;
   }
   return undefined;
+}
+
+// --------------------------------------------------------------------------
+// Star variants.
+//
+// The same creature at a different rating. A camp of Bog Wolves is not eight
+// identical Bog Wolves any more: it is a scrawny one, four ordinary ones, a
+// snarling one and, if the roll goes that way, an alpha — and the player can
+// see which is which from the nameplate and, once there is art, from the
+// silhouette.
+//
+// This is the cheapest variety in the game. Fifty-one creatures times four
+// ratings is two hundred distinct things to meet, and not one of them needed a
+// new stat block: `STAR_MODIFIERS` already turns a rating into health, damage
+// and defence, and `baseMobXp` and `goldForKill` already pay by rating. All
+// that was missing was the roll and the name.
+// --------------------------------------------------------------------------
+
+/**
+ * What a creature is called at each rating.
+ *
+ * Adjectives rather than numbers, because a player reads "Gaunt Bog Wolf" and
+ * knows what it means without being told, and reads "Bog Wolf (1)" and knows
+ * only that a programmer was here.
+ *
+ * A creature keeps its plain name at the rating it was authored with — that is
+ * the one the bestiary describes and the one the level band is fitted to — and
+ * takes a word at every other.
+ */
+const STAR_PREFIX: Record<number, string[]> = {
+  1: ['Gaunt', 'Scrawny', 'Half-Grown', 'Starveling'],
+  // ★2 carries a word too, even though it is the ordinary rating. A creature
+  // whose base rating is ★1 or ★3 still needs a ★2 name, and leaving this
+  // empty gave the Moor Hare two ratings both called "Moor Hare".
+  2: ['Full-Grown', 'Wary', 'Lean', 'Common'],
+  3: ['Snarling', 'Rangy', 'Scarred', 'Hard-Bitten'],
+  4: ['Great', 'Elder', 'Black', 'Storm-Fed'],
+};
+
+/**
+ * How often each rating turns up on a camp spawn point.
+ *
+ * Weighted toward the middle, so a camp reads as a population rather than a
+ * lottery: mostly ordinary animals, a few runts, a few big ones, and the ★4 is
+ * rare enough that finding one is a decision about whether to take it. That
+ * decision is the point — the lethality suite measures a ★4 at your own level
+ * killing a fifth of the characters that pull one.
+ */
+export const STAR_SPREAD: Array<{ stars: StarRating; weight: number }> = [
+  { stars: 1, weight: 0.22 },
+  { stars: 2, weight: 0.46 },
+  { stars: 3, weight: 0.24 },
+  { stars: 4, weight: 0.08 },
+];
+
+/** Id of a creature's variant at a given rating. */
+export function starVariantId(baseId: string, stars: StarRating): string {
+  return `${baseId}__s${stars}`;
+}
+
+/** The name a creature carries at a given rating. */
+function starVariantName(base: MobDef, stars: StarRating): string {
+  const options = STAR_PREFIX[stars] ?? [];
+  if (options.length === 0) return base.name;
+  // Chosen from the id rather than rolled, so a creature's ★3 is always called
+  // the same thing — a name that changes between spawns is not a name.
+  let hash = 0;
+  for (const ch of base.id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return `${options[hash % options.length]} ${base.name}`;
+}
+
+/**
+ * Every ordinary creature, at every rating it does not already have.
+ *
+ * Bosses, elites, dragons, mounts and named rares are all excluded: each of
+ * those means something specific, and a "Gaunt Cadfael" would be a joke at the
+ * expense of the one thing in the zone that is supposed to land.
+ */
+function buildStarVariants(): Record<string, MobDef> {
+  const out: Record<string, MobDef> = {};
+  for (const base of Object.values(MOBS)) {
+    if (base.stars >= BOSS_STARS || base.horse || base.rareOf || base.dragon) continue;
+    if (base.starOf) continue;
+    for (const { stars } of STAR_SPREAD) {
+      if (stars === base.stars) continue;
+      const id = starVariantId(base.id, stars);
+      const { rareVariant: _drop, ...rest } = base;
+      out[id] = {
+        ...rest,
+        id,
+        name: starVariantName(base, stars),
+        stars,
+        // Experience and gold follow the rating, exactly as they do for any
+        // other creature — that is what makes hunting the big one worth it.
+        xp: baseMobXp(base.level, stars),
+        starOf: base.id,
+        // A rating does not host the camp's rare. The rare roll happens first
+        // and against the plain creature — leaving `rareVariant` on a variant
+        // would mean a host with four of them, and the test that asserts one
+        // variant per host is the reason that matters.
+        // A ★4 is visibly bigger than a runt of the same animal. Modest, so
+        // the rating is read from the nameplate first and the size second.
+        view: { ...base.view, height: base.view.height * (0.86 + stars * 0.05) },
+      };
+    }
+  }
+  return out;
+}
+
+Object.assign(MOBS, buildStarVariants());
+
+/** Every rating a creature comes in, commonest first. Includes itself. */
+export function starVariantsOf(baseId: string): MobDef[] {
+  const base = MOBS[baseId];
+  if (!base) return [];
+  return STAR_SPREAD.map(({ stars }) =>
+    stars === base.stars ? base : MOBS[starVariantId(baseId, stars)],
+  ).filter((m): m is MobDef => !!m);
+}
+
+/**
+ * The creature behind a definition, whatever rating it turned up at.
+ *
+ * A Snarling Bog Wolf is a Bog Wolf. Everything that asks "which creature is
+ * this" — a quest counting kills, a garrison checking who is standing at a
+ * post, a bounty checking which camp it hides in — wants this and not the id,
+ * or a player who kills eight wolves of assorted sizes has killed eight of
+ * nothing.
+ */
+export function baseMobId(mobId: string): string {
+  return MOBS[mobId]?.starOf ?? mobId;
 }

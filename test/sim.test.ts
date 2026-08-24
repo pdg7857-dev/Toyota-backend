@@ -52,7 +52,16 @@ import {
   rareMobId,
   signatureWeaponId,
 } from '../src/content/rares.js';
-import { BOUNTY_MOBS, LOOT_TABLES, MOBS, RESPAWN_MS, getMob } from '../src/content/mobs.js';
+import {
+  BOUNTY_MOBS,
+  LOOT_TABLES,
+  MOBS,
+  RESPAWN_MS,
+  baseMobId,
+  getMob,
+  starVariantId,
+  starVariantsOf,
+} from '../src/content/mobs.js';
 import { BOSS_STARS, isBoss } from '../src/sim/types.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
 
@@ -1976,7 +1985,7 @@ describe('territory and standing', () => {
     const posts = [...world.entities.values()].filter((e) => e.holding === 'road_watch');
     expect(posts.length).toBeGreaterThan(6);
     for (const post of posts) {
-      expect(post.defId).toBe(holding.garrison[holding.initialController]);
+      expect(baseMobId(post.defId!)).toBe(holding.garrison[holding.initialController]);
     }
   });
 
@@ -3114,5 +3123,112 @@ describe('the reward gradient', () => {
     expect(hard, 'a ★4 is no likelier to be carrying gear than a ★1').toBeGreaterThan(soft);
     // And still rare. The ceiling the whole loot design rests on.
     expect(hard).toBeLessThanOrEqual(MAX_EQUIPMENT_DROP_CHANCE + 0.02);
+  });
+});
+
+describe('star variants', () => {
+  it('gives every ordinary creature four ratings, and names them', () => {
+    const rows: string[] = [];
+    const ordinary = Object.values(MOBS).filter(
+      (m) => m.stars < BOSS_STARS && !m.horse && !m.rareOf && !m.dragon && !m.starOf,
+    );
+    expect(ordinary.length).toBeGreaterThan(20);
+
+    for (const base of ordinary) {
+      const family = starVariantsOf(base.id);
+      expect(family, `${base.name} has no ratings`).toHaveLength(4);
+      const names = family.map((m) => m.name);
+      // Four distinct names, so the nameplate tells you which one you pulled.
+      expect(new Set(names).size, `${base.name}'s ratings share a name`).toBe(4);
+      for (const m of family) {
+        // Every rating is the same creature at the same level in the same camp.
+        expect(m.level).toBe(base.level);
+        expect(m.lootTableId).toBe(base.lootTableId);
+        expect(baseMobId(m.id)).toBe(base.id);
+      }
+      // And harder ratings pay more, which is the reason to take one.
+      const sorted = [...family].sort((a, b) => a.stars - b.stars);
+      for (let i = 1; i < sorted.length; i++) {
+        expect(sorted[i]!.xp, `${sorted[i]!.name} pays no more than the rating below`).toBeGreaterThan(
+          sorted[i - 1]!.xp,
+        );
+      }
+      if (base.id === 'bog_wolf') rows.push('  ' + names.join('  ·  '));
+    }
+    console.log('\nSTAR VARIANTS, e.g.\n' + rows.join('\n'));
+  });
+
+  it('never puts a rating on a boss, a mount or a named rare', () => {
+    // Each of those means something specific. "Gaunt Cadfael" is a joke at the
+    // expense of the one thing in the zone that is supposed to land.
+    for (const mob of Object.values(MOBS)) {
+      if (!mob.starOf) continue;
+      const base = getMob(mob.starOf);
+      expect(base.stars, `${mob.name} is a rating of a boss`).toBeLessThan(BOSS_STARS);
+      expect(base.horse, `${mob.name} is a rating of a mount`).toBeUndefined();
+      expect(base.rareOf, `${mob.name} is a rating of a rare`).toBeUndefined();
+      expect(base.dragon, `${mob.name} is a rating of a dragon`).toBeUndefined();
+      // And nothing is ever a rating of a rating.
+      expect(base.starOf, `${mob.name} is a variant of a variant`).toBeUndefined();
+    }
+  });
+
+  it('spawns a camp as a population rather than eight of the same thing', () => {
+    const world = new World({ seed: 500, zone: getZone('fenmarch'), classId: 'warrior' });
+    const counts = new Map<number, number>();
+    let total = 0;
+    for (const e of world.entities.values()) {
+      if (e.kind !== 'mob') continue;
+      const def = getMob(e.defId!);
+      if (def.stars >= BOSS_STARS || def.horse) continue;
+      counts.set(def.stars, (counts.get(def.stars) ?? 0) + 1);
+      total++;
+    }
+    const shown = [...counts.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([stars, n]) => `★${stars} ${((n / total) * 100).toFixed(0)}%`);
+    console.log(`  a fresh Fenmarch: ${shown.join(', ')} of ${total} creatures`);
+
+    // All four ratings present, weighted toward the middle.
+    for (const stars of [1, 2, 3, 4]) {
+      expect(counts.get(stars) ?? 0, `no ★${stars} anywhere in the zone`).toBeGreaterThan(0);
+    }
+    expect((counts.get(2) ?? 0) / total, 'the ordinary rating is not the common one').toBeGreaterThan(
+      0.3,
+    );
+    expect((counts.get(4) ?? 0) / total, '★4 is not rare').toBeLessThan(0.2);
+  });
+
+  it('counts every rating toward a quest for the creature', () => {
+    // A quest for eight Bog Wolves counts the gaunt one and the alpha alike.
+    // Resolving on the id instead would mean a player who killed eight wolves
+    // of assorted sizes had killed eight of nothing.
+    // Whatever the first kill quest in the game happens to ask for, fought at
+    // a rating it was not authored with.
+    const quest = Object.values(QUESTS).find((q) => q.objectives[0]?.kind === 'kill')!;
+    const objective = quest.objectives[0] as { kind: 'kill'; mobId: string; count: number };
+    const world = new World({
+      seed: 501,
+      zone: duelZone(starVariantId(objective.mobId, 4), 2),
+      classId: 'warrior',
+    });
+    const player = levelPlayer(world, { level: 30, gear: ['iron_longsword'] });
+    player.quests = [{ questId: quest.id, counts: [0] }];
+
+    const mob = theMob(world);
+    expect(getMob(mob.defId!).starOf).toBe(objective.mobId);
+    world.submit(player.id, { t: 'target', id: mob.id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+    for (let i = 0; i < 4000 && !mob.dead; i++) world.tick();
+
+    expect(mob.dead).toBe(true);
+    expect(player.quests[0]!.counts[0], 'the alpha did not count').toBe(1);
+  });
+
+  it('stays out of the test arenas', () => {
+    // Same reason as rare spawns and adventurers: a duel whose opponent is ★1
+    // on one seed and ★4 on the next is measuring the seed.
+    const world = new World({ seed: 502, zone: duelZone('bog_wolf'), classId: 'warrior' });
+    expect(getMob(theMob(world).defId!).id).toBe('bog_wolf');
   });
 });

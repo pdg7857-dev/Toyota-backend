@@ -88,6 +88,15 @@ export interface ZoneDef {
    * every seeded fight rolls different numbers. A duel is supposed to be a duel.
    */
   adventurers?: boolean;
+  /**
+   * Whether this zone's camps spawn the same creature at different ratings.
+   * Defaults to true.
+   *
+   * Off in test arenas, for the same reason as `rareSpawns` and `adventurers`:
+   * a duel whose opponent is ★1 on one seed and ★4 on the next is measuring
+   * the seed, and the roll itself comes out of the same `Rng` as the fight.
+   */
+  starVariants?: boolean;
 }
 
 /**

@@ -455,6 +455,15 @@ export interface MobDef {
   rareVariant?: string;
   rareOf?: string;
   /**
+   * Set on a star variant: the ordinary creature it is a rating of.
+   *
+   * A camp spawns the same animal at ★1 to ★4 — a runt, four ordinary ones, a
+   * scarred one, occasionally something much bigger. Everything else that cares
+   * about "which creature is this" wants the base rather than the rating, so
+   * quests, trophies and loot all resolve through this.
+   */
+  starOf?: string;
+  /**
    * Marks a rare that carries a windfall rather than an item.
    *
    * A `gold` or `xp` bounty is not a harder fight — it is the same creature
