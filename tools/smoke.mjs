@@ -1180,6 +1180,62 @@ async function main() {
       legend: document.querySelectorAll('#map-hint span').length,
     };
   });
+  // A mark the player puts down themselves.
+  //
+  // The whole of the navigation in this game was an arrow pointing at one
+  // quest objective. Clicked through a real pointer event rather than by
+  // calling the handler, because the failure worth guarding is the map layer
+  // going `pointer-events: none` and the canvas never hearing about it — which
+  // is exactly what happened to the target frame's tooltip.
+  const marking = await page.evaluate(async () => {
+    const g = window.__game;
+    const canvas = document.querySelector('#map-canvas');
+    const rect = canvas.getBoundingClientRect();
+    const fire = (fx, fy) =>
+      canvas.dispatchEvent(
+        new MouseEvent('click', {
+          bubbles: true,
+          clientX: rect.left + rect.width * fx,
+          clientY: rect.top + rect.height * fy,
+        }),
+      );
+
+    fire(0.3, 0.7);
+    await new Promise((r) => setTimeout(r, 350));
+    const mark = g.map.mark ? { ...g.map.mark } : null;
+    const head = document.querySelector('#tracker-head')?.textContent ?? '';
+    const dist = document.querySelector('#tracker-dist')?.textContent ?? '';
+    const arrow = document.querySelector('#tracker-arrow')?.style.transform ?? '';
+    const gap = mark
+      ? Math.round(Math.hypot(mark.x - g.world.player.pos.x, mark.z - g.world.player.pos.z))
+      : 0;
+
+    window.__clearMark = async () => {
+      fire(0.3, 0.7);
+      await new Promise((r) => setTimeout(r, 350));
+    };
+    return {
+      set: !!mark,
+      inZone: !!mark && Math.abs(mark.x) <= g.world.zone.halfSize,
+      tracked: /mark/i.test(head),
+      // The distance it reports has to be the distance it actually is.
+      saysHowFar: new RegExp(`\\b${gap}m`).test(dist),
+      turned: /rotate/.test(arrow),
+      gap,
+      head,
+      dist,
+    };
+  });
+  await page.screenshot({ path: join(OUT, '17b-map-mark.png') });
+  // And the same click again takes it off, so the quest arrow comes back.
+  const unmarked = await page.evaluate(async () => {
+    await window.__clearMark();
+    return {
+      cleared: window.__game.map.mark === null,
+      backToQuest: !/mark/i.test(document.querySelector('#tracker-head')?.textContent ?? ''),
+    };
+  });
+
   await page.keyboard.press('Escape');
   await wait(300);
   const mapClosed = await page.evaluate(() =>
@@ -2438,6 +2494,10 @@ async function main() {
     ['reclaiming from across the zone is refused', reclaimed.refused === true],
     ['walking back to the body clears it', reclaimed.owedNow === 0],
     ['the map opens', mapState.open === true],
+    ['a click puts your own mark on it', marking.set && marking.inZone],
+    ['the arrow takes the mark over the quest', marking.tracked && marking.turned],
+    ['and says how far it is', marking.saysHowFar],
+    ['clicking it again takes it off', unmarked.cleared && unmarked.backToQuest],
     ['the map drew the zone rather than a blank rectangle', mapState.fullColours > 40],
     ['the minimap drew ground', mapState.miniColours > 12],
     ['the map names the zone and its band', /levels \d+/i.test(mapState.title)],
@@ -2465,7 +2525,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('wade:', JSON.stringify(wade));
-  console.log('camera:', JSON.stringify(camera));
+  console.log('camera:', JSON.stringify(camera), '| mark:', JSON.stringify(marking));
   console.log('muster:', JSON.stringify(muster), '| offer:', JSON.stringify(questOffer));
   console.log('timing:', JSON.stringify(timing));
   console.log('reckoning:', JSON.stringify(reckoning));

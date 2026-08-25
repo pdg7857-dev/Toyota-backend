@@ -84,6 +84,10 @@ async function boot(): Promise<void> {
     structuresOf: () => rig.structures,
     yawOf: () => rig.yaw,
   });
+  // The quest arrow yields to a mark the player put down themselves. Wired
+  // after the fact because the map is built into the HUD's own container, so
+  // it cannot exist when the HUD is constructed.
+  hud.markOf = () => map.mark;
   // Sound is a third subscriber to the same event stream the HUD and the views
   // read — it calls nothing and mutates nothing, so a muted game and a loud one
   // simulate identically.

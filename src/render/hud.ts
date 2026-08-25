@@ -46,6 +46,7 @@ import type {
   ItemStack,
   QuestObjective,
   SimEvent,
+  Vec2,
 } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 
@@ -187,6 +188,13 @@ export class Hud {
   /** Hotkey order for this character's class, filled in at construction. */
   private skillOrder: string[] = [];
   private nameplates = new Map<EntityId, HTMLElement>();
+  /**
+   * Where the player has put their own mark, if anywhere.
+   *
+   * Set from `main.ts` rather than passed in, because the map is built after
+   * the HUD — the HUD is what the map's container goes into.
+   */
+  markOf: () => Vec2 | null = () => null;
   /** Last-painted signature per panel, so an open panel is not rebuilt every frame. */
   private readonly painted = new Map<string, string>();
   /** Which effects the pip row was last built for. */
@@ -890,7 +898,7 @@ export class Hud {
    * "which way" is answered by looking rather than by reading.
    */
   private updateTracker(player: Entity): void {
-    const found = this.trackedObjective(player);
+    const found = this.markObjective() ?? this.trackedObjective(player);
     if (!found) {
       this.els.tracker.style.display = 'none';
       return;
@@ -914,6 +922,27 @@ export class Hud {
     this.els.trackerArrow.style.transform = `rotate(${-bearing}rad)`;
     this.els.trackerDist.textContent =
       distance < 12 ? `${where.label} — you are here` : `${where.label} — ${Math.round(distance)}m`;
+  }
+
+  /**
+   * A mark the player put on the map takes the arrow.
+   *
+   * It is theirs and the quest's is the game's, and when the two disagree the
+   * player has just said which one they meant. The quest card comes back the
+   * moment the mark comes off, so nothing is lost by setting one.
+   */
+  private markObjective(): {
+    title: string;
+    line: string;
+    where: { x: number; z: number; label: string } | null;
+  } | null {
+    const mark = this.markOf();
+    if (!mark) return null;
+    return {
+      title: 'Your mark',
+      line: '<span class="muted">Click it again on the map to take it off.</span>',
+      where: { x: mark.x, z: mark.z, label: 'Your mark' },
+    };
   }
 
   /** Which way the camera is facing, for the tracker arrow. */

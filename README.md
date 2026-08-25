@@ -439,6 +439,14 @@ A level tells you what it gave you: the points, the skill it granted and the
 key that skill sits on, and — when you have reached the bottom of the next
 band — the road that just opened.
 
+## Your own mark
+
+Click the map to put a mark down, and the arrow that has been pointing at your
+quest points at that instead. Click it again to take it off and the quest comes
+back. It is for the tower you saw on the ridge, the camp you will come back to
+when it stops being deadly, and the corner of the marsh where something rare
+was standing.
+
 ## A camp that notices you are farming it
 
 Stand in one camp and empty it quickly and the place answers. The survivors

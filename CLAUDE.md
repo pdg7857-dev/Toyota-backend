@@ -1018,6 +1018,30 @@ What makes it worth reading rather than pretty:
 - The relief is shaded off the **slope**, not the height, because that is the
   only thing that makes a hill legible in plan.
 
+### And you can put your own mark on it
+
+The map answers every question about the ground except the one a player asks
+of a place they have already seen: *how do I get back to that*. The tower on
+the ridge, the camp to come back to when it stops being deadly, the corner of
+the marsh a rare was in — all of it was down to remembering, on three
+kilometres of terrain that mostly looks like itself.
+
+Click the map and a mark goes down; click it again and it comes off. **The
+quest arrow yields to it**, which is the whole feature: the arrow is the only
+navigation the game has, it points at what the *game* wants, and a mark is the
+player saying they meant somewhere else. The quest card comes straight back
+when the mark comes off, so setting one costs nothing.
+
+It is renderer state and is deliberately **not saved**, and it clears on
+travel. It is a note rather than a fact about the world — the sim has no
+opinion about where you meant to walk, and a mark you set twenty minutes ago
+and then closed the game on is not a plan any more.
+
+The mark goes down on the **map** and not on the minimap, though it draws on
+both. A minimap click already means "open the map", and a control that does
+two different things depending on how hard you meant it is a control nobody
+trusts.
+
 ## Looking at it
 
 `npm run smoke` proves the game runs. `npm run look` is the other half: it

@@ -34,6 +34,15 @@ import { roadPoints } from '../content/zone.js';
 /** Pixels across the relief bitmap. The whole zone, at ~5 units per pixel. */
 const RELIEF = 640;
 
+/**
+ * How near a click has to land to the mark already down to mean "take it off"
+ * rather than "put it there", in full-map pixels.
+ *
+ * Generous, because the alternative to a forgiving clear is a player stacking
+ * marks they cannot get rid of.
+ */
+const MARK_CLEAR_PX = 26;
+
 /** How much ground the minimap shows, as a radius in world units. */
 const MINIMAP_RANGE = 190;
 
@@ -102,6 +111,15 @@ export class MapView {
   private road: Vec2[] = [];
   private reliefZone = '';
   private open = false;
+  /**
+   * Somewhere the player decided to go.
+   *
+   * Renderer state, and not saved. It is a note rather than a fact about the
+   * world — the sim has no opinion about where you meant to walk, and a mark
+   * you set twenty minutes ago and then closed the game on is not a plan any
+   * more. Cleared when the zone changes for the same reason.
+   */
+  mark: Vec2 | null = null;
   /** Redraw throttle for the minimap: the ground under it does not move fast. */
   private sinceDraw = 0;
 
@@ -135,6 +153,15 @@ export class MapView {
     this.hint = this.root.querySelector<HTMLElement>('#map-hint')!;
     this.root.querySelector('#map-close')!.addEventListener('click', () => this.toggle());
     this.root.querySelector('#minimap')!.addEventListener('click', () => this.toggle());
+    // The map is the only place a mark goes down. The minimap is a click that
+    // already means "open the map", and a control that does two things
+    // depending on how hard you meant it is a control nobody trusts.
+    this.full.addEventListener('click', (ev) => this.clickMap(ev));
+    this.full.addEventListener('contextmenu', (ev) => {
+      ev.preventDefault();
+      this.mark = null;
+      this.drawFull();
+    });
   }
 
   get isOpen(): boolean {
@@ -152,10 +179,54 @@ export class MapView {
     this.toggle();
   }
 
+  /**
+   * Put a mark down, or take the one that is there off.
+   *
+   * The whole of the navigation in this game was an arrow pointing at one
+   * quest objective. Every other question a player asks of three kilometres of
+   * ground — "that tower I saw", "the camp I have to come back to when I can
+   * handle it", "where the boat was" — had no answer but remembering. A mark
+   * is the player's own arrow, and it is worth about as much as the quest one
+   * for a tenth of the machinery.
+   */
+  private clickMap(ev: MouseEvent): void {
+    const rect = this.full.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const size = this.full.width;
+    // Canvas pixels, not CSS pixels: the map is drawn at 1120 and displayed at
+    // whatever the panel is wide.
+    const px = ((ev.clientX - rect.left) / rect.width) * size;
+    const py = ((ev.clientY - rect.top) / rect.height) * size;
+
+    if (this.mark) {
+      const [mx, my] = this.toFull(this.mark, size);
+      if (Math.hypot(px - mx, py - my) <= MARK_CLEAR_PX) {
+        this.mark = null;
+        this.drawFull();
+        return;
+      }
+    }
+    const half = this.world.zone.halfSize;
+    this.mark = {
+      x: (px / size) * half * 2 - half,
+      z: (py / size) * half * 2 - half,
+    };
+    this.drawFull();
+  }
+
+  /** World point to full-map pixels. The inverse of what `clickMap` reads. */
+  private toFull(p: Vec2, size: number): [number, number] {
+    const half = this.world.zone.halfSize;
+    return [((p.x + half) / (half * 2)) * size, ((p.z + half) / (half * 2)) * size];
+  }
+
   /** Called every frame. Cheap unless the zone changed or the map is open. */
   update(dtMs: number): void {
     const zone = this.world.zone;
-    if (this.reliefZone !== zone.id) this.buildRelief(zone);
+    if (this.reliefZone !== zone.id) {
+      this.buildRelief(zone);
+      this.mark = null;
+    }
     this.sinceDraw += dtMs;
     if (this.sinceDraw >= 100) {
       this.sinceDraw = 0;
@@ -270,6 +341,29 @@ export class MapView {
     this.reliefZone = zone.id;
   }
 
+  /**
+   * The mark, on either view.
+   *
+   * Deliberately not a dot: every other thing on this map is a dot, and the
+   * one thing on it the player put there themselves should not have to be
+   * picked out of a crowd of them.
+   */
+  private drawMark(ctx: CanvasRenderingContext2D, x: number, y: number, r: number): void {
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.max(2, r * 0.28);
+    ctx.beginPath();
+    ctx.moveTo(x - r, y);
+    ctx.lineTo(x + r, y);
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x, y + r);
+    ctx.stroke();
+    ctx.strokeStyle = '#6fe0ff';
+    ctx.lineWidth = Math.max(1.5, r * 0.2);
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.62, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
   /** World position to relief-bitmap pixel. */
   private toRelief(p: Vec2): { x: number; y: number } {
     const half = this.world.zone.halfSize;
@@ -347,6 +441,11 @@ export class MapView {
         ctx.lineTo(x - 7, y + 7);
         ctx.stroke();
       }
+    }
+
+    if (this.mark) {
+      const [x, y] = at(this.mark);
+      if (x > -20 && y > -20 && x < size + 20 && y < size + 20) this.drawMark(ctx, x, y, 9);
     }
 
     // The player last, and as an arrow rather than a dot: on a north-up map
@@ -557,6 +656,12 @@ export class MapView {
       label('where you fell', x, y - 16, '#ff9a8a', 600);
     }
 
+    if (this.mark) {
+      const [mx, my] = at(this.mark);
+      this.drawMark(ctx, mx, my, 15);
+      label('your mark', mx, my - 22, '#bdefff', 600);
+    }
+
     // Where you are, drawn last and drawn big.
     const [px, py] = at(player.pos);
     ctx.strokeStyle = '#ffffff';
@@ -581,6 +686,7 @@ export class MapView {
       `<span style="color:#8fe0a0">● road out</span>` +
       `<span style="color:#e8e3d0">▪ landmark</span>` +
       `<span style="color:#ff9a8a">✕ where you fell (V)</span>` +
+      `<span style="color:#bdefff">✛ click to set your own mark</span>` +
       `<span class="map-scale">${Math.round(zone.halfSize * 2)}u across, about ten minutes on foot</span>`;
   }
 
