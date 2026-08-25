@@ -68,6 +68,35 @@ const SUN_DISTANCE = 500;
 /** How much depth either side of that distance the shadow camera keeps. */
 const SHADOW_DEPTH = 360;
 
+/**
+ * How close the camera may ever end up to the player, and how far it stops
+ * short of whatever it has been pulled in behind.
+ */
+const CAMERA_MIN = 2.4;
+const CAMERA_PAD = 0.5;
+
+/**
+ * What the camera counts as something to get out of the way of.
+ *
+ * Only what it cannot see past. A prop shorter than this is under the sight
+ * line anyway, and the radius is capped so the camera pushes through foliage:
+ * a shot that jumps every time you walk under a broadleaf is worse than the
+ * leaves, and the Sunken Wood is two hundred and ten of them to a patch.
+ */
+const CAMERA_BLOCK_HEIGHT = 2.4;
+const CAMERA_BLOCK_MAX_R = 1.6;
+
+/**
+ * A standing thing, as an upright cylinder. Cheap enough to test a few hundred
+ * of every frame, which a raycast against instanced scenery is not.
+ */
+interface Blocker {
+  x: number;
+  z: number;
+  r: number;
+  top: number;
+}
+
 /** Half-width of the box the ambient motes drift in. */
 const MOTE_SPAN = 90;
 
@@ -124,6 +153,13 @@ export class SceneRig {
    * Aligned by index with `theme.props`.
    */
   private propParts: PropPart[][] = [];
+  /**
+   * How big each of this zone's props actually is, measured off the geometry
+   * rather than declared. A per-kind table would go stale the moment somebody
+   * added a prop, and getting it wrong is invisible until a camera walks into
+   * something.
+   */
+  private propSize: { r: number; h: number }[] = [];
   /** Where this zone's road runs. Painted into the ground, never built. */
   private road: Vec2[] = [];
   /** Cell key -> the scenery standing in it. Built and dropped as you walk. */
@@ -227,6 +263,7 @@ export class SceneRig {
     this.zone = zone;
     this.road = roadPoints(zone.id, zone.theme);
     this.propParts = theme.props.map((spec) => propParts(spec));
+    this.propSize = this.propParts.map((parts) => measureProp(parts));
     this.structures = this.siteStructures(zone);
     this.clearingList = this.clearings(zone);
     this.height = new HeightField(theme.terrain, this.clearingList);
@@ -482,11 +519,17 @@ export class SceneRig {
     // Cells entirely outside the wall hold nothing but the wall itself.
     const inside = x0 + CELL_SIZE > -limit && x0 < limit && z0 + CELL_SIZE > -limit && z0 < limit;
 
+    // What the camera has to get out of the way of, gathered while the cell is
+    // being built because that is the only place the world transforms exist.
+    // It rides on the cell, so it is dropped with it — a blocker list that
+    // outlived its scenery would pull the camera in behind nothing.
+    const blockers: Blocker[] = [];
     if (inside) {
-      this.addCellScatter(group, x0, z0);
-      this.addCellStructures(group, x0, z0);
+      this.addCellScatter(group, x0, z0, blockers);
+      this.addCellStructures(group, x0, z0, blockers);
     }
     this.addCellBoundary(group, x0, z0);
+    group.userData.blockers = blockers;
     return group;
   }
 
@@ -502,15 +545,41 @@ export class SceneRig {
     return zoneStructures(zone);
   }
 
-  private addCellStructures(group: THREE.Group, x0: number, z0: number): void {
+  private addCellStructures(
+    group: THREE.Group,
+    x0: number,
+    z0: number,
+    blockers: Blocker[],
+  ): void {
     for (const st of this.structures) {
       if (st.pos.x < x0 || st.pos.x >= x0 + CELL_SIZE) continue;
       if (st.pos.z < z0 || st.pos.z >= z0 + CELL_SIZE) continue;
       const built = buildStructure(st, this.theme);
-      built.position.set(st.pos.x, this.height.at(st.pos.x, st.pos.z), st.pos.z);
+      const base = this.height.at(st.pos.x, st.pos.z);
+      built.position.set(st.pos.x, base, st.pos.z);
       built.rotation.y = st.facing;
       built.scale.setScalar(st.scale);
       group.add(built);
+      // One blocker per piece rather than one box round the lot. A stone
+      // circle's bounding box is the whole circle, and a camera pulled in
+      // because the player is standing *in* the ring is a camera in their
+      // pocket for the whole landmark. `clearing` is no good either — it is
+      // the keep-out for scatter and is wider still.
+      built.updateMatrixWorld(true);
+      const box = new THREE.Box3();
+      built.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh || !mesh.geometry) return;
+        box.setFromObject(mesh);
+        const r = Math.max(box.max.x - box.min.x, box.max.z - box.min.z) / 2;
+        if (box.max.y - box.min.y < CAMERA_BLOCK_HEIGHT) return;
+        blockers.push({
+          x: (box.max.x + box.min.x) / 2,
+          z: (box.max.z + box.min.z) / 2,
+          r,
+          top: box.max.y,
+        });
+      });
     }
   }
 
@@ -525,7 +594,12 @@ export class SceneRig {
    * sphere the frustum culls a whole cell at a time rather than a tree at a
    * time.
    */
-  private addCellScatter(group: THREE.Group, x0: number, z0: number): void {
+  private addCellScatter(
+    group: THREE.Group,
+    x0: number,
+    z0: number,
+    blockers: Blocker[],
+  ): void {
     const blocked = (x: number, z: number): boolean => {
       // Nothing grows in a road. People have been walking on it.
       if (this.road.length > 1 && roadDistance(this.road, x, z) < ROAD_HALF_WIDTH + 1.2) return true;
@@ -572,6 +646,15 @@ export class SceneRig {
         quat.setFromEuler(euler);
         scaleV.setScalar(scale);
         placed.push(new THREE.Matrix4().compose(pos, quat, scaleV));
+        const size = this.propSize[index];
+        if (size && size.h * scale >= CAMERA_BLOCK_HEIGHT) {
+          blockers.push({
+            x,
+            z,
+            r: Math.min(size.r * scale, CAMERA_BLOCK_MAX_R),
+            top: pos.y + size.h * scale,
+          });
+        }
       }
       if (placed.length === 0) continue;
 
@@ -673,7 +756,11 @@ export class SceneRig {
   updateCamera(focus: THREE.Vector3, shake = 0): void {
     this.lastFocus.copy(focus);
     const p = Math.max(0.15, Math.min(1.35, this.pitch));
-    const horiz = Math.cos(p) * this.distance;
+    // How far back it can actually sit. Walking backwards into a standing
+    // stone used to fill the screen with the inside face of a rock, which is
+    // the most visible thing in the game and the one nothing ever checked.
+    const back = this.clearBehind(focus, p);
+    const horiz = Math.cos(p) * back;
     const x = focus.x - Math.sin(this.yaw) * horiz;
     const z = focus.z - Math.cos(this.yaw) * horiz;
     // Never let the camera end up inside a hill: keep it above the ground it is
@@ -681,7 +768,7 @@ export class SceneRig {
     // Above the ground it is standing over, above the player, and above the
     // *surface* of any water rather than the bed of it — see
     // `HeightField.clearHeight`.
-    const y = Math.max(focus.y + Math.sin(p) * this.distance, this.height.clearHeight(x, z) + 1.5);
+    const y = Math.max(focus.y + Math.sin(p) * back, this.height.clearHeight(x, z) + 1.5);
     this.camera.position.set(x, y, z);
     if (shake > 0) {
       // Hashed off the frame clock rather than Math.random: a shake driven by
@@ -694,6 +781,66 @@ export class SceneRig {
       this.camera.position.z += Math.sin(t * 0.101 + 3.1) * shake;
     }
     this.camera.lookAt(focus.x, focus.y + 1.0, focus.z);
+  }
+
+  /**
+   * How far behind the player the camera can sit without being inside
+   * something.
+   *
+   * Cylinders rather than a raycast, and only the standing things a cell
+   * recorded while it was being built: raycasting instanced scenery means
+   * testing every tree in nine cells against a ray every frame, and this game
+   * has a frame budget it can see. See `Blocker`.
+   *
+   * The ground is not in here — it is handled by lifting the camera instead,
+   * which is what has always happened and is the right answer for a hill. This
+   * is for the things a hill is not: a wall, a tower, a stone.
+   */
+  private clearBehind(focus: THREE.Vector3, pitch: number): number {
+    // From the player's head, which is what the camera looks at. From their
+    // feet, every slope in the game reads as something in the way.
+    const oy = focus.y + 1;
+    const dx = -Math.sin(this.yaw) * Math.cos(pitch);
+    const dz = -Math.cos(this.yaw) * Math.cos(pitch);
+    const dy = Math.sin(pitch);
+    let best = this.distance;
+
+    const cx = Math.floor(focus.x / CELL_SIZE);
+    const cz = Math.floor(focus.z / CELL_SIZE);
+    for (let iz = -1; iz <= 1; iz++) {
+      for (let ix = -1; ix <= 1; ix++) {
+        const cell = this.cells.get(`${cx + ix},${cz + iz}`);
+        const list = cell?.userData.blockers as Blocker[] | undefined;
+        if (!list) continue;
+        for (const b of list) {
+          // Where the ray crosses the cylinder's circle, in 2D.
+          const ox = focus.x - b.x;
+          const oz = focus.z - b.z;
+          const a = dx * dx + dz * dz;
+          if (a <= 0) continue;
+          const half = ox * dx + oz * dz;
+          const c = ox * ox + oz * oz - b.r * b.r;
+          const disc = half * half - a * c;
+          if (disc <= 0) continue;
+          const root = Math.sqrt(disc);
+          const far = (-half + root) / a;
+          // Wholly in front of the player: not between them and the camera.
+          if (far <= 0) continue;
+          // The near crossing is where the sight line enters it. A player
+          // standing against the thing is already inside, and the camera has
+          // nowhere to go but as close as it is allowed.
+          const near = (-half - root) / a;
+          const t = Math.max(0, near);
+          if (t >= best) continue;
+          // Only if the sight line is still under the top of it there. A
+          // camera pitched up over a wall can see perfectly well.
+          if (oy + dy * t > b.top) continue;
+          best = t;
+        }
+      }
+    }
+    if (best >= this.distance) return this.distance;
+    return Math.max(CAMERA_MIN, best - CAMERA_PAD);
   }
 
   /** Drift the motes. Purely decorative, so frame time is the only budget. */
@@ -893,6 +1040,28 @@ function buildSnow(): THREE.Points {
 }
 
 /** Free every geometry and material under an object, before dropping it. */
+/**
+ * How tall and how wide a prop actually stands, from its own geometry.
+ *
+ * Measured once per zone rather than declared per kind: the props are built by
+ * `buildProp` from knobs, so a table of sizes beside it is a second source of
+ * truth that goes stale the moment somebody adds a reed.
+ */
+function measureProp(parts: PropPart[]): { r: number; h: number } {
+  const box = new THREE.Box3();
+  const part = new THREE.Box3();
+  for (const p of parts) {
+    if (!p.geometry.boundingBox) p.geometry.computeBoundingBox();
+    part.copy(p.geometry.boundingBox!).applyMatrix4(p.matrix);
+    box.union(part);
+  }
+  if (box.isEmpty()) return { r: 0, h: 0 };
+  return {
+    r: Math.max(box.max.x, -box.min.x, box.max.z, -box.min.z),
+    h: box.max.y,
+  };
+}
+
 function disposeTree(root: THREE.Object3D): void {
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;

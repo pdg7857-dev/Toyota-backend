@@ -1235,6 +1235,54 @@ It also stops casting at all once the sun is low enough not to be believed. A
 shadow at midnight is a shadow of the moon, and a sun that low draws one the
 length of the visible ground.
 
+## The camera stops going inside things
+
+Walk backwards into a standing stone and the shot filled with the dark inside
+face of a rock. It is the most visible thing a third-person game can do wrong,
+it happens constantly on a map with twelve standing stones and a hundred and
+ten trees to a patch, and nothing in the suite could see it: the sim is flat,
+and a screenshot of the inside of a stone looks exactly like a screenshot of a
+dark night.
+
+`clearBehind` walks the sight line from the player's head out to where the
+camera wants to sit and stops it short of the first thing in the way. Three
+decisions make it affordable and make it behave:
+
+- **Cylinders, not a raycast.** A cell records what it is standing up while it
+  builds it — the only place the world transforms exist — and the list rides on
+  the cell so it is dropped with it. A blocker list that outlived its scenery
+  would pull the camera in behind nothing. Raycasting instanced scenery means
+  testing every tree in nine cells every frame, and this game has a frame
+  budget it can see.
+- **Sizes are measured, never declared.** `measureProp` reads the built
+  geometry. A table of sizes beside `buildProp` is a second source of truth
+  that goes stale the moment somebody adds a reed, and being wrong about it is
+  invisible until a camera walks into something.
+- **It pushes through leaves.** A prop's radius is capped
+  (`CAMERA_BLOCK_MAX_R`), so the camera avoids a trunk and not a canopy — the
+  Sunken Wood is two hundred and ten broadleaves to a reference patch, and a
+  shot that jumps every time you walk under one is worse than the leaves.
+  Landmarks are the opposite and get no cap, one blocker **per piece**: a stone
+  circle's bounding box is the whole circle, and a camera pulled in because the
+  player is standing *in* the ring is a camera in their pocket for the whole
+  landmark.
+
+The ground is deliberately not in it. A hill is answered by lifting the camera,
+which is what has always happened and is the right answer for a hill.
+
+### Two probes that were measuring the frame clock
+
+Both found by this change and neither caused by it — which is the usual way a
+timing-dependent check announces itself.
+
+- **The threat-colour check read the nameplates after putting the lineup back
+  out of reach.** Whether it saw three colours or none depended on whether a
+  frame had happened to run in between.
+- **It also stood the lineup at a fixed offset from the player**, which is
+  behind the camera about half the time. A plate that does not project has no
+  colour on it, which reads as "the threat scale does nothing" and has nothing
+  to do with the threat scale. It stands them in front of the *camera* now.
+
 ## The two-minute scale was empty
 
 The loop has a ten-second unit — a kill — and a forty-minute unit — a level —

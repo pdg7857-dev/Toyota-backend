@@ -1338,6 +1338,76 @@ async function main() {
   await page.bringToFront();
   await wait(600);
 
+  // The camera stays out of the scenery.
+  //
+  // Walk backwards into a standing stone and the shot used to fill with the
+  // dark inside face of a rock. It is the most visible thing a 3D game can do
+  // wrong and nothing in this suite could see it — the sim is flat, and a
+  // screenshot of the inside of a stone looks like a screenshot of the night.
+  const camera = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const home = { x: me.pos.x, z: me.pos.z, yaw: g.rig.yaw, pitch: g.rig.pitch };
+    const flat = () =>
+      Math.hypot(g.rig.camera.position.x - me.pos.x, g.rig.camera.position.z - me.pos.z);
+
+    // Streamed first: earlier blocks teleport the player without telling the
+    // renderer, so the cells standing around are the ones from wherever the
+    // run was last looking and everything in them is a kilometre away.
+    g.rig.stream(me.pos.x, me.pos.z, true);
+    await new Promise((r) => setTimeout(r, 400));
+
+    // Somewhere with nothing behind it: the shot the pull-in must never touch.
+    const all = [...g.rig.cells.values()].flatMap((c) => c.userData.blockers ?? []);
+    const near = all.filter((b) => Math.hypot(b.x - me.pos.x, b.z - me.pos.z) < 400);
+    near.sort((a, b) => b.top - a.top);
+    const stone = near[0];
+    if (!stone) return { ok: false, why: 'nothing standing anywhere near' };
+
+    g.rig.pitch = 0.2;
+    // The camera sits at focus - (sin yaw, cos yaw) * distance, so `away` — the
+    // heading from the stone out to the player — is the yaw that puts the
+    // stone between the two of them, and `away + PI` is the one that puts it
+    // behind the player's back where it cannot matter.
+    const away = Math.atan2(me.pos.x - stone.x, me.pos.z - stone.z);
+
+    // Out in the open, well clear of it: the shot the pull-in must not touch.
+    g.rig.yaw = away + Math.PI;
+    g.rig.stream(me.pos.x, me.pos.z, true);
+    await new Promise((r) => setTimeout(r, 600));
+    const open = flat();
+
+    // Now with the stone directly between the player and where the camera
+    // wants to sit.
+    const gap = stone.r + 3.6;
+    me.pos.x = stone.x + Math.sin(away) * gap;
+    me.pos.z = stone.z + Math.cos(away) * gap;
+    g.rig.yaw = away;
+    g.rig.stream(me.pos.x, me.pos.z, true);
+    await new Promise((r) => setTimeout(r, 600));
+    const behind = flat();
+    const inside = Math.hypot(
+      g.rig.camera.position.x - stone.x,
+      g.rig.camera.position.z - stone.z,
+    );
+
+    me.pos.x = home.x;
+    me.pos.z = home.z;
+    g.rig.yaw = home.yaw;
+    g.rig.pitch = home.pitch;
+    g.rig.stream(home.x, home.z, true);
+    await new Promise((r) => setTimeout(r, 300));
+    return {
+      ok: true,
+      blockers: near.length,
+      tallest: +stone.top.toFixed(1),
+      open: +open.toFixed(2),
+      behind: +behind.toFixed(2),
+      clearOf: +(inside - stone.r).toFixed(2),
+      wanted: g.rig.distance,
+    };
+  });
+
   // A camp that notices it is being farmed.
   //
   // The one thing in this game that happens *because of what you just did* and
@@ -1879,12 +1949,23 @@ async function main() {
         Math.abs(m.level - lvl) < Math.abs(b.level - lvl) ? m : b);
     const mobs = [...g.world.entities.values()].filter((e) => e.kind === 'mob' && !e.dead).slice(0, 3);
     const want = [near(me.level - 12, 1), near(me.level, 1), near(me.level + 6, 4)];
+    // In front of the *camera*, not at a fixed offset from the player. A fixed
+    // offset is behind the camera about half the time, and a nameplate that
+    // does not project is a nameplate with no colour on it — which reads as
+    // "the threat scale does nothing" and has nothing to do with the scale.
+    const cam = g.rig.camera.position;
+    const len = Math.hypot(me.pos.x - cam.x, me.pos.z - cam.z) || 1;
+    const fx = (me.pos.x - cam.x) / len;
+    const fz = (me.pos.z - cam.z) / len;
     mobs.forEach((e, i) => {
       const def = want[i];
       e.defId = def.id;
       e.name = def.name;
       e.level = def.level;
-      e.pos = { x: me.pos.x + (i - 1) * 4, z: me.pos.z + 6 };
+      e.pos = {
+        x: me.pos.x + fx * 8 - fz * (i - 1) * 4,
+        z: me.pos.z + fz * 8 + fx * (i - 1) * 4,
+      };
       e.spawnPos = { ...e.pos };
       e.dead = false;
       e.health = g.world.statsOf(e).maxHealth;
@@ -1904,6 +1985,16 @@ async function main() {
     g.world.submit(me.id, { t: 'target', id: mobs[0].id });
     await new Promise((r) => setTimeout(r, 300));
     const trivial = document.querySelector('#target-threat').textContent;
+
+    // Read while the lineup is still standing there. It used to be read after
+    // they were put back out of reach, which measured whether a frame had
+    // happened to run in between — three colours on a good day and none on a
+    // bad one, decided by whatever the check before this one had done.
+    const colours = [...document.querySelectorAll('.nameplate.hostile')]
+      .filter((p) => p.style.display === 'block')
+      .map((p) => p.querySelector('.np-name')?.style.color)
+      .filter(Boolean);
+
     clearInterval(calm);
     for (const def of g.allMobs()) def.aggroRadius = aggro.get(def.id);
     // Put the lineup back out of reach before the aggro goes back on. Left
@@ -1918,10 +2009,6 @@ async function main() {
     me.dead = false;
     me.health = g.world.statsOf(me).maxHealth;
 
-    const colours = [...document.querySelectorAll('.nameplate.hostile')]
-      .filter((p) => p.style.display === 'block')
-      .map((p) => p.querySelector('.np-name')?.style.color)
-      .filter(Boolean);
     const farView = g.views.get(far.id);
     return {
       colours: [...new Set(colours)].length,
@@ -2237,6 +2324,9 @@ async function main() {
     ['every zone resolved a theme', themesMatched],
     ['entities stand on the terrain', standingOnGround],
     ['a creature in a lake wades rather than walking the bottom', wading],
+    ['the camera keeps its distance in the open', camera.ok && camera.open > camera.wanted * 0.7],
+    ['and comes in rather than into a stone', camera.behind < camera.open * 0.75],
+    ['landing outside the thing it avoided', camera.clearOf > 0],
     ['a camp notices when you empty it', muster.ok],
     ['and sends some of them, not all of them', muster.coming > 1 && muster.coming <= 5],
     ['the one who steps up is named for it', /Roused/.test(muster.champion ?? '')],
@@ -2375,6 +2465,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('wade:', JSON.stringify(wade));
+  console.log('camera:', JSON.stringify(camera));
   console.log('muster:', JSON.stringify(muster), '| offer:', JSON.stringify(questOffer));
   console.log('timing:', JSON.stringify(timing));
   console.log('reckoning:', JSON.stringify(reckoning));
