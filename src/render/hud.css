@@ -386,6 +386,13 @@ canvas { display: block; }
   flex-direction: column;
   gap: 10px;
   overflow-y: auto;
+  /* The scroll only works if the wheel can reach it. The HUD is
+     `pointer-events: none` so the world behind stays clickable, and the
+     *windows* inside are marked but the scrolling container was not — so a
+     character sheet taller than the panel simply had its bottom half
+     unreachable, which at level 24 is half the skills you can rank. */
+  pointer-events: auto;
+  scrollbar-width: thin;
 }
 
 .window {
@@ -1398,4 +1405,54 @@ canvas { display: block; }
   letter-spacing: 0.04em;
   color: #a99cc4;
   opacity: 0.85;
+}
+
+/* The belt. Sixteen consumables in the game and no key drank one; a key nobody
+ * can see is a key nobody uses, so it is shown as well as bound — and what is
+ * worth seeing is the cooldown, which is the whole decision. */
+#belt {
+  position: absolute;
+  /* Above the skill bar rather than in the bottom-left corner, where it sat
+     on top of the combat log. This is also where a player is already looking
+     during a fight, which is the only moment it matters. */
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 158px;
+  display: flex;
+  gap: 5px;
+}
+#belt .belt-slot {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 8px;
+  min-width: 92px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 4px;
+  font-size: 11px;
+}
+#belt .belt-slot.empty { opacity: 0.4; }
+#belt .belt-slot:not(.empty):hover { border-color: var(--gold); }
+#belt .belt-key { color: var(--gold); font-weight: bold; }
+#belt .belt-name { color: #cfc7b4; }
+#belt .belt-qty { color: #9c937c; }
+#belt .belt-cd { color: #d08a72; margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* The reckoning: a bestiary entry's trait, and a named creature put down. */
+#journal-body .trait { color: #a99cc4; font-size: 11px; }
+#journal-body .named { color: #ffd25e; }
+
+/* The reckoning sits where the realm does, one column further in — both are
+ * things you open, read and close rather than keep beside you. */
+#journal-window {
+  position: absolute;
+  top: 90px;
+  left: 14px;
+  width: 320px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  pointer-events: auto;
+  scrollbar-width: thin;
+  display: none;
 }

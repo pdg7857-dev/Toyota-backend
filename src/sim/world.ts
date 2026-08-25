@@ -872,6 +872,17 @@ export class World {
     return state;
   }
 
+  /**
+   * Put a named creature on the ground. Tests only.
+   *
+   * `spawnMob` is private because a camp spawn point is the only thing that
+   * should be deciding what turns up; this is the seam a test needs to put a
+   * *specific* creature in front of the player.
+   */
+  spawnMobForTest(mobId: string, pos: Vec2): Entity {
+    return this.spawnMob(mobId, pos);
+  }
+
   /** The dragon sitting on this holding, if one is. */
   dragonOver(holdingId: string): DragonDef | undefined {
     for (const def of DRAGONS) {
@@ -2529,7 +2540,38 @@ export class World {
       }
     }
 
+    // The two numbers a player actually remembers. Kept here rather than
+    // derived from the log, which holds nine lines.
+    if (target.kind === 'mob' && sourceId === this.playerId) {
+      const record = (this.player.record ??= { deaths: 0, biggestHit: 0, worstTaken: 0 });
+      record.biggestHit = Math.max(record.biggestHit, Math.round(amount));
+    } else if (target.kind === 'player') {
+      const record = (target.record ??= { deaths: 0, biggestHit: 0, worstTaken: 0 });
+      record.worstTaken = Math.max(record.worstTaken, Math.round(amount));
+    }
+
     if (target.health <= 0) this.kill(target, sourceId);
+  }
+
+  /**
+   * Write down what was killed.
+   *
+   * Through the *base* creature, so a Gaunt Bog Wolf, a Snarling one and
+   * `Mirefang the Bog Wolf` all count as Bog Wolves — a player thinks in
+   * creatures, not in ratings, and it is the same unwrapping quests use.
+   *
+   * The named ones are kept separately as well, because a rare is a
+   * once-an-hour creature and losing it in a tally of four hundred wolves is
+   * losing the only part of the tally anybody would want to look at.
+   */
+  private recordKill(player: Entity, def: MobDef): void {
+    const base = baseMobId(def.rareOf ?? def.id);
+    player.slain = player.slain ?? {};
+    player.slain[base] = (player.slain[base] ?? 0) + 1;
+    if (def.rareOf && !def.bounty) {
+      player.namedSlain = player.namedSlain ?? [];
+      if (!player.namedSlain.includes(def.id)) player.namedSlain.push(def.id);
+    }
   }
 
   private kill(victim: Entity, killerId: EntityId): void {
@@ -2554,7 +2596,11 @@ export class World {
       this.dragonEvent(dragon, state, `${dragon.name} is dead. Somebody will write that down.`);
     }
 
-    if (victim.kind === 'player') this.chargeForDeath(victim);
+    if (victim.kind === 'player') {
+      this.chargeForDeath(victim);
+      const record = (victim.record ??= { deaths: 0, biggestHit: 0, worstTaken: 0 });
+      record.deaths++;
+    }
 
     if (victim.kind === 'mob') {
       const def = getMob(victim.defId!);
@@ -2572,6 +2618,7 @@ export class World {
         const killed = baseMobId(def.id);
         this.advanceQuests(killer, (o) => (o.kind === 'kill' && o.mobId === killed ? 1 : 0));
         this.applyKillPolitics(killer, victim);
+        this.recordKill(killer, def);
       }
     } else {
       // Player death: everything currently hunting them goes home.
@@ -3064,7 +3111,10 @@ export class World {
       this.events.push({
         t: 'error',
         entityId: player.id,
-        message: 'Nothing here worth searching.',
+        // Covers both halves of the key: the player may have been reaching
+        // for a corpse rather than for a landmark, and "worth searching" reads
+        // as a refusal about the landmark they were not looking at.
+        message: 'Nothing here to take.',
       });
       return;
     }

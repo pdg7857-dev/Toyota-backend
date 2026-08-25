@@ -645,6 +645,24 @@ export interface Entity {
   quests?: QuestProgress[];
   /** Ids of quests already turned in; a quest is never repeatable. */
   questsDone?: string[];
+  /**
+   * What this character has done, kept per creature.
+   *
+   * A game whose whole design is "twenty-eight thousand kills" kept no record
+   * of a single one of them. The grind is the game here, and a grind you
+   * cannot see is a grind that feels like nothing is happening — this is what
+   * makes the number the design is proud of visible to the person doing it.
+   *
+   * Keyed on the *base* creature, so a Gaunt Bog Wolf, a Snarling one and
+   * `Mirefang the Bog Wolf` all count as Bog Wolves. That is the same
+   * unwrapping quests use, and for the same reason: a player thinks in
+   * creatures, not in ratings.
+   */
+  slain?: Record<string, number>;
+  /** Named rares put down, by mob id. Each is a once-in-an-hour creature. */
+  namedSlain?: string[];
+  /** Deaths, and the worst single hit taken and dealt. */
+  record?: { deaths: number; biggestHit: number; worstTaken: number };
   /** Global cooldown remaining; blocks every skill while > 0. */
   gcdMs?: number;
   /** Normalized movement intent, held until the client changes it. */

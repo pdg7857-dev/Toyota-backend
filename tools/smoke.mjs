@@ -145,7 +145,23 @@ async function main() {
   }, wanted);
   if (!picked) throw new Error('class select did not offer ' + wanted);
 
-  await wait(1500);
+  // Wait for the game to be *running*, not for a stopwatch.
+  //
+  // Every check below this line was written against a fixed 1500ms boot, and
+  // the first run after a rebuild is slower than that — a cold HTTP cache and
+  // a module graph nobody has parsed before — so twenty-one timing-sensitive
+  // checks failed on the first run and passed on the second. A suite that
+  // fails a fifth of itself at random is a suite people learn to ignore.
+  await page.waitForFunction(
+    () => {
+      const g = window.__game;
+      // Ticking, with a world and a zone actually built around the player.
+      return !!g && g.world.tickCount > 8 && [...g.views.all].length > 20;
+    },
+    null,
+    { timeout: 40000 },
+  );
+  await wait(400);
   await page.screenshot({ path: join(OUT, '01-spawn.png') });
 
   // Sound.
@@ -1292,6 +1308,97 @@ async function main() {
   await page.bringToFront();
   await wait(600);
 
+  // The reckoning.
+  const reckoning = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const before = Object.values(me.slain ?? {}).reduce((n, v) => n + v, 0);
+
+    // Kill something, and see it written down. Through the base creature: a
+    // Snarling Bog Wolf and a plain one are both Bog Wolves to a player.
+    const victim = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+    victim.pos = { x: me.pos.x + 2, z: me.pos.z };
+    const base = g.mobOf(victim.defId).starOf ?? g.mobOf(victim.defId).rareOf ?? victim.defId;
+    g.world.submit(me.id, { t: 'target', id: victim.id });
+    g.world.submit(me.id, { t: 'autoAttack', on: true });
+    const until = Date.now() + 20000;
+    while (!victim.dead && Date.now() < until) {
+      victim.health = 1;
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    g.world.submit(me.id, { t: 'autoAttack', on: false });
+    await new Promise((r) => setTimeout(r, 200));
+
+    document.querySelector('#journal-window').style.display = 'block';
+    await new Promise((r) => setTimeout(r, 300));
+    const rows = [...document.querySelectorAll('#journal-body .stat-row')].map((r) => r.textContent ?? '');
+    document.querySelector('#journal-window').style.display = 'none';
+
+    return {
+      counted: Object.values(me.slain ?? {}).reduce((n, v) => n + v, 0) > before,
+      byBase: (me.slain ?? {})[base] > 0,
+      rows: rows.length,
+      // The bestiary half: what a creature does, written down the first time
+      // you kill one, so the trait system is learned by playing.
+      saysTrait: rows.some((r) => /Pack|Skittish|Venomous|Stubborn/.test(r)),
+      total: rows.some((r) => /Creatures killed/.test(r)),
+    };
+  });
+
+  // The belt.
+  //
+  // Sixteen consumables, a two-clock cooldown system built so chaining them is
+  // impossible, and a balance test measuring exactly how much they save you —
+  // and until now no key drank one. The only way to reach the answer to a
+  // fight going wrong was to open the backpack and click, which nobody has
+  // ever done while something was hitting them.
+  const belt = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const usable = (f) =>
+      Object.values(g.allItems()).filter(
+        (i) => i.consumable?.family === f && (i.reqLevel ?? 1) <= me.level,
+      );
+    const potion = usable('potion').pop();
+    const elixir = usable('elixir').pop();
+    if (!potion || !elixir) return { ok: false, why: 'nothing drinkable at this level' };
+    me.inventory = [
+      { itemId: potion.id, qty: 3 },
+      { itemId: elixir.id, qty: 2 },
+    ];
+    me.consumableCooldowns = {};
+    await new Promise((r) => setTimeout(r, 300));
+
+    const slots = [...document.querySelectorAll('#belt .belt-slot')].map((s) => s.textContent ?? '');
+    // Counted out of the bag, not read off the health bar: out of combat you
+    // regenerate four percent a second, so "health went up" is true whether or
+    // not the key did anything at all.
+    const held = () => (me.inventory ?? []).find((s) => s.itemId === potion.id)?.qty ?? 0;
+    const before = held();
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 400));
+    const after = held();
+
+    // And a second one has to be refused, or the two clocks mean nothing.
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyQ', bubbles: true }));
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 300));
+
+    return {
+      ok: true,
+      slots,
+      shown: slots.length === 2 && slots[0].includes(potion.name),
+      drank: after < before,
+      chained: held() < after,
+      onCooldown: (me.consumableCooldowns?.potion ?? 0) > 0,
+      // The panel's scroll needs the wheel to reach it: the HUD is
+      // pointer-events: none, and the character sheet at level 24 is taller
+      // than the space it has.
+      panelReachable:
+        getComputedStyle(document.querySelector('#right-panels')).pointerEvents !== 'none',
+    };
+  });
+
   // What a creature does that a stat block cannot.
   const traits = await page.evaluate(async () => {
     const g = window.__game;
@@ -1827,6 +1934,13 @@ async function main() {
     ['every zone resolved a theme', themesMatched],
     ['entities stand on the terrain', standingOnGround],
     ['a creature in a lake wades rather than walking the bottom', wading],
+    ['a kill is written down', reckoning.counted && reckoning.byBase],
+    ['the reckoning adds it up', reckoning.total && reckoning.rows > 6],
+    ['and says what the creature does', reckoning.saysTrait],
+    ['the belt shows what you are carrying', belt.ok && belt.shown],
+    ['a key drinks it', belt.drank],
+    ['and the family cooldown refuses a second', belt.onCooldown && !belt.chained],
+    ['the character sheet can be scrolled to the bottom', belt.panelReachable],
     ['a creature says what it does that a stat block cannot', traits.ok && traits.inFrame],
     ['and says it on its nameplate too', traits.onPlate],
     ['and the frame can actually be hovered', traits.tipReachable],
@@ -1946,6 +2060,8 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('wade:', JSON.stringify(wade));
+  console.log('reckoning:', JSON.stringify(reckoning));
+  console.log('belt:', JSON.stringify(belt));
   console.log('traits:', JSON.stringify(traits));
   console.log('alive:', JSON.stringify(alive));
   console.log('found:', JSON.stringify(found));

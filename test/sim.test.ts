@@ -68,7 +68,7 @@ import {
   daylightAt,
   weatherAt,
 } from '../src/content/daylight.js';
-import { ITEMS, canEquip, gearSetFor, getItem } from '../src/content/items.js';
+import { ITEMS, bestDrink, canEquip, gearSetFor, getItem } from '../src/content/items.js';
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
 import {
   ARMOUR_LINES,
@@ -4237,5 +4237,149 @@ describe('things worth walking to', () => {
         expect(k, 'a cache should not skip a session of grinding').toBeLessThan(45);
       }
     }
+  });
+});
+
+describe('the answer you can actually reach', () => {
+  /**
+   * Sixteen consumables, a two-clock cooldown system built so chaining them is
+   * impossible, and a balance test measuring exactly how much they save you —
+   * and no key drank one. The whole system was reachable only by opening the
+   * backpack and clicking, which nobody has ever done while something was
+   * hitting them.
+   */
+  it('offers the best of each family you can actually drink', () => {
+    const world = new World({ seed: 3, zone: getZone('fenmarch'), classId: 'warrior' });
+    const player = world.player;
+    player.level = 20;
+
+    const drinkable = (family: 'potion' | 'elixir') =>
+      Object.values(ITEMS).filter((i) => i.consumable?.family === family);
+    const potions = drinkable('potion').sort((a, b) => a.value - b.value);
+    const low = potions[0]!;
+    const high = potions[potions.length - 1]!;
+
+    world.addItem(player, { itemId: low.id, qty: 2 });
+    expect(bestDrink(player, 'potion')).toBe(low.id);
+
+    // The better one wins — but only if it is one this character can drink.
+    // The belt offered a level-66 salve to a level-24 character on the first
+    // pass and the key then refused it, which is worse than an empty belt:
+    // an empty belt at least tells the truth.
+    world.addItem(player, { itemId: high.id, qty: 1 });
+    const chosen = bestDrink(player, 'potion')!;
+    expect((getItem(chosen).reqLevel ?? 1)).toBeLessThanOrEqual(player.level);
+
+    // And it never offers the wrong family.
+    expect(getItem(chosen).consumable?.family).toBe('potion');
+    expect(bestDrink(player, 'elixir')).toBeNull();
+  });
+
+  it('drinks it, spends it, and refuses the next one', () => {
+    const world = new World({ seed: 3, zone: getZone('fenmarch'), classId: 'warrior' });
+    const player = world.player;
+    player.level = 20;
+    const potion = Object.values(ITEMS)
+      .filter((i) => i.consumable?.family === 'potion' && (i.reqLevel ?? 1) <= 20)
+      .sort((a, b) => b.value - a.value)[0]!;
+    world.addItem(player, { itemId: potion.id, qty: 3 });
+
+    const first = bestDrink(player, 'potion')!;
+    world.submit(player.id, { t: 'use', itemId: first });
+    world.tick();
+    expect((player.inventory ?? []).find((s) => s.itemId === first)?.qty).toBe(2);
+    expect(player.consumableCooldowns?.potion ?? 0).toBeGreaterThan(0);
+
+    // The two clocks are the whole decision the system was built to create.
+    world.submit(player.id, { t: 'use', itemId: first });
+    world.tick();
+    expect(
+      (player.inventory ?? []).find((s) => s.itemId === first)?.qty,
+      'a consumable you can chain is a health bar with extra steps',
+    ).toBe(2);
+  });
+
+  it('has something to drink at every level of the game', () => {
+    // A belt that is empty for forty levels is a belt nobody looks at.
+    console.log('\n  what is on the belt');
+    for (const level of [1, 10, 25, 40, 55, 70, 85, 100]) {
+      const bag = Object.values(ITEMS)
+        .filter((i) => i.consumable && (i.reqLevel ?? 1) <= level)
+        .map((i) => ({ itemId: i.id, qty: 1 }));
+      const holder = { level, inventory: bag };
+      const potion = bestDrink(holder, 'potion');
+      const elixir = bestDrink(holder, 'elixir');
+      console.log(
+        `    lv${String(level).padStart(3)}  ${potion ? getItem(potion).name : '—'}` +
+          `  ·  ${elixir ? getItem(elixir).name : '—'}`,
+      );
+      expect(potion, `nothing to drink at level ${level}`).not.toBeNull();
+      expect(elixir, `no elixir at level ${level}`).not.toBeNull();
+    }
+  });
+});
+
+describe('the reckoning', () => {
+  /**
+   * The whole design of this game is twenty-eight thousand kills, and it kept
+   * no record of a single one of them. A grind you cannot see is a grind that
+   * feels like nothing is happening — and it is the number the design is
+   * proudest of, hidden from the only person doing it.
+   */
+  function killWith(world: World, mobId: string): void {
+    const mob = world.spawnMobForTest(mobId, { x: 2, z: 0 });
+    mob.health = 1;
+    world.player.pos = { x: 0, z: 0 };
+    world.submit(world.playerId, { t: 'target', id: mob.id });
+    world.submit(world.playerId, { t: 'autoAttack', on: true });
+    for (let i = 0; i < 200 && !mob.dead; i++) {
+      mob.health = 1;
+      world.tick();
+    }
+    world.submit(world.playerId, { t: 'autoAttack', on: false });
+    world.tick();
+  }
+
+  it('counts a variant and a rare as the creature they are', () => {
+    // A player thinks in creatures, not in ratings: a Gaunt Bog Wolf, a
+    // Snarling one and `Mirefang the Bog Wolf` are all Bog Wolves, and a
+    // bestiary that lists them separately is a list of internal ids.
+    const world = new World({ seed: 8, zone: duelZone('bog_wolf'), classId: 'warrior' });
+    levelPlayer(world, { level: 30 });
+    const start = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+    start.dead = true;
+    start.respawnInMs = 999999;
+
+    killWith(world, 'bog_wolf');
+    killWith(world, starVariantId('bog_wolf', 3));
+    const rare = RARES.find((r) => r.hostMobId === 'bog_wolf');
+    if (rare) killWith(world, rareMobId(rare));
+
+    const slain = world.player.slain ?? {};
+    expect(Object.keys(slain), `counted as ${Object.keys(slain).join(', ')}`).toEqual(['bog_wolf']);
+    expect(slain.bog_wolf).toBe(rare ? 3 : 2);
+    if (rare) {
+      expect(world.player.namedSlain, 'the named one was lost in the tally')
+        .toContain(rareMobId(rare));
+    }
+  });
+
+  it('remembers the worst moments, and keeps them across a save', () => {
+    const world = new World({ seed: 8, zone: duelZone('bog_wolf'), classId: 'warrior' });
+    levelPlayer(world, { level: 30 });
+    killWith(world, 'bog_wolf');
+    expect(world.player.record?.biggestHit ?? 0).toBeGreaterThan(0);
+
+    const back = World.deserialize(world.serialize(), world.zone);
+    expect(back.player.slain?.bog_wolf).toBe(world.player.slain?.bog_wolf);
+    expect(back.player.record?.biggestHit).toBe(world.player.record?.biggestHit);
+  });
+
+  it('never records anything for a creature somebody else killed', () => {
+    // The adventurers fight abstractly and must never touch your tally, the
+    // same way they must never touch your loot.
+    const world = new World({ seed: 8, zone: getZone('fenmarch'), classId: 'warrior' });
+    for (let i = 0; i < 400; i++) world.tick();
+    expect(Object.keys(world.player.slain ?? {}).length).toBe(0);
   });
 });

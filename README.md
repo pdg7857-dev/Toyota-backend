@@ -31,6 +31,7 @@ Add `?fresh` to the URL to discard your save and start over.
 | `1`–`0` | Skills (first row) |
 | `Shift`+`1`–`6` | Skills (second row — what the zones taught you) |
 | `T` | Toggle auto-attack |
+| `Q` / `X` | Drink a potion / an elixir |
 | `F` | Loot a corpse, or search a landmark |
 | `H` | Take a weakened wild horse |
 | `R` | Mount up / dismount |
@@ -38,6 +39,7 @@ Add `?fresh` to the URL to discard your save and start over.
 | `G` | Take the road to the next zone |
 | `J` | Quest log |
 | `K` | The realm — who holds what, and what they make of you |
+| `B` | The reckoning — everything you have killed, and what it was |
 | `M` | The map |
 | `N` | Mute |
 | `[` `]` | Volume |
@@ -386,10 +388,22 @@ same five-step scale the map uses. Stars count towards it, not just levels: a
 ★4 at your own level is not an even fight and the game now says so. A corpse
 with something still on it wears a gold mark you can see from across a camp.
 
+The belt above the skill bar holds the best potion and the best elixir you are
+carrying: `Q` and `X` drink them, and the two cooldowns are what stop either
+being a second health bar. A potion is for the moment you are about to die; an
+elixir is for a fight you know will be hard.
+
 Hover anything. A skill says what it costs, how long it takes and what it does;
 a locked one says how to get it — a level, or a tome and the zone it comes
 from. An item says how every one of its numbers compares to the piece you are
 wearing in that slot.
+
+## The reckoning
+
+Press `B`. Everything you have killed and how many, the named creatures you
+have put down, the landmarks you have opened, the times you fell, and the
+hardest hit you have ever landed. It is also a bestiary: what a creature does
+is written down the first time you kill one.
 
 ## Every creature fights like itself
 

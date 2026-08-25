@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { getSkill, skillBarFor } from '../content/skills.js';
-import { QUALITY_COLORS, canEquip, getItem } from '../content/items.js';
-import { getMob, mobDropping } from '../content/mobs.js';
+import { QUALITY_COLORS, bestDrink, canEquip, getItem } from '../content/items.js';
+import { MOBS, getMob, mobDropping } from '../content/mobs.js';
 import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
 import { getQuest } from '../content/quests.js';
 import {
@@ -18,6 +18,7 @@ import { getMount } from '../content/mounts.js';
 import { BOONS } from '../content/discoveries.js';
 import { traitFor } from '../content/traits.js';
 import {
+  PRIMARY_ATTRIBUTE,
   THREAT_WORDS,
   skillRankPower,
   threatBand,
@@ -123,6 +124,7 @@ export class Hud {
     xpLevel: HTMLElement;
     tip: HTMLElement;
     effects: HTMLElement;
+    belt: HTMLElement;
     tracker: HTMLElement;
     trackerHead: HTMLElement;
     trackerBody: HTMLElement;
@@ -147,6 +149,8 @@ export class Hud {
     questLogBody: HTMLElement;
     realmWindow: HTMLElement;
     realmBody: HTMLElement;
+    journalWindow: HTMLElement;
+    journalBody: HTMLElement;
     awayReport: HTMLElement;
     awayTitle: HTMLElement;
     awayBody: HTMLElement;
@@ -173,6 +177,10 @@ export class Hud {
   private readonly painted = new Map<string, string>();
   /** Which effects the pip row was last built for. */
   private effectKey = '';
+  /** Last-drawn belt contents, so it is not rebuilt every frame. */
+  private beltKey = '';
+  /** Which element the open tooltip belongs to, so a stale one can be closed. */
+  private tipFor: HTMLElement | null = null;
   /** The bag item currently being dragged, so a slot can say whether it fits. */
   private dragItemId: string | null = null;
   /** The last thing each adventurer said, for the bubble over their head. */
@@ -243,6 +251,7 @@ export class Hud {
       xpLevel: this.q('#xp-level'),
       tip: this.q('#tip'),
       effects: this.q('#effects'),
+      belt: this.q('#belt'),
       tracker: this.q('#tracker'),
       trackerHead: this.q('#tracker-head'),
       trackerBody: this.q('#tracker-body'),
@@ -269,6 +278,8 @@ export class Hud {
       questLogBody: this.q('#quest-log-body'),
       realmWindow: this.q('#realm-window'),
       realmBody: this.q('#realm-body'),
+      journalWindow: this.q('#journal-window'),
+      journalBody: this.q('#journal-body'),
       awayReport: this.q('#away-report'),
       awayTitle: this.q('#away-title'),
       awayBody: this.q('#away-body'),
@@ -693,7 +704,9 @@ export class Hud {
     setBar(this.els.playerEnergy, player.energy, stats.maxEnergy);
     this.els.playerEnergyLabel.textContent = `${Math.floor(player.energy)} / ${stats.maxEnergy}`;
 
+    this.checkTip();
     this.updateEffects(player);
+    this.updateBelt(player);
     this.updateTargetFrame();
     this.updateCastBar(player);
     this.updateXpBar(player);
@@ -732,6 +745,7 @@ export class Hud {
     this.repaint('character', this.els.characterWindow, () => this.characterSignature(player), () => this.renderCharacter());
     this.repaint('inventory', this.els.inventoryWindow, () => this.bagSignature(player), () => this.renderInventory());
     this.repaint('realm', this.els.realmWindow, () => this.realmSignature(), () => this.renderRealm());
+    this.repaint('journal', this.els.journalWindow, () => this.journalSignature(player), () => this.renderJournal());
   }
 
   /** Repaint a panel when its signature changes, and not otherwise. */
@@ -971,6 +985,96 @@ export class Hud {
     return { x: best.x, z: best.z, label: getMob(mobId).name };
   }
 
+  /** What an attribute buys, for the class actually being played. */
+  private attributeTip(label: string, key: keyof Attributes): TipContent {
+    const player = this.world.player;
+    const classId = player.classId ?? 'warrior';
+    const primary = PRIMARY_ATTRIBUTE[classId];
+    const lines: string[] = [];
+    let note: string | undefined;
+
+    switch (key) {
+      case 'vitality':
+        lines.push('+8 health a point, and a little defence');
+        note = 'Nobody is ever wrong to want more of this.';
+        break;
+      case 'focus':
+        lines.push('+5 energy a point');
+        if (primary === 'focus') lines.push('And attack rating: this is what you hit with.');
+        break;
+      default:
+        lines.push(
+          key === 'strength'
+            ? 'Attack rating, for whoever swings with it'
+            : 'Attack rating, and critical chance',
+        );
+        if (key === 'dexterity') lines.push('+0.25% crit a point, up to half your swings');
+        break;
+    }
+
+    if (key === primary) {
+      note = `The ${classId}'s own attribute — it is what your attack rating is made of.`;
+    } else if (key !== 'vitality' && key !== 'dexterity') {
+      note = `A ${classId} attacks with ${primary}. This buys nothing else you use.`;
+    }
+    return { title: label, sub: `${attrsOf(player, key)} now`, lines, note };
+  }
+
+  /**
+   * The belt: the best potion and the best elixir you are carrying.
+   *
+   * There are sixteen consumables in this game and, until now, no key drank
+   * one — the only way to reach the answer to a fight going wrong was to open
+   * the backpack, find it and click it, which nobody has ever done while
+   * something was hitting them.
+   *
+   * Shown as well as bound, because a key nobody can see is a key nobody uses,
+   * and because the thing worth seeing is the *cooldown*: the two clocks are
+   * the entire decision the consumable system was built to create.
+   */
+  private updateBelt(player: Entity): void {
+    const families: Array<['potion' | 'elixir', string]> = [
+      ['potion', 'Q'],
+      ['elixir', 'X'],
+    ];
+    const key = families
+      .map(([f]) => `${bestDrink(player, f) ?? '-'}:${Math.ceil((player.consumableCooldowns?.[f] ?? 0) / 1000)}`)
+      .join('|');
+    if (key === this.beltKey) return;
+    this.beltKey = key;
+    this.els.belt.innerHTML = '';
+
+    for (const [family, hotkey] of families) {
+      const itemId = bestDrink(player, family);
+      const slot = document.createElement('div');
+      slot.className = `belt-slot${itemId ? ' clickable' : ' empty'}`;
+      const left = player.consumableCooldowns?.[family] ?? 0;
+      const qty = itemId
+        ? (player.inventory ?? []).filter((s) => s.itemId === itemId).reduce((n, s) => n + s.qty, 0)
+        : 0;
+      slot.innerHTML =
+        `<span class="belt-key">${hotkey}</span>` +
+        `<span class="belt-name">${itemId ? getItem(itemId).name : family}</span>` +
+        (qty > 1 ? `<span class="belt-qty">${qty}</span>` : '') +
+        (left > 0 ? `<span class="belt-cd">${Math.ceil(left / 1000)}s</span>` : '');
+      if (itemId) {
+        slot.addEventListener('click', () => this.emit({ t: 'use', itemId }));
+        this.tip(slot, () => itemTip(itemId, { foot: `${hotkey} to drink · ${qty} in the bag` }));
+      } else {
+        this.tip(slot, () => ({
+          title: `No ${family}`,
+          lines: [
+            family === 'potion'
+              ? 'A potion is for the moment you are about to die.'
+              : 'An elixir is for a fight you know will be hard.',
+          ],
+          note: 'Creatures drop them. Traders sell them.',
+        }));
+      }
+      this.els.belt.appendChild(slot);
+    }
+  }
+
   /**
    * What is currently on you, and how long it has left.
    *
@@ -1160,9 +1264,10 @@ export class Hud {
     const show = (ev: MouseEvent) => {
       const c = content();
       if (!c) {
-        this.els.tip.style.display = 'none';
+        this.hideTip();
         return;
       }
+      this.tipFor = el;
       this.els.tip.innerHTML = renderTip(c);
       this.els.tip.style.display = 'block';
       this.moveTip(ev);
@@ -1171,9 +1276,25 @@ export class Hud {
     el.addEventListener('mousemove', (ev) => {
       if (this.els.tip.style.display === 'block') this.moveTip(ev);
     });
-    el.addEventListener('mouseleave', () => {
-      this.els.tip.style.display = 'none';
-    });
+    el.addEventListener('mouseleave', () => this.hideTip());
+  }
+
+  /**
+   * Put the tooltip away, and make sure it goes.
+   *
+   * `mouseleave` is not enough on its own: a panel that repaints while you are
+   * hovering it takes its own node out of the document, so the event never
+   * fires and the tip is left hanging over nothing. Checked every frame,
+   * because the alternative is a stale tooltip that only a click clears.
+   */
+  private hideTip(): void {
+    this.tipFor = null;
+    this.els.tip.style.display = 'none';
+  }
+
+  private checkTip(): void {
+    if (!this.tipFor) return;
+    if (!this.tipFor.isConnected) this.hideTip();
   }
 
   /** Beside the cursor, and never off the edge of the window. */
@@ -1644,6 +1765,110 @@ export class Hud {
       : `${exit.label} — return at level ${exit.minLevel}`;
   }
 
+  /**
+   * What you have done.
+   *
+   * The whole design of this game is "twenty-eight thousand kills", and it
+   * kept no record of a single one of them. A grind you cannot see is a grind
+   * that feels like nothing is happening — and it is the number the design is
+   * proudest of, hidden from the only person doing it.
+   *
+   * It doubles as a bestiary, which is the part that earns its place beyond
+   * bookkeeping: what a creature *does* is written down the first time you
+   * kill one, so the trait system is learned by playing rather than by reading
+   * a tooltip on something already hitting you.
+   */
+  toggleJournal(): void {
+    const visible = this.els.journalWindow.style.display === 'block';
+    this.els.journalWindow.style.display = visible ? 'none' : 'block';
+    if (!visible) this.renderJournal();
+  }
+
+  private journalSignature(player: Entity): string {
+    const total = Object.values(player.slain ?? {}).reduce((n, v) => n + v, 0);
+    return `${total}|${(player.namedSlain ?? []).length}|${player.record?.deaths ?? 0}` +
+      `|${player.record?.biggestHit ?? 0}|${(player.questsDone ?? []).length}` +
+      `|${Object.keys(this.world.found).length}`;
+  }
+
+  private renderJournal(): void {
+    const player = this.world.player;
+    const body = this.els.journalBody;
+    body.innerHTML = '';
+
+    const slain = player.slain ?? {};
+    const total = Object.values(slain).reduce((n, v) => n + v, 0);
+    const named = player.namedSlain ?? [];
+    const record = player.record ?? { deaths: 0, biggestHit: 0, worstTaken: 0 };
+
+    const line = (label: string, value: string): void => {
+      const row = document.createElement('div');
+      row.className = 'stat-row';
+      row.innerHTML = `<span>${label}</span><span class="v">${value}</span>`;
+      body.appendChild(row);
+    };
+    line('Creatures killed', total.toLocaleString());
+    line('Kinds met', String(Object.keys(slain).length));
+    line('Named creatures put down', String(named.length));
+    line('Landmarks opened', String(Object.keys(this.world.found).length));
+    line('Work finished', String((player.questsDone ?? []).length));
+    line('Times you fell', String(record.deaths));
+    if (record.biggestHit > 0) line('Hardest you have hit', record.biggestHit.toLocaleString());
+    if (record.worstTaken > 0) line('Hardest you have been hit', record.worstTaken.toLocaleString());
+
+    if (total === 0) {
+      const none = document.createElement('div');
+      none.className = 'empty';
+      none.textContent = 'Nothing yet. Go and find something.';
+      body.appendChild(none);
+      return;
+    }
+
+    const head = document.createElement('div');
+    head.className = 'bag-head';
+    head.textContent = 'What you have met';
+    body.appendChild(head);
+
+    // Commonest first: the tally is the story, and the creature you have killed
+    // four hundred of is the one the last three hours were actually about.
+    const rows = Object.entries(slain)
+      .filter(([id]) => MOBS[id])
+      .sort((a, b) => b[1] - a[1]);
+    for (const [mobId, count] of rows) {
+      const def = getMob(mobId);
+      const trait = traitFor(def);
+      const row = document.createElement('div');
+      row.className = 'stat-row hoverable';
+      row.innerHTML =
+        `<span>${def.name}` +
+        (trait ? ` <span class="trait">${trait.name}</span>` : '') +
+        `</span><span class="v">${count.toLocaleString()}</span>`;
+      // A bestiary entry is only worth having if it says something the
+      // nameplate does not: what it does, and what to do about it.
+      this.tip(row, () => ({
+        title: def.name,
+        sub: `level ${def.level}, ${'★'.repeat(def.stars)}`,
+        lines: [`${count.toLocaleString()} killed`, ...(trait ? [trait.line] : [])],
+        note: trait?.answer,
+      }));
+      body.appendChild(row);
+    }
+
+    if (named.length > 0) {
+      const namedHead = document.createElement('div');
+      namedHead.className = 'bag-head';
+      namedHead.textContent = 'Named creatures';
+      body.appendChild(namedHead);
+      for (const id of named) {
+        if (!MOBS[id]) continue;
+        const row = document.createElement('div');
+        row.className = 'stat-row';
+        row.innerHTML = `<span class="named">${getMob(id).name}</span><span class="v">✓</span>`;
+        body.appendChild(row);
+      }
+    }
+  }
+
   toggleRealm(): void {
     const visible = this.els.realmWindow.style.display === 'block';
     this.els.realmWindow.style.display = visible ? 'none' : 'block';
@@ -1909,6 +2134,14 @@ export class Hud {
         this.renderCharacter();
       });
       row.appendChild(btn);
+      // What it actually does, for *this* class.
+      //
+      // The panel showed "Strength 25 (8+17)" and a plus button, and nothing
+      // anywhere said whether Strength was worth anything to a Priest. A
+      // player spending a point they cannot unspend deserves to know what they
+      // are buying, and "the primary attribute is the only branch in the
+      // combat maths" is exactly the sort of thing a game knows and never says.
+      this.tip(row, () => this.attributeTip(label, key));
       body.appendChild(row);
     };
 
@@ -2258,6 +2491,11 @@ interface TipContent {
   foot?: string;
 }
 
+/** An attribute's current total, gear included. */
+function attrsOf(player: Entity, key: keyof Attributes): number {
+  return player.attributes?.[key] ?? 0;
+}
+
 function renderTip(c: TipContent): string {
   const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
   const parts = [`<div class="tip-title ${c.titleClass ?? ''}">${esc(c.title)}</div>`];
@@ -2393,6 +2631,8 @@ const TEMPLATE = `
     <div id="effects"></div>
   </div>
 
+  <div id="belt" class="hoverable"></div>
+
   <div id="target-frame" class="frame panel hoverable">
     <div class="frame-name"><span id="target-name"></span><span id="target-level" class="frame-level"></span></div>
     <div id="target-hp" class="bar bar-hp"><div class="bar-fill"></div><div class="bar-label"></div></div>
@@ -2442,6 +2682,11 @@ const TEMPLATE = `
     <div id="realm-body"></div>
   </div>
 
+  <div id="journal-window" class="window panel clickable">
+    <h3>The Reckoning</h3>
+    <div id="journal-body"></div>
+  </div>
+
   <div id="quest-log" class="window panel clickable">
     <h3>Quest Log</h3>
     <div id="quest-log-body"></div>
@@ -2474,7 +2719,7 @@ const TEMPLATE = `
   <div id="help">
     <b>WASD</b> move &nbsp; <b>Drag</b> or <b>←→</b> look &nbsp; <b>Scroll</b> zoom<br />
     <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–0</b> / <b>⇧1–6</b> skills &nbsp; <b>T</b> auto-attack<br />
-    <b>F</b> loot / search &nbsp; <b>E</b> trade &nbsp; <b>G</b> travel &nbsp; <b>J</b> quests<br />
-    <b>H</b> take horse &nbsp; <b>R</b> ride &nbsp; <b>K</b> realm &nbsp; <b>M</b> map &nbsp; <b>V</b> reclaim &nbsp; <b>N</b> mute &nbsp; <b>[ ]</b> volume &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
+    <b>Q</b>/<b>X</b> drink &nbsp; <b>F</b> loot / search &nbsp; <b>E</b> trade &nbsp; <b>G</b> travel &nbsp; <b>J</b> quests<br />
+    <b>H</b> take horse &nbsp; <b>R</b> ride &nbsp; <b>K</b> realm &nbsp; <b>B</b> reckoning &nbsp; <b>M</b> map &nbsp; <b>V</b> reclaim &nbsp; <b>N</b> mute &nbsp; <b>[ ]</b> volume &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
   </div>
 `;

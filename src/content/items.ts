@@ -813,3 +813,40 @@ export const QUALITY_COLORS: Record<ItemQuality, string> = {
   rare: '#4aa3ff',
   epic: '#c77dff',
 };
+
+/**
+ * The best thing of its family in somebody's bag, by what it is worth.
+ *
+ * "Best" is deliberately the item's own value rather than its healing or its
+ * buff: value is the one number every consumable has, it already tracks tier,
+ * and it means a belt never has to know what a new kind of draught does.
+ *
+ * Lives here rather than in the input handler because the sim will want it too
+ * the day anything drinks on its own — and because a belt that picks a
+ * different item from the one the tooltip describes is a belt nobody trusts.
+ * On this side of the pair because `items.ts` already imports `consumables.ts`
+ * and the reverse would be a cycle.
+ */
+export function bestDrink(
+  entity: { level?: number; inventory?: Array<{ itemId: string; qty: number }> },
+  family: 'potion' | 'elixir',
+): string | null {
+  let best: string | null = null;
+  let worth = -1;
+  for (const stack of entity.inventory ?? []) {
+    if (stack.qty <= 0) continue;
+    const item = ITEMS[stack.itemId];
+    if (item?.consumable?.family !== family) continue;
+    // Only what they can actually drink. Without this the belt offered a
+    // level-66 salve to a level-24 character and the key refused it — and a
+    // belt that shows you something and then will not use it is worse than an
+    // empty one, because the empty one at least tells the truth.
+    if ((item.reqLevel ?? 1) > (entity.level ?? 1)) continue;
+    if (item.value > worth) {
+      worth = item.value;
+      best = item.id;
+    }
+  }
+  return best;
+}
+

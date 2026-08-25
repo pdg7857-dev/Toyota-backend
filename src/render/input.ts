@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getMob } from '../content/mobs.js';
+import { bestDrink } from '../content/items.js';
 import type { Command, EntityId } from '../sim/types.js';
 import type { World } from '../sim/world.js';
 import type { Hud } from './hud.js';
@@ -104,6 +105,12 @@ export class InputController {
       case 'KeyF':
         this.lootNearest();
         break;
+      case 'KeyQ':
+        this.drink('potion');
+        break;
+      case 'KeyX':
+        this.drink('elixir');
+        break;
       case 'KeyE':
         this.talkToNearestVendor();
         break;
@@ -116,6 +123,9 @@ export class InputController {
         break;
       case 'KeyK':
         this.hud.toggleRealm();
+        break;
+      case 'KeyB':
+        this.hud.toggleJournal();
         break;
       case 'KeyH':
         this.captureNearestHorse();
@@ -353,6 +363,29 @@ export class InputController {
     }
     const stable = player.stable ?? [];
     if (stable.length > 0) this.emit({ t: 'mount', mountId: stable[stable.length - 1]! });
+  }
+
+  /**
+   * Drink the best thing on your belt.
+   *
+   * There are sixteen consumables in this game, a two-clock cooldown system
+   * built so chaining them is impossible, and a balance test that measures
+   * exactly how much they save you — and until now **no key drank one**. The
+   * only way to use the answer to a fight going wrong was to open the
+   * backpack, find the item and click it, which nobody has ever done while
+   * something was hitting them.
+   *
+   * One key per family, because the families are the decision the cooldowns
+   * were built to create: a potion is "I am about to die", an elixir is "this
+   * fight is going to be hard".
+   */
+  private drink(family: 'potion' | 'elixir'): void {
+    const best = bestDrink(this.world.player, family);
+    if (!best) {
+      this.hud.log(`No ${family} in your bag.`, 'log-bad');
+      return;
+    }
+    this.emit({ t: 'use', itemId: best });
   }
 
   private lootNearest(): void {

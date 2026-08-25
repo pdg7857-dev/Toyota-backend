@@ -223,8 +223,14 @@ await page.evaluate(async () => {
   await new Promise((r) => setTimeout(r, 1200));
   clearInterval(calm);
 });
-await page.hover('#target-frame');
-await wait(500);
+await page.evaluate(() => {
+  const el = document.querySelector('#target-frame');
+  const b = el.getBoundingClientRect();
+  const at = { clientX: b.left + 30, clientY: b.top + 14, bubbles: true };
+  el.dispatchEvent(new MouseEvent('mouseenter', at));
+  el.dispatchEvent(new MouseEvent('mousemove', at));
+});
+await wait(400);
 await page.screenshot({ path: join(OUT, '8-trait.png') });
 console.log('trait:', await page.evaluate(() => ({
   frame: document.querySelector('#target-threat')?.textContent,
@@ -273,5 +279,103 @@ if (locked) {
   console.log('locked tip:', await page.evaluate(
     () => document.querySelector('#tip')?.textContent?.trim().slice(0, 250) ?? '(none)'));
 }
+
+
+// The panels, at a point where a player has decisions to make.
+await page.evaluate(async () => {
+  const g = window.__game;
+  const me = g.world.player;
+  me.level = 24;
+  me.unspentPoints = 12;
+  me.skillPoints = 5;
+  me.gold = 5400;
+  me.xp = 400;
+  for (const def of g.allMobs()) def.aggroRadius = 0;
+  const items = Object.values(g.allItems()).filter((i) => g.canUse(i.id));
+  me.inventory = items.slice(0, 10).map((i) => ({ itemId: i.id, qty: 1 }));
+  await new Promise((r) => setTimeout(r, 600));
+});
+// Kill a few things first, so the reckoning has something in it.
+await page.evaluate(async () => {
+  const g = window.__game;
+  const me = g.world.player;
+  for (const def of g.allMobs()) def.aggroRadius = 0;
+  const kinds = new Map();
+  for (const e of g.world.entities.values()) {
+    if (e.kind !== 'mob' || e.dead) continue;
+    const def = g.mobOf(e.defId);
+    if (def.stars >= 5 || def.horse) continue;
+    kinds.set(def.id, (kinds.get(def.id) ?? 0) + 1);
+  }
+  // Straight into the record: this is a look at the panel, not a play session.
+  me.slain = {};
+  let n = 0;
+  for (const [id] of [...kinds].slice(0, 9)) {
+    const base = g.mobOf(id);
+    me.slain[base.starOf ?? base.rareOf ?? id] = 6 + n * 37;
+    n++;
+  }
+  me.record = { deaths: 4, biggestHit: 812, worstTaken: 344 };
+  me.questsDone = ['fenmarch_story_1', 'fenmarch_story_2'];
+  await new Promise((r) => setTimeout(r, 300));
+});
+
+for (const [key, name] of [['c', 'character'], ['i', 'inventory'], ['j', 'quests'], ['k', 'realm'], ['b', 'reckoning']]) {
+  await page.keyboard.press(key);
+  await wait(700);
+  await page.screenshot({ path: join(OUT, `9-${name}.png`) });
+  await page.keyboard.press(key);
+  await wait(250);
+}
+console.log('panels: shot');
+
+// The belt, and the character panel's reachable bottom.
+console.log('belt:', await page.evaluate(async () => {
+  const g = window.__game;
+  const me = g.world.player;
+  const usable = (f) =>
+    Object.values(g.allItems()).filter(
+      (i) => i.consumable?.family === f && (i.reqLevel ?? 1) <= me.level,
+    );
+  const potions = usable('potion');
+  const elixirs = usable('elixir');
+  me.inventory = [
+    { itemId: potions[potions.length - 1].id, qty: 4 },
+    { itemId: elixirs[0].id, qty: 2 },
+  ];
+  me.health = g.world.statsOf(me).maxHealth * 0.3;
+  await new Promise((r) => setTimeout(r, 400));
+  const slots = [...document.querySelectorAll('#belt .belt-slot')].map((s) => s.textContent);
+  // Counted out of the bag, not read off the health bar: out of combat you
+  // regenerate 4% a second, so "health went up" is true whether or not the key
+  // did anything at all.
+  const before = (me.inventory ?? []).find((s) => s.itemId === potions[potions.length - 1].id)?.qty ?? 0;
+  window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ', bubbles: true }));
+  await new Promise((r) => setTimeout(r, 500));
+  const after = (me.inventory ?? []).find((s) => s.itemId === potions[potions.length - 1].id)?.qty ?? 0;
+  const panel = document.querySelector('#right-panels');
+  return {
+    slots,
+    drank: after < before,
+    onCooldown: (me.consumableCooldowns?.potion ?? 0) > 0,
+    panelScrolls: getComputedStyle(panel).pointerEvents !== 'none',
+    itemLevel: potions[potions.length - 1].reqLevel,
+    myLevel: me.level,
+    log: document.querySelector('#log')?.textContent?.replace(/\s+/g, ' ').slice(-120),
+  };
+}));
+
+// Consumables: can you drink one without opening a bag?
+console.log('potions:', await page.evaluate(() => {
+  const g = window.__game;
+  const help = document.querySelector('#help')?.textContent ?? '';
+  const potions = Object.values(g.allItems()).filter((i) => i.consumable);
+  return {
+    inGame: potions.length,
+    helpMentions: /potion|drink|quaff/i.test(help),
+    // Bound to anything?
+    keys: help.match(/\b[A-Z]\b/g)?.join('') ?? '',
+  };
+}));
 
 await browser.close();

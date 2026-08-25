@@ -888,6 +888,76 @@ puts a small unlit gold mark over a corpse that still has something on it, so
 "there is loot over there" is answered by looking rather than by walking back to
 check. `smoke` asserts it at forty metres, well past any nameplate.
 
+## The reckoning
+
+The whole design of this game is *twenty-eight thousand kills*, and it kept no
+record of a single one of them. A grind you cannot see is a grind that feels
+like nothing is happening — and it is the number this design is proudest of,
+hidden from the only person doing it.
+
+**B** opens it. Creatures killed, kinds met, named creatures put down,
+landmarks opened, work finished, times you fell, and the hardest hit you have
+landed and taken.
+
+Three things make it more than bookkeeping:
+
+- **It counts creatures, not ratings.** A Gaunt Bog Wolf, a Snarling one and
+  `Mirefang the Bog Wolf` are all Bog Wolves. That is the same unwrapping
+  quests already use, and for the same reason: a player thinks in creatures,
+  and a bestiary that lists them separately is a list of internal ids.
+- **The named ones are kept apart.** A rare is a once-an-hour creature, and
+  losing it in a tally of four hundred wolves is losing the only part of the
+  tally anybody would want to look at.
+- **It is a bestiary.** What a creature *does* is written down the first time
+  you kill one, so a trait is learned by playing rather than by reading a
+  tooltip on something already hitting you.
+
+All of it rides on the player entity, which is plain data — so it saves,
+catches up and round-trips with everything else and needed no new plumbing.
+
+## The answer you could not reach
+
+Sixteen consumables, a two-clock cooldown system built so that chaining them is
+impossible, drop tables that feed them, and a balance test that measures
+exactly how much they save you — and **no key drank one**. The only way to
+reach the answer to a fight going wrong was to open the backpack, find the
+item and click it, which nobody has ever done while something was hitting them.
+
+`Q` and `X` now drink the best potion and the best elixir you are carrying, and
+the belt above the skill bar shows what they are. Shown as well as bound,
+because a key nobody can see is a key nobody uses — and what is worth seeing is
+the **cooldown**, which is the entire decision the two clocks were built to
+create.
+
+`bestDrink` picks by the item's own value, because value is the one number
+every consumable has and it already tracks tier — so a belt never has to know
+what a new kind of draught does. It also filters by `reqLevel`, which the first
+version did not: it offered a level-66 salve to a level-24 character and the
+key then refused it, and a belt that shows you something it will not use is
+worse than an empty one, because the empty one at least tells the truth.
+
+### Two things nobody could reach at all
+
+Both the same bug, and both invisible to every assertion, because the *content*
+was there and only the *hover* was not. The HUD is `pointer-events: none` so
+the world behind it stays clickable, and anything that wants a pointer has to
+say so:
+
+- **The target frame's tooltip.** It carried the trait's answer and could never
+  be opened.
+- **The character sheet's scroll.** `#right-panels` is `overflow-y: auto` with
+  a max height, and the wheel could not reach it — so at level 24, with twelve
+  attribute points and five skill points to spend, half the skills you could
+  rank were below the fold and unreachable.
+
+`.hoverable` is the marker, and `smoke` now asserts the computed
+`pointer-events` on both rather than only the text inside them.
+
+A tooltip also needs putting away by something other than `mouseleave`: a panel
+that repaints while you are hovering it takes its own node out of the document,
+the event never fires, and the tip hangs over nothing. `checkTip` drops it the
+frame its element leaves the page.
+
 ## Nothing told you what anything did
 
 Sixteen skill slots, ten of them reading `Lv 44` and nothing else. A bagful of
@@ -1527,6 +1597,14 @@ arena has no `dragonId`, the respawn guard keyed off the entity rather than the
 definition, and `respawnMs: 0` meant *respawn immediately*: it healed to full on
 the tick it died. A number that does not move when you change the inputs is not
 a balance problem, it is a bug.
+
+**`smoke` waits for the game to be running, not for a stopwatch.** Every check
+was written against a fixed 1500ms boot, and the first run after a rebuild is
+slower than that — a cold HTTP cache and a module graph nobody has parsed
+before — so twenty-one timing-sensitive checks failed on the first run and
+passed on the second. A suite that fails a fifth of itself at random is a suite
+people learn to ignore. It now gates on the world actually ticking with a zone
+built around the player.
 
 Always run `smoke` for renderer or HUD changes. Unit tests cannot see a panel
 overlapping another panel, nameplate clutter, or a tree planted through a boss —
