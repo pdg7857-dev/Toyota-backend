@@ -17,6 +17,7 @@ import {
   TICK_MS,
   addAttributes,
   applyItem,
+  adventurerStats,
   deriveMobStats,
   unscaleAdd,
   deriveStats,
@@ -98,12 +99,17 @@ import {
   CHATTER_INTERVAL_SEC,
   CHATTER_MIN_GAP_MS,
   DEATH_CHATTER,
-  DEATH_INTERVAL_SEC,
   DRAGON_CHATTER,
+  DROVE_OFF_CHATTER,
+  FIGHT_FLOOR,
+  FIGHT_MS,
   FRONT_CHATTER,
+  GIVE_UP_AT,
   GRATS_CHATTER,
   GRATS_RANGE,
   IDLE_CHATTER,
+  REST_SHARE,
+  YIELD_MARGIN,
 } from '../content/adventurers.js';
 import {
   CAPTURE_RANGE,
@@ -626,20 +632,6 @@ export class World {
   }
 
   /** What is standing closest to a point, for chatter that names things. */
-  private nearestMobName(pos: Vec2): string | null {
-    let best: string | null = null;
-    let bestDist = 30;
-    for (const e of this.entities.values()) {
-      if (e.kind !== 'mob' || e.dead) continue;
-      const d = dist(pos.x, pos.z, e.pos.x, e.pos.z);
-      if (d < bestDist) {
-        bestDist = d;
-        best = e.name;
-      }
-    }
-    return best;
-  }
-
   /** A stable per-zone number, so the same people are in the same zone. */
   private zoneSeed(): number {
     let h = 0;
@@ -663,6 +655,7 @@ export class World {
     const camps = this.campCentres();
     for (const e of npcs) {
       e.npcUntilMs = (e.npcUntilMs ?? 0) - TICK_MS;
+      this.restNpc(e);
 
       if ((e.npcUntilMs ?? 0) <= 0 && camps.length > 0) {
         // Bored of this camp; pick another and walk there.
@@ -670,6 +663,8 @@ export class World {
         e.npcGoal = { x: next.x + this.rng.int(-6, 6), z: next.z + this.rng.int(-6, 6) };
         e.npcUntilMs = CAMP_MINUTES * 60000 * (0.6 + this.rng.next());
       }
+
+      if (this.tickFight(e)) continue;
 
       const goal = e.npcGoal;
       if (!goal) continue;
@@ -681,22 +676,136 @@ export class World {
         e.facing = Math.atan2(goal.x - e.pos.x, goal.z - e.pos.z);
         e.npcBusy = false;
       } else {
-        // Standing in a camp: they are "fighting" it, abstractly.
+        // Standing in a camp. They used to "fight" it abstractly, which from
+        // sixty metres is a person turning slowly on the spot beside eight
+        // creatures that have not noticed them. Now they pick one and pull it.
         e.npcBusy = true;
         e.facing += 0.02;
-        // And occasionally losing. Other people failing is a bigger part of a
-        // world feeling inhabited than other people succeeding.
-        if (this.rng.chance(TICK_MS / (DEATH_INTERVAL_SEC * 1000))) {
-          // Said by the one it happened to, not by whoever the roll picked.
-          // Chatter that does not belong to the person saying it is the tell.
-          const near = this.nearestMobName(e.pos);
-          if (near) this.say(e, this.pick(DEATH_CHATTER).replace('%s', near));
-          e.npcUntilMs = 0;
-        }
+        this.startFight(e);
       }
     }
 
     this.tickChatter(npcs);
+  }
+
+  /**
+   * One of them picks a creature and pulls it.
+   *
+   * Never a boss, never a horse, never something already fighting anything —
+   * the first is not theirs to take on, the second is not a fight at all, and
+   * the third is either the player's or another adventurer's.
+   */
+  private startFight(npc: Entity): void {
+    if (npc.npcFoe !== undefined) return;
+    if (npc.health < this.statsOf(npc).maxHealth * 0.8) return;
+    // Once a second each, staggered by id. Looking for a creature means
+    // walking every entity in the zone, and four people doing that sixty times
+    // a second is a hundred and forty thousand distance checks — the same
+    // lesson `tickPacks` had to learn, and worth nothing at all here: nobody
+    // can see the difference between picking a fight now and picking one in
+    // half a second.
+    if ((this.tickCount + npc.id) % 20 !== 0) return;
+    const player = this.player;
+
+    let best: Entity | undefined;
+    let bestGap = 26;
+    for (const e of this.entities.values()) {
+      if (e.kind !== 'mob' || e.dead) continue;
+      if (e.targetId !== null || e.aiState === 'chasing' || e.aiState === 'attacking') continue;
+      const def = getMob(e.defId!);
+      if (def.stars >= BOSS_STARS || def.horse || def.dragon) continue;
+      // Not one the player could be about to walk into. Whose creature it is
+      // has to be decided before the swing, not after.
+      if (dist(e.pos.x, e.pos.z, player.pos.x, player.pos.z) < def.aggroRadius + YIELD_MARGIN) {
+        continue;
+      }
+      const gap = dist(e.pos.x, e.pos.z, npc.pos.x, npc.pos.z);
+      if (gap >= bestGap) continue;
+      bestGap = gap;
+      best = e;
+    }
+    if (!best) return;
+
+    npc.npcFoe = best.id;
+    npc.npcFightMs = FIGHT_MS;
+    npc.autoAttack = true;
+    npc.targetId = best.id;
+    best.threat = best.threat ?? {};
+    best.threat[npc.id] = (best.threat[npc.id] ?? 0) + 1;
+    best.targetId = npc.id;
+    best.aiState = 'chasing';
+    best.roamGoal = null;
+    this.events.push({ t: 'aggro', mobId: best.id, targetId: npc.id });
+  }
+
+  /**
+   * Run a fight one of them is in, and end it when it should end.
+   *
+   * Returns true while they are busy, so the walking half leaves them alone.
+   * Every way out goes through `leashMob`, which is the game's own answer to
+   * "that fight is over": home, threat dropped, healed to full. The creature a
+   * player walks up to is therefore always the creature they would have found.
+   */
+  private tickFight(npc: Entity): boolean {
+    const foe = this.entities.get(npc.npcFoe ?? -1);
+    if (npc.npcFoe === undefined) return false;
+    const stats = this.statsOf(npc);
+
+    // The player is near enough to want it: it is theirs, and it is whole.
+    const player = this.player;
+    const near =
+      foe && dist(foe.pos.x, foe.pos.z, player.pos.x, player.pos.z) <
+        getMob(foe.defId!).aggroRadius + YIELD_MARGIN;
+    const taken = foe && (foe.threat?.[player.id] ?? 0) > 0;
+
+    npc.npcFightMs = (npc.npcFightMs ?? 0) - TICK_MS;
+    const worn = npc.health <= stats.maxHealth * GIVE_UP_AT;
+    // Reaching the floor *ends* it rather than capping it. A clamp alone meant
+    // every fight drove the creature down and then sat on it for another half
+    // a minute, with the bar visibly refusing to move.
+    const beaten = !!foe && foe.health <= this.statsOf(foe).maxHealth * FIGHT_FLOOR + 0.5;
+    const over =
+      !foe || foe.dead || near || taken || worn || beaten || (npc.npcFightMs ?? 0) <= 0;
+
+    if (over) {
+      if (foe && !foe.dead && foe.targetId === npc.id) {
+        this.leashMob(foe);
+        // Whole again on the spot, rather than on arriving home the way an
+        // ordinary leash heals. The walk back is too slow: the reason the
+        // fight ended is usually that the player is nearly in range, and a
+        // creature that aggros them halfway home arrives wounded — which is a
+        // gift rather than a theft, and still not the creature they would have
+        // found. The break happens `YIELD_MARGIN` outside its own aggro, so
+        // nobody is close enough to watch the bar jump.
+        foe.health = this.statsOf(foe).maxHealth;
+        foe.effects = [];
+        foe.firedAbilities = [];
+      }
+      npc.npcFoe = undefined;
+      npc.npcFightMs = 0;
+      npc.autoAttack = false;
+      npc.targetId = null;
+      npc.npcBusy = false;
+      // Nothing follows them out of it. A venom stack that outlived the fight
+      // would tick one of them down in a field somewhere with nobody watching.
+      npc.effects = [];
+      // Losing is the half worth watching. They cannot win — see
+      // `content/adventurers.ts` — so the only fights that end any other way
+      // are the ones somebody else wanted.
+      if (worn) {
+        npc.npcUntilMs = 0;
+        if (foe) this.say(npc, this.pick(DEATH_CHATTER).replace('%s', foe.name));
+      } else if (beaten && foe) {
+        // And the other way round, because a population that only ever reports
+        // losing is not people, it is a running joke.
+        this.say(npc, this.pick(DROVE_OFF_CHATTER).replace('%s', foe.name));
+      }
+      return false;
+    }
+
+    npc.npcBusy = true;
+    npc.facing = Math.atan2(foe!.pos.x - npc.pos.x, foe!.pos.z - npc.pos.z);
+    return true;
   }
 
   /**
@@ -705,6 +814,13 @@ export class World {
    * Quiet on purpose. The fastest way to make a fake population feel fake is
    * to make it chatty.
    */
+  /** They get their wind back between fights. Nothing else heals them. */
+  private restNpc(npc: Entity): void {
+    if (npc.npcFoe !== undefined) return;
+    const max = this.statsOf(npc).maxHealth;
+    npc.health = Math.min(max, npc.health + max * REST_SHARE * (TICK_MS / 1000));
+  }
+
   private tickChatter(npcs: Entity[]): void {
     const perTick = TICK_MS / (CHATTER_INTERVAL_SEC * 1000);
     if (!this.rng.chance(perTick)) return;
@@ -1277,6 +1393,10 @@ export class World {
    */
   statsOf(e: Entity): DerivedStats {
     let stats: DerivedStats;
+    // An adventurer carries no gear and spends no points, so there is nothing
+    // to derive from — see `adventurerStats`. They needed one at all only once
+    // they started pulling real creatures.
+    if (e.kind === 'npc') return adventurerStats(e.level);
     if (e.kind === 'mob') {
       const def = getMob(e.defId!);
       stats = deriveMobStats(def);
@@ -2346,8 +2466,10 @@ export class World {
       const target = this.entities.get(e.targetId ?? -1);
       if (!target || target.dead || target.id === e.id) continue;
       // Non-combatants are not swung at, not just unhurt by it. A swing
-      // animation that can never land is worse than no swing at all.
-      if (target.kind === 'vendor' || target.kind === 'npc') continue;
+      // animation that can never land is worse than no swing at all — which is
+      // also why a creature an adventurer pulled *is* swung at: that one lands.
+      if (target.kind === 'vendor') continue;
+      if (target.kind === 'npc' && e.kind !== 'mob') continue;
       const stats = this.statsOf(e);
       if (dist(e.pos.x, e.pos.z, target.pos.x, target.pos.z) > stats.attackRange) continue;
 
@@ -2525,10 +2647,24 @@ export class World {
     if (target.dead) return;
     // Traders are scenery with a shop attached, not combatants.
     if (target.kind === 'vendor') return;
-    // Neither are the other adventurers. They are allowed to be *seen* and
-    // nothing else: a population you can kill is a population you will kill,
-    // and then the world is empty again and it was your fault.
-    if (target.kind === 'npc') return;
+    // Neither are the other adventurers — to *you*. A population you can kill
+    // is a population you will kill, and then the world is empty again and it
+    // was your fault. A creature they picked a fight with is a different
+    // matter: that is the fight they are there to be seen having.
+    if (target.kind === 'npc' && this.entities.get(sourceId)?.kind !== 'mob') return;
+    // And nothing can finish one either. The rule is symmetrical on purpose:
+    // an adventurer who dies is an adventurer who is *gone*, and a population
+    // that quietly empties itself over an evening is worse than one that never
+    // fought at all. They are worn down and they walk away — see `GIVE_UP_AT`,
+    // which a single heavy hit can otherwise skip straight past.
+    if (target.kind === 'npc') amount = Math.max(0, Math.min(amount, target.health - 1));
+    // And nothing an adventurer does can finish a creature. Not "they usually
+    // don't" — there is no path from their swing to `kill`, so a drop, a quest
+    // tick or a scrap of territory can never go to somebody who is not you.
+    if (target.kind === 'mob' && this.entities.get(sourceId)?.kind === 'npc') {
+      const floor = this.statsOf(target).maxHealth * FIGHT_FLOOR;
+      amount = Math.max(0, Math.min(amount, target.health - floor));
+    }
     target.health -= amount;
     this.events.push({
       t: 'damage',

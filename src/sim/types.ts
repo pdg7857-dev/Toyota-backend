@@ -757,6 +757,12 @@ export interface Entity {
   roused?: boolean;
   /** Milliseconds left of being roused, if you walk away rather than fight. */
   rousedMs?: number;
+  /**
+   * The creature an adventurer is currently fighting, and how long they will
+   * stay on it. See `content/adventurers.ts` — they cannot ever finish one.
+   */
+  npcFoe?: EntityId;
+  npcFightMs?: number;
   /** Set on the entity a dragon is currently being represented by. */
   dragonId?: string;
   aiState?: 'idle' | 'chasing' | 'attacking' | 'returning' | 'dead';

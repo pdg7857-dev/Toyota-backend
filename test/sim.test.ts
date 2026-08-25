@@ -39,7 +39,10 @@ import {
   ADVENTURERS,
   ADVENTURERS_PER_ZONE,
   CHATTER_INTERVAL_SEC,
+  FIGHT_FLOOR,
+  GIVE_UP_AT,
   GRATS_RANGE,
+  YIELD_MARGIN,
 } from '../src/content/adventurers.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { grindMobFor, killsForLevel } from './pace.js';
@@ -2615,22 +2618,121 @@ describe('the other adventurers', () => {
     }
   });
 
-  it('never touches your mobs', () => {
-    // The rule the whole feature stands on. An adventurer that tags the
-    // creature you needed is not atmosphere, it is a competitor.
+  it('pulls real creatures, and never takes one from you', () => {
+    // The rule the whole feature stands on, and the only interesting question
+    // once they fight for real: an adventurer that tags the creature you
+    // needed is not atmosphere, it is a competitor.
+    //
+    // Four things are watched at once, because the failure modes are all
+    // "it worked, and it took something": a kill, a drop, a creature left
+    // standing wounded for you to walk into, or one picked from under you.
     const world = new World({ seed: 901, zone: getZone('fenmarch'), classId: 'warrior' });
+    const player = world.player;
     const mobs = [...world.entities.values()].filter((e) => e.kind === 'mob');
-    const before = mobs.map((m) => m.health);
+    const people = peopleIn(world);
 
-    const events = world.advance(4 * 60 * 1000);
+    let deaths = 0;
+    const died: string[] = [];
+    let loot = 0;
+    let swungAt = 0;
+    const fought = new Set<number>();
+    let lowest = 1;
+    let stolen = 0;
+    let woundedAndFree = 0;
+    const ends: string[] = [];
+    const engagedNow = new Map<number, number>();
 
-    expect(events.some((e) => e.t === 'damage')).toBe(false);
-    expect(events.some((e) => e.t === 'death')).toBe(false);
-    expect(events.some((e) => e.t === 'lootGained')).toBe(false);
-    mobs.forEach((mob, i) => {
-      expect(mob.health).toBe(before[i]);
-      expect(mob.dead).toBe(false);
-    });
+    for (let i = 0; i < 12 * 60 * 20; i++) {
+      for (const ev of world.tick()) {
+        if (ev.t === 'death') {
+          deaths++;
+          died.push(`${world.entity(ev.entityId)?.kind ?? '?'} ${world.entity(ev.entityId)?.name}`);
+        }
+        if (ev.t === 'lootGained') loot++;
+        if (ev.t === 'damage' && world.entity(ev.sourceId)?.kind === 'npc') {
+          swungAt++;
+          fought.add(ev.targetId);
+        }
+      }
+      if (i % 20 !== 0) continue;
+
+      const engaged = new Set(people.map((p) => p.npcFoe).filter((id) => id !== undefined));
+      for (const p of people) {
+        const was = engagedNow.get(p.id);
+        if (p.npcFoe === undefined && was !== undefined) {
+          const mob = world.entity(was);
+          const left = p.health / world.statsOf(p).maxHealth;
+          ends.push(left <= GIVE_UP_AT + 0.03 ? 'worn down' : 'gave it up');
+          void mob;
+          engagedNow.delete(p.id);
+        } else if (p.npcFoe !== undefined) {
+          engagedNow.set(p.id, p.npcFoe);
+        }
+      }
+      for (const mob of mobs) {
+        const max = world.statsOf(mob).maxHealth;
+        if (engaged.has(mob.id)) {
+          lowest = Math.min(lowest, mob.health / max);
+          const reach = getMob(mob.defId!).aggroRadius + YIELD_MARGIN;
+          if (Math.hypot(mob.pos.x - player.pos.x, mob.pos.z - player.pos.z) < reach) stolen++;
+        } else if (mob.health < max - 0.5 && mob.aiState !== 'returning') {
+          // Nobody is on it and it is not walking home: that is a wounded
+          // creature left lying about for the player to find, which is the
+          // quiet version of taking one.
+          woundedAndFree++;
+        }
+      }
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `\n  twelve minutes of other people: ${fought.size} creature(s) pulled, ` +
+        `${swungAt} blows landed, worst off any of them got ` +
+        `${Math.round(lowest * 100)}% (floor ${Math.round(FIGHT_FLOOR * 100)}%)` +
+        `\n    ${ends.length} fight(s): ` +
+        [...new Set(ends)].map((k) => `${ends.filter((e) => e === k).length} ${k}`).join(', '),
+    );
+
+    expect(fought.size, 'nobody pulled anything in four minutes').toBeGreaterThan(0);
+    expect(deaths, `something died: ${died.join(', ')}`).toBe(0);
+    expect(loot, 'somebody looted something').toBe(0);
+    expect(lowest, 'they got one below the floor').toBeGreaterThanOrEqual(FIGHT_FLOOR - 0.01);
+    expect(stolen, 'one was fought inside the reach of the player').toBe(0);
+    expect(woundedAndFree, 'a wounded creature was left lying about').toBe(0);
+    for (const mob of mobs) expect(mob.dead).toBe(false);
+  });
+
+  it('gives the creature straight back when you come near', () => {
+    // The half that makes the rule true rather than merely likely. Whatever
+    // they were doing to it, the creature a player walks up to is the creature
+    // they would have found: leashMob sends it home and heals it to full,
+    // which is this game's own answer to "that fight is over" rather than a
+    // special case pretending to be one.
+    const world = new World({ seed: 907, zone: getZone('fenmarch'), classId: 'warrior' });
+    const player = world.player;
+    const people = peopleIn(world);
+
+    let foe: Entity | undefined;
+    for (let i = 0; i < 3 * 60 * 20 && !foe; i++) {
+      world.tick();
+      for (const p of people) {
+        const e = world.entity(p.npcFoe ?? -1);
+        if (e && e.health < world.statsOf(e).maxHealth * 0.9) foe = e;
+      }
+    }
+    expect(foe, 'nobody got a creature far enough into a fight').toBeDefined();
+
+    const hurt = foe!.health;
+    player.pos = { x: foe!.pos.x + 4, z: foe!.pos.z };
+    world.advance(300);
+
+    expect(people.some((p) => p.npcFoe === foe!.id), 'they hung on to it').toBe(false);
+    // Whole again on the spot, not on arriving home: by the time it has walked
+    // back it has aggroed the player and arrived at their feet wounded, which
+    // is a gift rather than a theft and still not the creature they would have
+    // found.
+    expect(hurt).toBeLessThan(world.statsOf(foe!).maxHealth);
+    expect(foe!.health).toBe(world.statsOf(foe!).maxHealth);
   });
 
   it('cannot be fought, however hard you try', () => {

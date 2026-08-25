@@ -439,6 +439,17 @@ A level tells you what it gave you: the points, the skill it granted and the
 key that skill sits on, and — when you have reached the bottom of the next
 band — the road that just opened.
 
+## Other people
+
+Four other adventurers work each zone. They walk between camps, pull real
+creatures and fight them, drive some off and get worn down by others, and say
+things about it.
+
+They can never take anything from you. Nothing they do can finish a creature,
+and the moment you come near one they are fighting they let go of it and it is
+whole again — the creature you walk up to is always the creature you would have
+found. You cannot fight them either.
+
 ## Your own mark
 
 Click the map to put a mark down, and the arrow that has been pointing at your

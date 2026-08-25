@@ -1067,10 +1067,12 @@ Three rules, each of which a test enforces:
   never reach a real mob's health, threat or loot table. An adventurer that tags
   the creature you needed is not atmosphere, it is a competitor, and competing
   with a script is miserable.
-- **They cannot be fought.** Not "take no damage" — `applyDamage` refuses them
-  and `tickSwings` will not even swing, because a swing animation that can never
-  land reads as a broken game. A population you *can* kill is one you will kill,
-  and then the world is empty and it was your fault.
+- **They cannot be fought — by you.** Not "take no damage": `applyDamage`
+  refuses anything you aim at them and `tickSwings` will not even swing, because
+  a swing animation that can never land reads as a broken game. A population you
+  *can* kill is one you will kill, and then the world is empty and it was your
+  fault. A creature *they* picked a fight with is a different matter — see
+  below.
 - **They are quiet.** Ambient lines go through one shared floor
   (`CHATTER_MIN_GAP_MS`) rather than each source having its own rate. The first
   version did the obvious thing — idle chatter plus death chatter, each on its
@@ -1078,6 +1080,63 @@ Three rules, each of which a test enforces:
   volume was an accident of how many things could talk. Reactions to real events
   (a front falling, a dragon landing, your level) bypass the floor: they are rare
   by nature and are the half that makes them read as people rather than wallpaper.
+
+### And they pull real creatures now
+
+This was the flagged next step in this file for a long time, and the reason it
+stayed flagged is that the obvious version breaks the rule above. They fought
+*abstractly*: stood in a camp, span slowly on the spot, and occasionally
+announced that something had got them. From sixty metres that is a person
+turning in circles beside eight creatures that have not noticed them, which is
+worse than nobody being there — it says out loud that the population is a
+script.
+
+So a real creature leaves its mark, walks over, and the two of them trade real
+blows with real numbers. The rule is unchanged and is now enforced three ways
+rather than by pretending:
+
+- **They can never finish one.** `FIGHT_FLOOR` caps how far into a creature's
+  health an adventurer's damage can reach, so there is no path from their swing
+  to `kill` — and therefore none by which a drop, a quest tick, a scrap of
+  territory or a line in your reckoning can go to somebody who is not you.
+- **The creature you walk up to is the creature you would have found.** The
+  moment the player is within `aggroRadius + YIELD_MARGIN`, or takes any threat
+  on it, the adventurer lets go and it is whole again. *On the spot*, not on
+  arriving home the way an ordinary leash heals — the fight usually ends
+  because the player is nearly in range, and a creature that aggros them
+  halfway home arrives wounded, which is a gift rather than a theft and still
+  not the creature they would have found. The break happens a margin outside
+  the creature's own aggro, so nobody is close enough to watch the bar jump.
+- **Nothing in the system can finish anybody.** The floor is symmetrical: an
+  adventurer cannot be killed either, by a creature or by anything else. One
+  who dies is one who is *gone*, and a population that quietly empties itself
+  over an evening is worse than one that never fought at all. They are worn
+  down (`GIVE_UP_AT`) and they walk away saying so.
+
+What the numbers had to learn, again, and every first guess was wrong:
+
+- **A clamp is not an ending.** The first version capped the damage and nothing
+  else, so every fight drove the creature onto the floor and then sat on it for
+  another half a minute with the bar visibly refusing to move. Reaching the
+  floor *ends* the fight now: they beat it, it breaks off, and they get a line
+  for it. `DROVE_OFF_CHATTER` exists because a population that only ever
+  reports losing is not people, it is a running joke.
+- **One heavy hit skips straight past a give-up threshold.** `GIVE_UP_AT` is
+  35% of their health and a creature above their level takes more than that in
+  a swing. The test found it as a dead adventurer twelve minutes in — which is
+  exactly why the sample is twelve minutes and not four.
+- **A dot outlives the fight.** Venom left on somebody who has walked away
+  ticks them down in a field with nobody watching. Effects are cleared when
+  they let go.
+- **Looking for a creature means walking every entity in the zone.** Four
+  people doing that sixty times a second is a hundred and forty thousand
+  distance checks for nothing — the lesson `tickPacks` had to learn. They look
+  once a second, staggered by id, and nobody can tell.
+
+They still carry no gear and spend no points, so `adventurerStats` derives a
+block from their level alone, deliberately below what a player of that level
+fields: a population that out-fights you is a population that makes you the
+extra.
 
 A congratulation on a level is **proximity-gated** (`GRATS_RANGE`), which is the
 whole trick: a "grats" from nobody in particular is a system message wearing a
@@ -1874,10 +1933,7 @@ Dialogue, crafting, **gameplay-authoritative terrain**, pathfinding
 traders never run out and never restock, which wants an inventory model if the
 economy ever grows past four zones.
 
-The adventurers are the thinnest of the world layers and the one with the most
-obvious next step: they fight abstractly, so they never actually pull anything,
-and they have nothing to say about the player beyond a level. Giving them real
-pulls on real camps is the one change that would make them feel like people —
-and it is also the change that would break the rule they exist under, so it
-needs a way for them to fight *without* ever being the reason a spawn you wanted
-is missing.
+The adventurers pull real camps now — see "And they pull real creatures now".
+What is still thin is what they have to say *about the player*: a level, and
+nothing else. They have no opinion about the dragon you killed or the front you
+turned, which is the next thing worth giving them.

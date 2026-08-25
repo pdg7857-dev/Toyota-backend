@@ -19,9 +19,8 @@ import type { ClassId } from '../sim/types.js';
  *
  *  - **They never touch your loot or your kills.** An adventurer that tags the
  *    mob you needed is not atmosphere, it is a competitor, and competing with
- *    a script is miserable. They fight their own copies of the world's fights:
- *    damage between an adventurer and a mob is simulated abstractly and never
- *    touches the mob's real health.
+ *    a script is miserable. They pull real creatures now — see below — and the
+ *    creature always goes home to full before you can reach it.
  *  - **They are always plausible.** Their level tracks the zone they are in,
  *    so you never see a level 4 in Caer Dubh, and their chat is about things
  *    that are actually happening — the front that just flipped, the dragon
@@ -154,3 +153,68 @@ export const GRATS_CHATTER = [
 
 /** How close one of them has to be to congratulate you. */
 export const GRATS_RANGE = 34;
+
+
+/**
+ * What happens when one of them fights something.
+ *
+ * They used to stand in a camp and *abstractly* fight it: a spin, a timer, and
+ * a line when they lost. From sixty metres that is a person turning slowly on
+ * the spot beside eight creatures that have not noticed them, which is worse
+ * than nobody being there — it says out loud that the population is a script.
+ *
+ * So they pull. A real creature leaves its mark, walks over, and the two of
+ * them trade real blows with real numbers. The rule they exist under is
+ * unchanged and is enforced three ways rather than by pretending:
+ *
+ * - **They can never finish one.** An adventurer's damage stops at
+ *   `FIGHT_FLOOR` of the creature's health. Nothing they do can call `kill`,
+ *   so there is no path by which a kill, a drop, a quest tick or a scrap of
+ *   territory can go to somebody who is not you.
+ * - **The creature you walk up to is the creature you would have found.** The
+ *   moment the player is anywhere near, the adventurer breaks off and the
+ *   creature leashes — which sends it home and heals it to full, exactly as it
+ *   does when *you* run out of its reach. It is the game's own existing answer
+ *   to "that fight is over", not a special case pretending to be one.
+ * - **They lose.** Not always, but they cannot win, so eventually they are
+ *   worn down and walk away saying so. Other people failing is a much bigger
+ *   part of a world feeling inhabited than other people succeeding, and now it
+ *   is something you can watch rather than a line in a log.
+ */
+
+/**
+ * How far into a creature's health an adventurer can ever get.
+ *
+ * Reaching it **ends the fight** rather than capping it. The first version
+ * simply clamped the damage, and the measured result was every fight driving
+ * the creature onto the floor and then sitting on it for another half a minute
+ * — a health bar visibly refusing to move, which is the one thing a backstop
+ * must never be. Now they beat it down, it breaks off, and they get to say so.
+ */
+export const FIGHT_FLOOR = 0.3;
+
+/** How low they let themselves get before giving it up as a bad job. */
+export const GIVE_UP_AT = 0.35;
+
+/** How near the player has to be for them to leave the creature alone. */
+export const YIELD_MARGIN = 26;
+
+/** How long one of them will stay on a creature before wandering off. */
+export const FIGHT_MS = 45_000;
+
+/**
+ * Said when one of them drove a creature off. `%s` is the creature.
+ *
+ * The counterpart to `DEATH_CHATTER`, and needed the moment the fights became
+ * real: a population that only ever reports losing is not people, it is a
+ * running joke.
+ */
+export const DROVE_OFF_CHATTER = [
+  'that %s has had enough',
+  '%s legged it',
+  'saw off a %s, that will do',
+  'and stay off, %s',
+];
+
+/** How fast they get their wind back afterwards, as a share of health a second. */
+export const REST_SHARE = 0.02;

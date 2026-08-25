@@ -1674,7 +1674,67 @@ async function main() {
     };
   });
 
-  // The level you just earned.
+  // Other people, fighting real things.
+  //
+  // They used to stand in a camp and fight it abstractly, which from sixty
+  // metres is a person turning slowly on the spot beside eight creatures that
+  // have not noticed them. What only a browser can say is whether the fight
+  // reaches the screen: a swing animation, a creature that actually came, and
+  // — the part the whole rule rests on — a creature handed straight back.
+  const pulling = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const home = { x: me.pos.x, z: me.pos.z };
+    const people = [...g.world.entities.values()].filter((e) => e.kind === 'npc');
+    if (people.length === 0) return { ok: false, why: 'nobody in this zone' };
+
+    // Out of the way, so nothing yields on account of the player standing
+    // there — which is the behaviour being tested a few lines down.
+    me.pos = { x: g.world.zone.halfSize - 40, z: g.world.zone.halfSize - 40 };
+
+    let who = null;
+    const until = Date.now() + 30000;
+    while (!who && Date.now() < until) {
+      await new Promise((r) => setTimeout(r, 250));
+      who = people.find((p) => p.npcFoe !== undefined) ?? null;
+    }
+    if (!who) {
+      me.pos = home;
+      return { ok: false, why: 'nobody picked a fight in thirty seconds' };
+    }
+    const foe = g.world.entity(who.npcFoe);
+    const max = g.world.statsOf(foe).maxHealth;
+
+    // Let it run long enough to be a fight rather than a pull.
+    await new Promise((r) => setTimeout(r, 2500));
+    const hurt = foe.health < max;
+    const came = Math.hypot(foe.pos.x - who.pos.x, foe.pos.z - who.pos.z) < 8;
+    const view = g.views.get(who.id);
+    const anim = view?.anim?.current ?? '';
+
+    // And now the player is near enough to want it. Parked just inside the
+    // yield and just outside the creature's own aggro: standing on top of it
+    // measures the player killing it, which the first version of this did.
+    const reach = g.mobOf(foe.defId).aggroRadius;
+    me.pos = { x: foe.pos.x + reach + 18, z: foe.pos.z };
+    await new Promise((r) => setTimeout(r, 600));
+    const handedBack = who.npcFoe === undefined && foe.health >= max - 0.5;
+
+    me.pos = home;
+    return {
+      ok: true,
+      hurt,
+      came,
+      anim,
+      handedBack,
+      // Never theirs to finish, whatever else happens.
+      alive: !foe.dead,
+      foe: foe.name,
+      by: who.name,
+    };
+  });
+
+  // The level you just earned.  // The level you just earned.
   //
   // The payoff of the whole design, and until now one grey line in a nine-line
   // log — gone in seconds, usually mid-fight. What is worth asserting is not
@@ -2391,6 +2451,9 @@ async function main() {
     ['a skill lights up when its moment arrives', timing.ok && timing.nearlyDead > 0],
     ['and is dark the rest of the time', timing.healthy === 0],
     ['a kill is written down', reckoning.counted && reckoning.byBase],
+    ['somebody else pulls a real creature', pulling.ok && pulling.came],
+    ['and it is a real fight', pulling.hurt && pulling.alive],
+    ['and you get it back whole when you want it', pulling.handedBack],
     ['a level is a moment, not a log line', levelling.shown && levelling.reached],
     ['and says what it gave you', levelling.saysPoints],
     ['and names the skill it granted', levelling.saysTheSkill],
@@ -2530,6 +2593,7 @@ async function main() {
   console.log('timing:', JSON.stringify(timing));
   console.log('reckoning:', JSON.stringify(reckoning));
   console.log('levelling:', JSON.stringify(levelling));
+  console.log('pulling:', JSON.stringify(pulling));
   console.log('belt:', JSON.stringify(belt));
   console.log('traits:', JSON.stringify(traits));
   console.log('alive:', JSON.stringify(alive));

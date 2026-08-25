@@ -649,6 +649,41 @@ export function curveMobDamageRange(level: number): { min: number; max: number }
 }
 
 /** Mob stat block, derived the same way so player and mob math stay symmetric. */
+/**
+ * An adventurer's stat block, from their level and nothing else.
+ *
+ * They carry no gear and spend no points, so there is nothing to derive from.
+ * Fitted so one of them trades believably with a level-appropriate camp
+ * creature and is worn down by it over a minute or two — they are built to
+ * lose, because they are not allowed to win (see `content/adventurers.ts`),
+ * and a fight that ends in ten seconds is not a fight anybody watches.
+ *
+ * Deliberately below what a player of the same level fields. A population that
+ * out-fights you is a population that makes you feel like the extra.
+ */
+export function adventurerStats(level: number): DerivedStats {
+  const scales = ordinaryScales(level);
+  return {
+    maxHealth: Math.round((70 + level * 26) * scales.bulk),
+    maxEnergy: 100,
+    attack: Math.round(10 + level * 4),
+    defense: Math.round(level * 1.5),
+    critChance: 0.05,
+    swingMs: 1900,
+    // Half what the first pass gave them, measured rather than guessed: at the
+    // old numbers every fight drove the creature onto `FIGHT_FLOOR` and then
+    // sat there, which is the one thing the floor must never be — a backstop
+    // you can watch the game leaning on. They chip at it now and give up.
+    damageMin: (1 + level * 0.32) * scales.bite,
+    damageMax: (2 + level * 0.55) * scales.bite,
+    damageType: 'physical',
+    attackRange: 2.6,
+    moveSpeed: 5.2,
+    skillPower: 1,
+    regenPerSec: 0,
+  };
+}
+
 export function deriveMobStats(def: MobDef): DerivedStats {
   const star = STAR_MODIFIERS[def.stars];
   // Bosses are exempt from both ordinary-creature dials: their ★5/★6
