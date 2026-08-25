@@ -475,6 +475,28 @@ export class MapView {
       ctx.fillRect(x - 4, y - 4, 8, 8);
     }
 
+    // Places you have opened.
+    //
+    // Only the ones you have actually found: a map that lists them all is a
+    // checklist, and walking a checklist is errand-running rather than
+    // exploring. Drawn after the fact, the map slowly becomes a record of
+    // where you have been — which is the one thing the minimap can never be.
+    for (const site of this.world.sites) {
+      if (!this.world.found[site.id]) continue;
+      const [x, y] = at(site.pos);
+      ctx.strokeStyle = site.kind === 'boon' ? '#9fd08a' : '#e0b95a';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x - 3.5, y);
+      ctx.lineTo(x + 3.5, y);
+      ctx.moveTo(x, y - 3.5);
+      ctx.lineTo(x, y + 3.5);
+      ctx.stroke();
+    }
+
     // Holdings, in the colour of whoever is winning them right now. This is
     // the territory layer's only picture of itself.
     for (const holding of holdingsIn(zone.id)) {
@@ -553,6 +575,7 @@ export class MapView {
       `<span style="color:${THREAT_COLOURS.trivial}">● trivial</span>` +
       `<span style="color:${THREAT_COLOURS.even}">● even</span>` +
       `<span style="color:${THREAT_COLOURS.deadly}">● deadly</span>` +
+      `<span style="color:#9fd08a">✛ found</span>` +
       `<span style="color:#ff9a5c">★ boss</span>` +
       `<span style="color:#57c6f0">● trader</span>` +
       `<span style="color:#8fe0a0">● road out</span>` +

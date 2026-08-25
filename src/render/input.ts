@@ -368,7 +368,15 @@ export class InputController {
         best = e.id;
       }
     }
-    if (best !== null) this.emit({ t: 'loot', id: best });
+    if (best !== null) {
+      this.emit({ t: 'loot', id: best });
+      return;
+    }
+    // One key, one meaning: take what is here. A separate key for searching a
+    // cairn would be a fifteenth line in the help strip for something a player
+    // does twice an hour, and the two can never both apply — you are either
+    // standing on a corpse or you are not.
+    this.emit({ t: 'search' });
   }
 
   /**

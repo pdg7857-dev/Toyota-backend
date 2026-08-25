@@ -559,6 +559,8 @@ export interface ActiveEffect {
   regenPerTick?: number;
   /** buff: multiplier on outgoing weapon damage while active. */
   damageMultiplier?: number;
+  /** buff: units a second on top of your movement, from a blessing. */
+  moveSpeedBonus?: number;
 }
 
 /** An in-progress cast, for player skills and mob abilities alike. */
@@ -719,6 +721,8 @@ export type Command =
   | { t: 'autoAttack'; on: boolean }
   | { t: 'useSkill'; skillId: string }
   | { t: 'loot'; id: EntityId }
+  /** Open the landmark you are standing at. See `content/discoveries.ts`. */
+  | { t: 'search' }
   | { t: 'equip'; itemId: string }
   /** Drink a potion or an elixir out of the bags. */
   | { t: 'use'; itemId: string }
@@ -753,6 +757,16 @@ export interface ActorCommand {
 
 export type SimEvent =
   | { t: 'swing'; sourceId: EntityId; targetId: EntityId }
+  /** A landmark opened. Once per site, ever. See `content/discoveries.ts`. */
+  | {
+      t: 'discovered';
+      entityId: EntityId;
+      siteId: string;
+      name: string;
+      kind: 'boon' | 'cache';
+      line: string;
+      gold: number;
+    }
   | { t: 'castBegin'; sourceId: EntityId; kind: 'skill' | 'ability'; id: string; durationMs: number }
   | { t: 'castInterrupted'; sourceId: EntityId; kind: 'skill' | 'ability'; id: string }
   | { t: 'castComplete'; sourceId: EntityId; kind: 'skill' | 'ability'; id: string }

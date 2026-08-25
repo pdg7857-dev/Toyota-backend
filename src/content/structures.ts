@@ -1,4 +1,5 @@
-import type { Vec2 } from '../sim/types.js';
+import { isBoss, type Vec2 } from '../sim/types.js';
+import { getMob } from './mobs.js';
 import { SHORE_CLEARANCE, getTheme, terrainHeight } from './terrain.js';
 
 /**
@@ -48,6 +49,15 @@ export interface StructureDef {
   scale: number;
   /** How much flat ground it needs, for the height field. */
   clearing: number;
+  /**
+   * Placed to explain something that is already there — a boss's ground, a
+   * holding's post, a trader's shopfront — rather than to fill empty country.
+   *
+   * Anchored ones deliberately sit *inside* the thing they explain, which is
+   * right for a landmark and wrong for anything you have to stand still at:
+   * see `content/discoveries.ts`.
+   */
+  anchored?: boolean;
 }
 
 /** How far a structure keeps away from anything a player fights in. */
@@ -84,6 +94,69 @@ const ZONE_KINDS: Record<string, StructureKind[]> = {
   reach: ['wreck', 'ruin', 'bridge', 'camp', 'cairn'],
   caer_dubh: ['ruin', 'stoneCircle', 'watchtower', 'cairn'],
 };
+
+/**
+ * Every landmark in a zone, from the zone alone.
+ *
+ * Lived in `render/scene.ts` until the sim needed to know where the cairns
+ * were. It is pure — it reads a `ZoneDef` and returns data — so moving it here
+ * costs nothing and buys the thing that matters: **the sim and the renderer
+ * cannot disagree about where a landmark is**, because they call the same
+ * function rather than each deriving it. The alternative was passing the
+ * renderer's list into the sim, which would make a headless world's structures
+ * depend on whether anybody had drawn them.
+ *
+ * Anchored ones first — a tower on every guard post, a ruin over every boss, a
+ * farmstead at every shopfront — then the rest fill the empty country. The
+ * anchors are what make a landmark information rather than decoration.
+ */
+export function zoneStructures(zone: StructureZone, count = 26): StructureDef[] {
+  const anchors: Array<{ pos: Vec2; kind: StructureKind; scale?: number }> = [];
+  const keepClear: Vec2[] = [];
+  const seenHoldings = new Set<string>();
+
+  for (const spawn of zone.spawns) {
+    keepClear.push(spawn.pos);
+    if (isBoss(getMob(spawn.mobId).stars)) {
+      anchors.push({ pos: { x: spawn.pos.x, z: spawn.pos.z - 26 }, kind: 'ruin', scale: 1.3 });
+    } else if (spawn.holding && !seenHoldings.has(spawn.holding)) {
+      seenHoldings.add(spawn.holding);
+      anchors.push({
+        pos: { x: spawn.pos.x + 22, z: spawn.pos.z - 18 },
+        kind: holdingStructure(zone.id),
+        scale: 1.15,
+      });
+    }
+  }
+  for (const vendor of zone.vendors ?? []) {
+    anchors.push({ pos: { x: vendor.pos.x + 17, z: vendor.pos.z + 5 }, kind: 'farmstead' });
+    keepClear.push(vendor.pos);
+  }
+  keepClear.push(zone.playerStart);
+  for (const exit of zone.exits ?? []) keepClear.push(exit.pos);
+
+  return structuresFor(zone.id, zone.theme, anchors, zone.halfSize, keepClear, count);
+}
+
+/**
+ * What this module needs of a zone.
+ *
+ * Structural rather than a `ZoneDef` import, so `content/zone.ts` can go on
+ * importing this file for the clearances without the two forming a cycle. It
+ * resolves which spawns are bosses *itself* rather than taking a flag: the sim
+ * and the renderer both call this, and a caller-supplied flag is a caller that
+ * can get it wrong — which is precisely the disagreement moving this here was
+ * meant to make impossible.
+ */
+export interface StructureZone {
+  id: string;
+  theme?: string;
+  halfSize: number;
+  playerStart: Vec2;
+  spawns: Array<{ mobId: string; pos: Vec2; holding?: string }>;
+  vendors?: Array<{ pos: Vec2 }>;
+  exits?: Array<{ pos: Vec2 }>;
+}
 
 /** Deterministic hash, so a zone's landmarks are where they were last time. */
 function hash(s: string): number {
@@ -161,6 +234,7 @@ export function structuresFor(
       facing: random() * Math.PI * 2,
       scale: anchor.scale ?? 1,
       clearing: FOOTPRINT[anchor.kind],
+      anchored: true,
     });
   }
 

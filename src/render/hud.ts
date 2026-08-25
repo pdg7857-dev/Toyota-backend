@@ -15,6 +15,7 @@ import { BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
 import { ZONES } from '../content/zone.js';
 import { DRAGONS } from '../content/dragons.js';
 import { getMount } from '../content/mounts.js';
+import { BOONS } from '../content/discoveries.js';
 import {
   THREAT_WORDS,
   skillRankPower,
@@ -120,6 +121,7 @@ export class Hud {
     deathCost: HTMLElement;
     xpLevel: HTMLElement;
     tip: HTMLElement;
+    effects: HTMLElement;
     tracker: HTMLElement;
     trackerHead: HTMLElement;
     trackerBody: HTMLElement;
@@ -168,6 +170,8 @@ export class Hud {
   private nameplates = new Map<EntityId, HTMLElement>();
   /** Last-painted signature per panel, so an open panel is not rebuilt every frame. */
   private readonly painted = new Map<string, string>();
+  /** Which effects the pip row was last built for. */
+  private effectKey = '';
   /** The bag item currently being dragged, so a slot can say whether it fits. */
   private dragItemId: string | null = null;
   /** The last thing each adventurer said, for the bubble over their head. */
@@ -234,6 +238,7 @@ export class Hud {
       xpLabel: this.q('#xp-bar .bar-label'),
       xpLevel: this.q('#xp-level'),
       tip: this.q('#tip'),
+      effects: this.q('#effects'),
       tracker: this.q('#tracker'),
       trackerHead: this.q('#tracker-head'),
       trackerBody: this.q('#tracker-body'),
@@ -482,6 +487,24 @@ export class Hud {
           this.renderVendor();
           break;
         }
+        case 'discovered': {
+          // Two lines, because a discovery is the one thing in this game that
+          // happens *because you walked somewhere* — everything else happens
+          // because you hit something — and a single grey line in a log that
+          // is mostly combat spam would be missed entirely.
+          this.log(ev.line, 'log-loot');
+          this.log(
+            ev.kind === 'boon'
+              ? `${ev.name} is on you.`
+              : `${ev.name} — ${ev.gold.toLocaleString()} gold.`,
+            'log-good',
+          );
+          this.showZoneBanner(
+            ev.kind === 'boon' ? ev.name : `${ev.name} — ${ev.gold.toLocaleString()}g`,
+            'found',
+          );
+          break;
+        }
         case 'lootGained': {
           const names = ev.items.map(
             (s) => `${getItem(s.itemId).name}${s.qty > 1 ? ` x${s.qty}` : ''}`,
@@ -662,6 +685,7 @@ export class Hud {
     setBar(this.els.playerEnergy, player.energy, stats.maxEnergy);
     this.els.playerEnergyLabel.textContent = `${Math.floor(player.energy)} / ${stats.maxEnergy}`;
 
+    this.updateEffects(player);
     this.updateTargetFrame();
     this.updateCastBar(player);
     this.updateXpBar(player);
@@ -937,6 +961,73 @@ export class Hud {
     }
     if (!best) return null;
     return { x: best.x, z: best.z, label: getMob(mobId).name };
+  }
+
+  /**
+   * What is currently on you, and how long it has left.
+   *
+   * There was no display for this at all. A defensive buff you cannot see is
+   * one you cannot time, a bleed you cannot see is damage with no explanation,
+   * and a twelve-minute blessing you walked half a zone to find is one you
+   * forget you are carrying — which makes the whole trip feel like nothing
+   * happened.
+   *
+   * Rebuilt only when the set of effects changes, not every frame; the
+   * countdown is written into existing nodes.
+   */
+  private updateEffects(player: Entity): void {
+    const effects = player.effects ?? [];
+    const key = effects.map((e) => e.sourceAbilityId).join(',');
+    if (key !== this.effectKey) {
+      this.effectKey = key;
+      this.els.effects.innerHTML = '';
+      for (const eff of effects) {
+        const pip = document.createElement('div');
+        pip.className = `pip clickable ${eff.kind === 'dot' ? 'bad' : 'good'}`;
+        pip.innerHTML = `<span class="pip-name"></span><span class="pip-left"></span>`;
+        this.els.effects.appendChild(pip);
+        const id = eff.sourceAbilityId;
+        this.tip(pip, () => this.effectTip(id));
+      }
+    }
+    const pips = this.els.effects.children;
+    effects.forEach((eff, i) => {
+      const pip = pips[i] as HTMLElement | undefined;
+      if (!pip) return;
+      pip.querySelector<HTMLElement>('.pip-name')!.textContent = this.effectName(eff.sourceAbilityId);
+      const left = Math.max(0, Math.ceil(eff.remainingMs / 1000));
+      pip.querySelector<HTMLElement>('.pip-left')!.textContent =
+        left >= 60 ? `${Math.ceil(left / 60)}m` : `${left}s`;
+    });
+  }
+
+  /** A blessing, a skill or a mob ability — whichever put this on you. */
+  private effectName(abilityId: string): string {
+    const boon = BOONS.find((b) => b.id === abilityId);
+    if (boon) return boon.name;
+    return this.abilityName(this.world.player.id, abilityId);
+  }
+
+  private effectTip(abilityId: string): TipContent | null {
+    const eff = (this.world.player.effects ?? []).find((e) => e.sourceAbilityId === abilityId);
+    if (!eff) return null;
+    const lines: string[] = [];
+    if (eff.damageMultiplier) {
+      lines.push(`You hit ${Math.round((eff.damageMultiplier - 1) * 100)}% harder`);
+    }
+    if (eff.defenseBonus) lines.push(`+${eff.defenseBonus} defence`);
+    if (eff.regenPerTick) lines.push(`+${eff.regenPerTick} health a second`);
+    if (eff.moveSpeedBonus) lines.push(`+${eff.moveSpeedBonus} movement speed`);
+    if (eff.dotPower) lines.push(`${eff.dotPower} ${eff.damageType} damage every ${eff.tickMs / 1000}s`);
+    const left = Math.ceil(eff.remainingMs / 1000);
+    lines.push(left >= 60 ? `${Math.floor(left / 60)}m ${left % 60}s left` : `${left}s left`);
+    const boon = BOONS.find((b) => b.id === abilityId);
+    return {
+      title: this.effectName(abilityId),
+      sub: eff.kind === 'dot' ? 'on you, and hurting' : 'blessing',
+      lines,
+      desc: boon?.line,
+    };
   }
 
   private updateTargetFrame(): void {
@@ -2262,6 +2353,7 @@ const TEMPLATE = `
     <div class="frame-name"><span id="player-name"></span><span id="player-level" class="frame-level"></span></div>
     <div id="player-hp" class="bar bar-hp"><div class="bar-fill"></div><div class="bar-label"></div></div>
     <div id="player-energy" class="bar bar-energy"><div class="bar-fill"></div><div class="bar-label"></div></div>
+    <div id="effects"></div>
   </div>
 
   <div id="target-frame" class="frame panel">
@@ -2345,7 +2437,7 @@ const TEMPLATE = `
   <div id="help">
     <b>WASD</b> move &nbsp; <b>Drag</b> or <b>←→</b> look &nbsp; <b>Scroll</b> zoom<br />
     <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–0</b> / <b>⇧1–6</b> skills &nbsp; <b>T</b> auto-attack<br />
-    <b>F</b> loot &nbsp; <b>E</b> trade &nbsp; <b>G</b> travel &nbsp; <b>J</b> quests<br />
+    <b>F</b> loot / search &nbsp; <b>E</b> trade &nbsp; <b>G</b> travel &nbsp; <b>J</b> quests<br />
     <b>H</b> take horse &nbsp; <b>R</b> ride &nbsp; <b>K</b> realm &nbsp; <b>M</b> map &nbsp; <b>V</b> reclaim &nbsp; <b>N</b> mute &nbsp; <b>[ ]</b> volume &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
   </div>
 `;

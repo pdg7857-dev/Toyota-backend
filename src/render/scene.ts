@@ -10,9 +10,10 @@ import {
   roadPoints,
   type ZoneDef,
 } from '../content/zone.js';
-import { holdingStructure, structuresFor, type StructureDef, type StructureKind } from '../content/structures.js';
+import { zoneStructures, type StructureDef } from '../content/structures.js';
 import type { Vec2 } from '../sim/types.js';
 import { NIGHT_FLOOR, type Daylight, type Weather } from '../content/daylight.js';
+import { Wildlife } from './wildlife.js';
 
 /**
  * How much ground the moving terrain tile covers, and at what resolution.
@@ -91,6 +92,8 @@ export class SceneRig {
   /** Everything belonging to the current zone, dropped wholesale on travel. */
   private zoneRoot = new THREE.Group();
   private motes: THREE.Points | null = null;
+  /** Birds, midges and rings. Renderer-only, and never on the sim's Rng. */
+  wildlife: Wildlife | null = null;
   private water: THREE.Mesh | null = null;
   /** The zone being streamed, kept for the cell builders. */
   private zone!: ZoneDef;
@@ -227,6 +230,21 @@ export class SceneRig {
    * The fog is doing the other half of the job: it is set closer than the tile
    * edge, so the place where the world stops being built is never on screen.
    */
+  /**
+   * Advance the ambient life.
+   *
+   * Separate from `stream` because it needs a frame delta and `stream` is
+   * called with none — and because everything in `Wildlife` is decoration that
+   * must run off the render clock rather than off the sim's.
+   */
+  updateWildlife(dtMs: number, x: number, z: number): void {
+    if (!this.wildlife) {
+      this.wildlife = new Wildlife(this.theme, this.height, hash(this.zone.id));
+      this.zoneRoot.add(this.wildlife.group);
+    }
+    this.wildlife.update(dtMs, x, z);
+  }
+
   stream(x: number, z: number, force = false): void {
     this.recentreGround(x, z, force);
     this.streamCells(x, z);
@@ -250,6 +268,10 @@ export class SceneRig {
     this.zoneRoot = new THREE.Group();
     this.scene.add(this.zoneRoot);
     this.motes = null;
+    if (this.wildlife) {
+      this.wildlife.dispose();
+      this.wildlife = null;
+    }
     this.water = null;
     // The shared scatter belongs to the zone being torn down, and `disposeTree`
     // was told to leave it alone — so it is freed here instead.
@@ -451,32 +473,7 @@ export class SceneRig {
    * see a tower on the ridge and you know there is a front over there.
    */
   private siteStructures(zone: ZoneDef): StructureDef[] {
-    const anchors: Array<{ pos: Vec2; kind: StructureKind; scale?: number }> = [];
-    const keepClear: Vec2[] = [];
-    const seenHoldings = new Set<string>();
-
-    for (const spawn of zone.spawns) {
-      keepClear.push(spawn.pos);
-      const def = getMob(spawn.mobId);
-      if (isBoss(def.stars)) {
-        anchors.push({ pos: { x: spawn.pos.x, z: spawn.pos.z - 26 }, kind: 'ruin', scale: 1.3 });
-      } else if (spawn.holding && !seenHoldings.has(spawn.holding)) {
-        seenHoldings.add(spawn.holding);
-        anchors.push({
-          pos: { x: spawn.pos.x + 22, z: spawn.pos.z - 18 },
-          kind: holdingStructure(zone.id),
-          scale: 1.15,
-        });
-      }
-    }
-    for (const vendor of zone.vendors ?? []) {
-      anchors.push({ pos: { x: vendor.pos.x + 17, z: vendor.pos.z + 5 }, kind: 'farmstead' });
-      keepClear.push(vendor.pos);
-    }
-    keepClear.push(zone.playerStart);
-    for (const exit of zone.exits ?? []) keepClear.push(exit.pos);
-
-    return structuresFor(zone.id, zone.theme, anchors, zone.halfSize, keepClear, 26);
+    return zoneStructures(zone);
   }
 
   private addCellStructures(group: THREE.Group, x0: number, z0: number): void {
@@ -655,7 +652,10 @@ export class SceneRig {
     const z = focus.z - Math.cos(this.yaw) * horiz;
     // Never let the camera end up inside a hill: keep it above the ground it is
     // standing over as well as above the player.
-    const y = Math.max(focus.y + Math.sin(p) * this.distance, this.heightAt(x, z) + 1.5);
+    // Above the ground it is standing over, above the player, and above the
+    // *surface* of any water rather than the bed of it — see
+    // `HeightField.clearHeight`.
+    const y = Math.max(focus.y + Math.sin(p) * this.distance, this.height.clearHeight(x, z) + 1.5);
     this.camera.position.set(x, y, z);
     if (shake > 0) {
       // Hashed off the frame clock rather than Math.random: a shake driven by

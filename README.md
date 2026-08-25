@@ -31,7 +31,7 @@ Add `?fresh` to the URL to discard your save and start over.
 | `1`–`0` | Skills (first row) |
 | `Shift`+`1`–`6` | Skills (second row — what the zones taught you) |
 | `T` | Toggle auto-attack |
-| `F` | Loot a nearby corpse |
+| `F` | Loot a corpse, or search a landmark |
 | `H` | Take a weakened wild horse |
 | `R` | Mount up / dismount |
 | `E` | Trade with a nearby vendor |
@@ -321,6 +321,29 @@ read a telegraph circle. It has exactly one consequence, and one is enough —
 Weather is per zone and per hour: the Fenmarch gets rain and mist, Ardmoor gets
 snow, the Sunken Wood is mostly mist. Mist is the one that changes how far you
 can see, which is the whole point of it as a thing that happens to you.
+
+## Something is always moving
+
+Birds wheel over the moor and break up when you walk under them. Midges hang
+over the lochs, and every so often something rises and leaves a ring. None of
+it can be fought, looted or targeted — it is there so that the only thing
+moving in three kilometres of country is not always something trying to kill
+you.
+
+## Things worth walking to
+
+Some of the cairns, farmsteads, wrecks and abandoned camps out in the country
+are hiding something, and you can see which from about ninety metres — a slow
+pale glimmer over the top of them. Walk up and press `F`.
+
+A cairn gives a **blessing**: twelve minutes of hitting harder, or shrugging
+more off, or covering ground faster. A farmstead or a wreck gives a **cache**
+of coin worth twenty or thirty kills of whatever lives nearby. Neither ever
+gives you gear — that is what drop tables, bosses and traders are for.
+
+Each one pays **once, ever**. They are not on the map until you find them, and
+after that they are, so the map slowly becomes a record of where you have
+actually been.
 
 ## Landmarks
 

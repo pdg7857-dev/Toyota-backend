@@ -55,6 +55,7 @@ input / HUD click ──> Command ──> World.submit()
 | `src/content/dragons.ts` | The four things the world moves around by itself. |
 | `src/content/mounts.ts` | The herds, and what riding each one is worth. |
 | `src/content/luxury.ts` | The one shop that is not a safety net. |
+| `src/content/discoveries.ts` | What the landmarks are hiding, and what it is worth. |
 | `src/content/adventurers.ts` | Who else is out there, and what they say. |
 | `src/content/structures.ts` | The things somebody built, and where they stand. |
 | `src/render/` | three.js, DOM, input. Nothing gameplay-authoritative. |
@@ -62,12 +63,16 @@ input / HUD click ──> Command ──> World.submit()
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
 | `src/render/map.ts` | The minimap and the map. Both drawn from one relief bitmap. |
 | `src/render/audio.ts` | Every sound in the game, synthesised. No audio files. |
+| `src/render/wildlife.ts` | Birds, midges and rings. Alive, and not creatures. |
 | `src/content/bodies.ts` | What each creature is shaped like. Pure data. |
 | `src/render/body.ts` | Turns a body plan into geometry. Knows *how*, not *which*. |
 | `src/content/models.ts` | Which creatures have real art, and how it is fitted. |
 | `tools/smoke.mjs` | Boots the real game in Chromium, plays it, screenshots it. |
 | `tools/look.mjs` | Stands the camera somewhere and takes a picture. See below. |
 | `tools/bestiary.mjs` | Stands one of every creature in a row and photographs them. |
+| `tools/firstrun.mjs` | The opening, as a new player sees it. |
+| `tools/discover.mjs` | Walks to a landmark that holds something. |
+| `tools/wildlife.mjs` | Stands still and watches the sky. |
 
 Adding a mob, item or skill should mean editing `src/content/` only.
 
@@ -747,6 +752,104 @@ nothing new is stored and reloading never replays the tutorial:
 
 Gated on level 1, so a veteran who has just spent their last coin is never told
 how to loot a corpse.
+
+## The world between fights
+
+Strays fixed the *emptiness* — there is something to fight every hundred metres
+now — but everything in a zone that moved was still a health bar, and a world
+whose only motion is a thing that wants to kill you reads as a shooting gallery
+rather than as a place.
+
+`render/wildlife.ts` is birds, midges over the water, and rings where something
+rose. None of it can be targeted, fought, looted or counted, and that is the
+whole point: it is evidence of a world rather than content in one, and the
+moment any of it grows a nameplate it stops being scenery and becomes a chore.
+
+Three rules:
+
+- **It never touches `World.rng`.** The same rule roaming creatures and the
+  weather run under, for the same reason — anything ambient that draws from the
+  combat stream turns every figure in the balance suite into a measurement of
+  the scenery. This file has its own PRNG and its own clock and cannot reach
+  the sim at all.
+- **Nothing carries an `entityId`.** The click raycast resolves against that
+  tag, so there is no code path by which a bird can be targeted. A bird you can
+  click is a bird somebody will try to kill. `smoke` walks the scene and fails
+  if one ever grows a tag.
+- **One draw call per flock.** A flock is an `InstancedMesh`; the whole layer
+  costs about twenty draw calls out of a budget of seven hundred.
+
+A flock has exactly two states, and the transition is the feature: birds that
+only circle are wallpaper, and birds that break and climb *because you walked
+under them* are the cheapest possible proof that the world noticed you.
+
+`tools/wildlife.mjs` is the fourth looking-at-it tool, and like the other three
+it earned its place immediately. Standing in a lake to photograph the midges
+showed the whole screen going the colour of the water plane: `updateCamera`
+clamped to `heightAt` — the lake **bed** — so wading in put the camera under
+the surface. There is no swimming in this game and nothing to look at down
+there. `HeightField.clearHeight` is the ground or the surface of whatever is
+lying on it, whichever is higher, and the camera clamps to that.
+
+## Things worth walking to
+
+Three kilometres of ground had exactly two reasons to be crossed: a camp at the
+far end, and an arrow pointing at it. Landmarks existed and were **navigation
+furniture** — you steered by the watchtower, you never went to it.
+
+The obvious fix is more camps, and it is the wrong one for the same reason it
+was wrong for the empty country: a camp is a grinding spot, and making every
+part of the map a grinding spot makes every part of the map the same part of
+the map. A discovery (`content/discoveries.ts`) is the opposite of a camp. It
+is **once, ever**, it is *found* rather than farmed, and what it pays cannot be
+got by killing anything.
+
+Five rules hold it together:
+
+- **Only out in the country.** A landmark placed to *explain* something — the
+  ruin over a boss's ground, the tower on a holding, the farmstead at a
+  shopfront — sits deliberately inside the thing it explains, which is right
+  for a landmark and wrong for anywhere you have to stand still. A test caught
+  a ruin fourteen metres from a Clan Axeman; searching there is not a
+  discovery, it is an ambush. `StructureDef.anchored` is the switch.
+- **Once each, forever.** Anything you can go back to is a grinding spot with
+  extra steps, and the feeling being bought is "nobody else is getting this
+  one".
+- **Not on the map until found.** A map that lists them is a checklist, and
+  walking a checklist is errand-running. Once found they *are* on it, so the
+  map slowly becomes a record of where you have actually been.
+- **Never equipment.** Every piece of gear is earned off a drop table, a boss
+  or a trader, and a chest in a field that beat any of those would make all
+  three pointless. A cairn pays a **blessing** that expires; a farmstead pays a
+  **cache** of coin, anchored to what an ordinary kill is worth in that zone so
+  a level-3 farmstead is never worth robbing at level 90. `npm test` prints
+  what each is worth in kills — currently 18 to 32.
+- **Nothing is rolled.** What a site holds is hashed from where it stands, so
+  it cannot draw from `World.rng` — the lesson roaming and the weather both had
+  to learn — and two players in the same world find the same thing at the same
+  cairn. A test ticks a control world alongside and fails if searching moves
+  the stream by one draw.
+
+`zoneStructures` moved out of `render/scene.ts` and into `content/` for this.
+It is pure, so the cost is nothing and the gain is that **the sim and the
+renderer cannot disagree about where a landmark is** — they call the same
+function rather than one being handed the other's list, which is what keeps a
+headless world's discoveries independent of whether anybody drew them. It also
+resolves which spawns are bosses itself rather than taking a flag: a
+caller-supplied flag is a caller that can get it wrong.
+
+Only the "once, ever" half is state. `World.found` is a set of site ids keyed
+on **where the site stands**, never on an index into a list — an index would
+silently re-point every save the moment anybody added a landmark.
+
+### And you can see what is on you
+
+There was no display for active effects at all. A defensive buff you cannot see
+is one you cannot time, a bleed you cannot see is damage with no explanation,
+and a twelve-minute blessing you walked half a zone to find is one you forget
+you are carrying — which makes the whole trip feel like nothing happened. The
+pips under the player frame carry a name, a countdown and a tooltip, and they
+rebuild only when the *set* changes rather than every frame.
 
 ## Can I win this fight
 

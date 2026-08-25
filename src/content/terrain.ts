@@ -313,6 +313,23 @@ export class HeightField {
     // are swimming, and swimming is level with the surface.
     return water - Math.min(WADE_DEPTH, water - ground) * 0.45;
   }
+
+  /**
+   * The height nothing should ever be *below*: the ground, or the surface of
+   * whatever is lying on it.
+   *
+   * The camera clamps to this. It used to clamp to `at()` — the lake **bed** —
+   * so wading into a tarn put the camera under the surface and the whole
+   * screen went the colour of the water plane, with the world behind it. There
+   * is no swimming in this game and nothing to look at down there; the one
+   * thing a player does in water is walk through it, and they have to be able
+   * to see while they do.
+   */
+  clearHeight(x: number, z: number): number {
+    const water = this.spec.waterLevel;
+    const ground = this.at(x, z);
+    return water === undefined ? ground : Math.max(ground, water);
+  }
 }
 
 /** How far into the water a wading creature sits, at most. */

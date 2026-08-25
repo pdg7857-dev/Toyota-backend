@@ -165,6 +165,7 @@ async function boot(): Promise<void> {
     const alpha = accumulator / TICK_MS;
     views.update(alpha, dtMs);
     rig.update(dtMs);
+    rig.updateWildlife(dtMs, world.player.pos.x, world.player.pos.z);
 
     const playerView = views.get(world.playerId);
     if (playerView) rig.updateCamera(playerView.group.position, views.takeShake(dtMs));

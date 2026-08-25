@@ -19,6 +19,7 @@ import { CLASSES } from '../content/zone.js';
 import { getMount } from '../content/mounts.js';
 import { getMob } from '../content/mobs.js';
 import { getItem } from '../content/items.js';
+import { DISCOVERY_SIGHT } from '../content/discoveries.js';
 import { getVendor } from '../content/vendors.js';
 import { TICK_MS } from '../sim/formulas.js';
 import { clipFor, modelFor, setModelOverride, type ModelDef, type ModelState } from '../content/models.js';
@@ -721,6 +722,74 @@ class HazardPatch {
   }
 }
 
+/**
+ * The mark over a landmark that still holds something.
+ *
+ * A landmark is how you navigate: you steer by the watchtower, you never go to
+ * it. This is what turns one into a destination — a slow pale glimmer you can
+ * pick out from ninety metres, which is well past nameplate range and short of
+ * the fog, because a mark you can only see from on top of the thing does not
+ * change how anybody walks.
+ *
+ * Deliberately not a map pin and not a quest arrow. Both of those turn a map
+ * into a checklist, and walking a checklist is errand-running. This is only
+ * ever visible when the place itself is.
+ */
+class SiteMark {
+  readonly group = new THREE.Group();
+  private readonly beam: THREE.Mesh;
+  private readonly mote: THREE.Mesh;
+  private phase = Math.random() * Math.PI * 2;
+
+  constructor(readonly siteId: string, x: number, y: number, z: number, boon: boolean) {
+    // Green for a blessing, gold for what somebody left behind — the same two
+    // meanings the landmark's own shape already carries, said again in colour
+    // for anyone reading it at distance.
+    const colour = boon ? 0x9fd08a : 0xe0b95a;
+    const shared = {
+      color: colour,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    } as const;
+    this.beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 1.1, 9, 7, 1, true),
+      new THREE.MeshBasicMaterial({ ...shared, opacity: 0.16, side: THREE.DoubleSide }),
+    );
+    // Clear of the landmark itself. A cairn is a four-metre stack of stones
+    // and the first version put the mote inside it, which is a light source
+    // with a rock in front of it.
+    this.beam.position.y = 8.5;
+    this.mote = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.42, 0),
+      new THREE.MeshBasicMaterial({ ...shared, opacity: 0.9 }),
+    );
+    this.mote.position.y = 5.2;
+    this.group.add(this.beam, this.mote);
+    this.group.position.set(x, y, z);
+    // Tagged so `smoke` can count them without knowing what they are made of.
+    this.group.userData.siteMark = siteId;
+  }
+
+  update(dtMs: number): void {
+    this.phase += dtMs / 1000;
+    this.mote.rotation.y += dtMs * 0.0016;
+    this.mote.position.y = 5.2 + Math.sin(this.phase * 1.3) * 0.26;
+    // Breathing rather than blinking. A blink at this size across a whole zone
+    // reads as a rendering fault; a slow swell reads as something being there.
+    const swell = 0.72 + Math.sin(this.phase * 0.9) * 0.28;
+    (this.beam.material as THREE.MeshBasicMaterial).opacity = 0.1 + swell * 0.1;
+    (this.mote.material as THREE.MeshBasicMaterial).opacity = 0.55 + swell * 0.4;
+  }
+
+  dispose(): void {
+    for (const m of [this.beam, this.mote]) {
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+    }
+  }
+}
+
 class TelegraphRing {
   readonly group = new THREE.Group();
   private readonly fill: THREE.Mesh;
@@ -844,6 +913,8 @@ export class ViewManager {
   private views = new Map<EntityId, EntityView>();
   private telegraphs: TelegraphRing[] = [];
   private hazardPatches: HazardPatch[] = [];
+  /** One per unopened landmark in this zone, built once and kept. */
+  private siteMarks = new Map<string, SiteMark>();
   private bursts: ImpactBurst[] = [];
   /**
    * Camera shake left to spend, in world units.
@@ -976,12 +1047,54 @@ export class ViewManager {
   }
 
   /**
+   * Keep a mark on every landmark in the zone that still holds something.
+   *
+   * Rebuilt from the sim's list rather than from an event, so opening one
+   * makes its mark disappear on the next frame with no bookkeeping — and so a
+   * loaded save comes back with exactly the marks it should have.
+   */
+  private updateSiteMarks(dtMs: number, player: Entity): void {
+    const open = this.world.openSites();
+    const live = new Set<string>();
+    const range = Math.min(DISCOVERY_SIGHT, this.visibleRange());
+    for (const site of open) {
+      live.add(site.id);
+      let mark = this.siteMarks.get(site.id);
+      if (!mark) {
+        mark = new SiteMark(
+          site.id,
+          site.pos.x,
+          this.groundAt(site.pos.x, site.pos.z),
+          site.pos.z,
+          site.kind === 'boon',
+        );
+        this.siteMarks.set(site.id, mark);
+        this.scene.add(mark.group);
+      }
+      const far = Math.hypot(site.pos.x - player.pos.x, site.pos.z - player.pos.z) > range;
+      mark.group.visible = !far;
+      if (!far) mark.update(dtMs);
+    }
+    for (const [id, mark] of this.siteMarks) {
+      if (live.has(id)) continue;
+      this.scene.remove(mark.group);
+      mark.dispose();
+      this.siteMarks.delete(id);
+    }
+  }
+
+  /**
    * Drop every view and telegraph. Called on zone change: the entities are all
    * new and the ground under them is a different shape, so interpolating from
    * where things were is meaningless — and looks like the whole zone sliding
    * into place.
    */
   reset(): void {
+    for (const mark of this.siteMarks.values()) {
+      this.scene.remove(mark.group);
+      mark.dispose();
+    }
+    this.siteMarks.clear();
     for (const view of this.views.values()) {
       this.scene.remove(view.group);
       view.dispose();
@@ -1088,6 +1201,7 @@ export class ViewManager {
         view.group.visible = !looted || entity.respawnInMs > 0;
       }
     }
+    this.updateSiteMarks(dtMs, player);
     this.updateTelegraphs(dtMs);
     this.bursts = this.bursts.filter((burst) => {
       if (burst.update(dtMs, this.camera)) return true;

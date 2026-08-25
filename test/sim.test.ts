@@ -43,7 +43,13 @@ import {
 } from '../src/content/adventurers.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { grindMobFor, killsForLevel } from './pace.js';
-import { ROAM_RADIUS, THREAT_WORDS, threatBand, threatGap } from '../src/sim/formulas.js';
+import {
+  ROAM_RADIUS,
+  THREAT_WORDS,
+  threatBand,
+  threatGap,
+} from '../src/sim/formulas.js';
+import { zoneStructures } from '../src/content/structures.js';
 import { MODELS, clipFor } from '../src/content/models.js';
 import {
   BODY_PLANS,
@@ -4033,5 +4039,203 @@ describe('can I win this fight', () => {
     const words = Object.values(THREAT_WORDS);
     expect(new Set(words).size).toBe(words.length);
     for (const w of words) expect(w.length).toBeGreaterThan(3);
+  });
+});
+
+describe('things worth walking to', () => {
+  /**
+   * Three kilometres of ground had two reasons to be crossed: a camp at the
+   * far end, and an arrow pointing at it. Landmarks existed and were
+   * navigation furniture — you steered by the watchtower, you never went to
+   * it. A discovery is the opposite of a camp: once ever, found rather than
+   * farmed, and paying in something no kill can drop.
+   */
+  function fresh(zoneId = 'fenmarch'): World {
+    return new World({ seed: 99, zone: getZone(zoneId), classId: 'warrior' });
+  }
+
+  function walkTo(world: World, site: { pos: { x: number; z: number } }): void {
+    world.player.pos = { ...site.pos };
+  }
+
+  it('puts some in every zone, of both kinds, and prints them', () => {
+    console.log('\n  discoveries');
+    for (const zoneId of Object.keys(ZONES)) {
+      const world = fresh(zoneId);
+      const kinds = new Map<string, number>();
+      for (const s of world.sites) kinds.set(s.kind, (kinds.get(s.kind) ?? 0) + 1);
+      console.log(
+        `    ${zoneId.padEnd(10)} ${String(world.sites.length).padStart(2)} sites  ` +
+          [...kinds].sort().map(([k, n]) => `${k} ${n}`).join(', '),
+      );
+      expect(world.sites.length, `${zoneId} has nothing to find`).toBeGreaterThan(3);
+      expect(kinds.get('boon') ?? 0, `${zoneId} has no blessings`).toBeGreaterThan(0);
+      expect(kinds.get('cache') ?? 0, `${zoneId} has nothing left behind`).toBeGreaterThan(0);
+    }
+  });
+
+  it('leaves some landmarks holding nothing', () => {
+    // If every cairn paid out, a cairn would be a vending machine and walking
+    // to one would be a chore. The ones that hold nothing are what make the
+    // ones that do feel found.
+    const world = fresh();
+    const landmarks = zoneStructures(world.zone).filter(
+      (st) => st.kind === 'cairn' || st.kind === 'farmstead' || st.kind === 'stoneCircle',
+    );
+    expect(landmarks.length).toBeGreaterThan(world.sites.length);
+  });
+
+  it('pays once, ever', () => {
+    const world = fresh();
+    const cache = world.sites.find((s) => s.kind === 'cache')!;
+    walkTo(world, cache);
+    world.player.gold = 0;
+
+    world.submit(world.playerId, { t: 'search' });
+    world.tick();
+    const first = world.player.gold ?? 0;
+    expect(first).toBeGreaterThan(0);
+
+    world.submit(world.playerId, { t: 'search' });
+    world.tick();
+    expect(world.player.gold, 'a discovery you can farm is a grinding spot').toBe(first);
+  });
+
+  it('says so rather than doing nothing, when there is nothing here', () => {
+    // Every mount failure names the mistake for the same reason: "nothing
+    // happened" reads as a broken key.
+    const world = fresh();
+    world.player.pos = { x: 0, z: 0 };
+    world.submit(world.playerId, { t: 'search' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'error')).toBe(true);
+  });
+
+  it('never draws from the combat stream', () => {
+    // The lesson roaming and the weather both had to learn. What a site holds
+    // is hashed from where it stands, so two players who walk to the same
+    // cairn find the same thing — and a blessing taken mid-grind cannot change
+    // the numbers of the next fight.
+    // Against a control that ticks identically without searching, because a
+    // tick moves the Rng for a hundred other reasons — creatures deciding
+    // where to walk, adventurers deciding what to say.
+    const world = fresh();
+    const control = fresh();
+    const site = world.sites[0]!;
+    walkTo(world, site);
+    walkTo(control, site);
+
+    world.submit(world.playerId, { t: 'search' });
+    world.tick();
+    control.tick();
+
+    expect(world.found[site.id]).toBe(true);
+    expect(world.rng.state, 'searching moved the Rng').toBe(control.rng.state);
+  });
+
+  it('never pays in equipment', () => {
+    // Every piece of gear is earned off a drop table, a boss or a trader. A
+    // chest in a field that beat any of those would make all three pointless.
+    const world = fresh();
+    for (const site of world.sites) {
+      walkTo(world, site);
+      world.submit(world.playerId, { t: 'search' });
+      world.tick();
+    }
+    expect((world.player.inventory ?? []).length).toBe(0);
+  });
+
+  it('gives a blessing that runs out', () => {
+    const world = fresh();
+    const boon = world.sites.find((s) => s.kind === 'boon')!;
+    walkTo(world, boon);
+    world.submit(world.playerId, { t: 'search' });
+    world.tick();
+
+    const on = world.player.effects.find((e) => e.sourceAbilityId === boon.boon!.id);
+    expect(on, 'the blessing did not land').toBeDefined();
+    expect(on!.remainingMs).toBeGreaterThan(5 * 60_000);
+    // Worth using rather than banking: it runs from the moment you take it.
+    on!.remainingMs = 60;
+    world.tick();
+    world.tick();
+    expect(world.player.effects.some((e) => e.sourceAbilityId === boon.boon!.id)).toBe(false);
+  });
+
+  it('remembers what you opened, across a save and across a zone', () => {
+    const world = fresh();
+    const site = world.sites[0]!;
+    walkTo(world, site);
+    world.submit(world.playerId, { t: 'search' });
+    world.tick();
+
+    const back = World.deserialize(world.serialize(), world.zone);
+    expect(back.found[site.id], 'the world forgot what you found').toBe(true);
+    expect(back.openSites().some((s) => s.id === site.id)).toBe(false);
+
+    // And going away and coming back does not reset it: a site's id carries
+    // its zone, so `found` is never cleared on travel.
+    back.travelTo('ardmoor');
+    back.travelTo('fenmarch');
+    expect(back.found[site.id]).toBe(true);
+  });
+
+  it('agrees with the renderer about where the landmarks are', () => {
+    // The sim and the renderer both call `zoneStructures`, rather than one
+    // being handed the other's list — which is what makes a headless world's
+    // discoveries independent of whether anybody drew them.
+    for (const zone of Object.values(ZONES)) {
+      const a = zoneStructures(zone);
+      const b = zoneStructures(zone);
+      expect(a.length).toBe(b.length);
+      for (const [i, st] of a.entries()) {
+        expect(st.pos.x).toBe(b[i]!.pos.x);
+        expect(st.kind).toBe(b[i]!.kind);
+      }
+    }
+  });
+
+  it('keeps them clear of everything you fight in', () => {
+    // A landmark already keeps `STRUCTURE_CLEARANCE` from every camp, and a
+    // discovery inherits that: standing still to search while a camp pulls you
+    // is not a discovery, it is an ambush.
+    for (const zoneId of Object.keys(ZONES)) {
+      const world = fresh(zoneId);
+      for (const site of world.sites) {
+        for (const sp of world.zone.spawns) {
+          const def = getMob(sp.mobId);
+          const gap = Math.hypot(sp.pos.x - site.pos.x, sp.pos.z - site.pos.z);
+          expect(
+            gap,
+            `a ${site.structure} in ${zoneId} sits ${Math.round(gap)}m from a ${def.name}`,
+          ).toBeGreaterThan(def.aggroRadius + ROAM_RADIUS);
+        }
+      }
+    }
+  });
+
+  it('prints what a cache is worth in kills', () => {
+    // Measured, like everything else here. A cache should be a good half hour,
+    // not a shortcut past one — and not a rounding error either.
+    console.log('\n  what a cache pays');
+    for (const zoneId of Object.keys(ZONES)) {
+      const world = fresh(zoneId);
+      const band = world.zone.levelRange;
+      const level = Math.round((band[0] + band[1]) / 2);
+      const purse = goldForKill(level, 1);
+      const perKill = (purse.min + purse.max) / 2;
+      const caches = world.sites.filter((s) => s.kind === 'cache');
+      const kills = caches.map((c) => c.worth);
+      const gold = kills.map((k) => Math.round(perKill * k));
+      console.log(
+        `    ${zoneId.padEnd(10)} ${caches.length} caches, ` +
+          `${Math.min(...gold).toLocaleString()}–${Math.max(...gold).toLocaleString()}g ` +
+          `(${Math.min(...kills)}–${Math.max(...kills)} kills each)`,
+      );
+      for (const k of kills) {
+        expect(k, 'a cache worth almost nothing is not worth walking to').toBeGreaterThan(10);
+        expect(k, 'a cache should not skip a session of grinding').toBeLessThan(45);
+      }
+    }
   });
 });

@@ -1292,6 +1292,109 @@ async function main() {
   await page.bringToFront();
   await wait(600);
 
+  // The world between fights.
+  //
+  // Everything in a zone that moved used to be a health bar, and a world whose
+  // only motion is a thing that wants to kill you reads as a shooting gallery
+  // rather than as a place.
+  const alive = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    let flocks = 0;
+    let clouds = 0;
+    let taggable = 0;
+    g.rig.scene.traverse((o) => {
+      if (!o.userData?.ambient) return;
+      if (o.isInstancedMesh) flocks++;
+      else if (o.isPoints) clouds++;
+      // The one rule that has to hold: the click raycast resolves against
+      // `entityId`, so a bird carrying one would be a bird you could target,
+      // and a bird you can target is a bird somebody will try to kill.
+      if (o.userData.entityId !== undefined) taggable++;
+      o.traverse?.((c) => {
+        if (c !== o && c.userData?.entityId !== undefined) taggable++;
+      });
+    });
+
+    // Walk into one and watch it break up. Birds that only circle are
+    // wallpaper; birds that scatter because you walked under them are the
+    // cheapest possible proof that the world noticed you.
+    const flock = g.rig.wildlife.flocksForTest()[0];
+    const before = flock.centreForTest();
+    me.pos = { x: before.x, z: before.z - 4 };
+    g.rig.stream(me.pos.x, me.pos.z, true);
+    await new Promise((r) => setTimeout(r, 1400));
+    const after = flock.centreForTest();
+
+    // And the camera has to stay above the water. It clamped to the lake BED,
+    // so wading into a tarn put it under the surface and the screen went the
+    // colour of the water plane.
+    const field = g.rig.height;
+    let underwater = 0;
+    let checked = 0;
+    for (let dx = -900; dx <= 900; dx += 90) {
+      for (let dz = -900; dz <= 900; dz += 90) {
+        if (!field.underwater(dx, dz)) continue;
+        checked++;
+        if (field.clearHeight(dx, dz) < field.at(dx, dz) + 0.001) underwater++;
+      }
+    }
+
+    return {
+      flocks,
+      clouds,
+      taggable,
+      scattered: Math.round(Math.hypot(after.x - before.x, after.z - before.z)),
+      lakePoints: checked,
+      cameraUnderWater: underwater,
+    };
+  });
+
+  // Things worth walking to.
+  //
+  // The sim half is covered by unit tests; what only a browser can answer is
+  // whether the mark on an unopened landmark actually exists in the scene, and
+  // whether opening one makes it go away.
+  const found = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const site = g.world.openSites()[0];
+    if (!site) return { ok: false, why: 'nothing to find in this zone' };
+
+    const marks = () => {
+      let n = 0;
+      g.rig.scene.traverse((o) => {
+        if (o.userData?.siteMark) n++;
+      });
+      return n;
+    };
+    me.pos = { x: site.pos.x, z: site.pos.z - 20 };
+    g.rig.stream(me.pos.x, me.pos.z, true);
+    await new Promise((r) => setTimeout(r, 700));
+    const before = marks();
+
+    me.pos = { x: site.pos.x, z: site.pos.z - 2 };
+    const goldBefore = me.gold ?? 0;
+    const effectsBefore = (me.effects ?? []).length;
+    g.world.submit(me.id, { t: 'search' });
+    await new Promise((r) => setTimeout(r, 500));
+    const paid = (me.gold ?? 0) > goldBefore || (me.effects ?? []).length > effectsBefore;
+    const after = marks();
+
+    // And the buff row, which had no display at all before this.
+    const pips = document.querySelectorAll('#effects .pip').length;
+    return {
+      ok: true,
+      kind: site.kind,
+      before,
+      after,
+      paid,
+      pips,
+      opened: g.world.found[site.id] === true,
+      onMap: g.world.sites.some((s) => g.world.found[s.id]),
+    };
+  });
+
   // Can I win this fight, and is that corpse worth walking to.
   const danger = await page.evaluate(async () => {
     const g = window.__game;
@@ -1676,6 +1779,14 @@ async function main() {
     ['every zone resolved a theme', themesMatched],
     ['entities stand on the terrain', standingOnGround],
     ['a creature in a lake wades rather than walking the bottom', wading],
+    ['there are birds in the sky', alive.flocks > 0],
+    ['a flock breaks up when you walk into it', alive.scattered > 3],
+    ['and nothing ambient can ever be targeted', alive.taggable === 0],
+    ['the camera stays above the water', alive.lakePoints > 0 && alive.cameraUnderWater === 0],
+    ['an unopened landmark is marked in the world', found.ok && found.before > 0],
+    ['searching it pays', found.paid],
+    ['and the mark goes away', found.after < found.before],
+    ['what is on you is on the screen', found.kind !== 'boon' || found.pips > 0],
     ['nameplates are coloured by what they would do to you', danger.colours >= 2],
     ['the target frame says the danger in words', danger.deadly !== danger.trivial],
     ['and says it about the right creature', /deadly|dangerous/.test(danger.deadly ?? '')],
@@ -1783,6 +1894,8 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('wade:', JSON.stringify(wade));
+  console.log('alive:', JSON.stringify(alive));
+  console.log('found:', JSON.stringify(found));
   console.log('danger:', JSON.stringify(danger));
   console.log('tips:', JSON.stringify(tips));
   console.log('bodies:', JSON.stringify(bodies), '| gear:', JSON.stringify(gear));

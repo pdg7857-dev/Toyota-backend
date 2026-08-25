@@ -137,6 +137,13 @@ import {
   getHolding,
   standingBand,
 } from '../content/factions.js';
+import {
+  DISCOVERY_RANGE,
+  discoveriesFor,
+  discoveryName,
+  type DiscoverySite,
+} from '../content/discoveries.js';
+import { zoneStructures as structuresOf } from '../content/structures.js';
 import { getSkill, skillsForClass } from '../content/skills.js';
 import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
 import { CLASSES, ZONES, getZone, type ZoneDef } from '../content/zone.js';
@@ -185,7 +192,7 @@ function roamHash(a: number, b: number): number {
 const COMBAT_TIMEOUT_MS = 6000;
 
 /** Save format version. Bump when the Entity shape changes. */
-const SAVE_VERSION = 10;
+const SAVE_VERSION = 11;
 
 /**
  * How big a step `catchUp` takes through the time you were away.
@@ -232,6 +239,19 @@ export class World {
    * midnight in a game whose first instruction is to go and look at a beast.
    */
   worldTimeMs = DAY_LENGTH_MS * 0.34;
+
+  /**
+   * Landmarks in this zone that hold something, and which of them are opened.
+   *
+   * The sites themselves are derived from the zone — `zoneStructures` is pure,
+   * so the sim and the renderer compute the same landmarks rather than one
+   * being handed the other's list. What is *state* is only which ones have
+   * been opened, and that is keyed on where a site stands rather than on its
+   * index: an index would silently re-point every save the moment anybody
+   * added a landmark.
+   */
+  sites: DiscoverySite[] = [];
+  found: Record<string, true> = {};
   entities = new Map<EntityId, Entity>();
   playerId: EntityId = 0;
 
@@ -294,6 +314,7 @@ export class World {
     }
     for (const v of this.zone.vendors ?? []) this.spawnVendor(v.vendorId, v.pos);
     this.spawnAdventurers();
+    this.sites = discoveriesFor(this.zone.id, structuresOf(this.zone));
   }
 
   // ------------------------------------------------------------------ setup
@@ -1262,6 +1283,7 @@ export class World {
       if (eff.kind !== 'buff') continue;
       stats.defense += scaledDefenseBonus(eff.defenseBonus ?? 0, e.level);
       damageMultiplier *= eff.damageMultiplier ?? 1;
+      stats.moveSpeed += eff.moveSpeedBonus ?? 0;
     }
     if (damageMultiplier !== 1) {
       stats.damageMin *= damageMultiplier;
@@ -1330,6 +1352,9 @@ export class World {
         break;
       case 'loot':
         this.tryLoot(e, cmd.id);
+        break;
+      case 'search':
+        this.trySearch(e);
         break;
       case 'equip':
         this.tryEquip(e, cmd.itemId);
@@ -2802,6 +2827,105 @@ export class World {
 
   // --------------------------------------------------------------- inventory
 
+  /**
+   * The nearest unopened landmark you are standing at.
+   *
+   * Nothing here is rolled. What a site holds was decided by where it stands
+   * (`discoveriesFor` hashes the position), which keeps the whole feature off
+   * `this.rng` — the lesson roaming and the weather both had to learn, because
+   * anything ambient that touches the combat stream turns every balance figure
+   * in the suite into a measurement of the scenery.
+   */
+  siteAt(pos: Vec2): DiscoverySite | null {
+    let best: DiscoverySite | null = null;
+    let bestGap = DISCOVERY_RANGE;
+    for (const site of this.sites) {
+      if (this.found[site.id]) continue;
+      const gap = dist(pos.x, pos.z, site.pos.x, site.pos.z);
+      if (gap <= bestGap) {
+        bestGap = gap;
+        best = site;
+      }
+    }
+    return best;
+  }
+
+  /** Every site in this zone you have not opened yet, for the marks on screen. */
+  openSites(): DiscoverySite[] {
+    return this.sites.filter((s) => !this.found[s.id]);
+  }
+
+  /**
+   * Open one. Once, ever.
+   *
+   * A discovery you can come back to is a grinding spot with extra steps, and
+   * the feeling being bought here is "nobody else is getting this one". The
+   * refusal names the reason, the same way every mount failure does:
+   * "nothing happened" reads as a broken key.
+   */
+  private trySearch(player: Entity): void {
+    const site = this.siteAt(player.pos);
+    if (!site) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: 'Nothing here worth searching.',
+      });
+      return;
+    }
+    this.found[site.id] = true;
+
+    if (site.kind === 'boon' && site.boon) {
+      const boon = site.boon;
+      // Replaces rather than stacks: two of the same blessing is a number
+      // going up, and a blessing is meant to be a thing you go and get.
+      player.effects = (player.effects ?? []).filter((e) => e.sourceAbilityId !== boon.id);
+      player.effects.push({
+        id: `${boon.id}:${this.nextId++}`,
+        kind: 'buff',
+        sourceId: player.id,
+        sourceAbilityId: boon.id,
+        remainingMs: boon.minutes * 60_000,
+        // A blessing that regenerates ticks on the same clock a salve does.
+        tickMs: 1000,
+        sinceTickMs: 0,
+        damageType: 'physical',
+        ...(boon.damageMultiplier ? { damageMultiplier: boon.damageMultiplier } : {}),
+        ...(boon.defenseBonus ? { defenseBonus: boon.defenseBonus } : {}),
+        ...(boon.regenPerSec ? { regenPerTick: boon.regenPerSec } : {}),
+        ...(boon.moveSpeedBonus ? { moveSpeedBonus: boon.moveSpeedBonus } : {}),
+      });
+      this.events.push({
+        t: 'discovered',
+        entityId: player.id,
+        siteId: site.id,
+        name: boon.name,
+        kind: 'boon',
+        line: boon.line,
+        gold: 0,
+      });
+      return;
+    }
+
+    // A cache pays in the currency the economy already runs on, scaled to what
+    // an ordinary kill is worth *here*. Anywhere else and a level-3 farmstead
+    // would be worth robbing at level 90.
+    const band = this.zone.levelRange;
+    const level = Math.round((band[0] + band[1]) / 2);
+    const purse = goldForKill(level, 1);
+    const gold = Math.round(((purse.min + purse.max) / 2) * site.worth);
+    player.gold = (player.gold ?? 0) + gold;
+    this.events.push({
+      t: 'discovered',
+      entityId: player.id,
+      siteId: site.id,
+      name: discoveryName(site),
+      kind: 'cache',
+      line: 'Somebody left in a hurry.',
+      gold,
+    });
+  }
+
   private tryLoot(player: Entity, corpseId: EntityId): void {
     const corpse = this.entities.get(corpseId);
     if (!corpse || !corpse.dead || corpse.kind !== 'mob') return;
@@ -3036,6 +3160,9 @@ export class World {
     for (const v of zone.vendors) this.spawnVendor(v.vendorId, v.pos);
     for (const dragon of DRAGONS) this.syncDragonEntity(dragon);
     this.spawnAdventurers();
+    // `found` is deliberately NOT cleared: a site's id carries its zone, so
+    // what you opened in the Fenmarch is still opened when you come back.
+    this.sites = discoveriesFor(zone.id, structuresOf(zone));
 
     this.events.push({
       t: 'zoneChanged',
@@ -3377,6 +3504,9 @@ export class World {
       dragons: this.dragons,
       hazards: this.hazards,
       nextHazardId: this.nextHazardId,
+      // Which landmarks you have opened. The sites themselves are derived, so
+      // only the "once, ever" half is state.
+      found: this.found,
       entities: [...this.entities.values()],
     });
   }
@@ -3393,6 +3523,7 @@ export class World {
       control?: Record<string, number>;
       hazards?: World['hazards'];
       nextHazardId?: number;
+      found?: Record<string, true>;
       controller?: Record<string, FactionId>;
       dragons?: Record<string, DragonState>;
       entities: Entity[];
@@ -3415,6 +3546,7 @@ export class World {
     if (typeof data.worldTimeMs === 'number') world.worldTimeMs = data.worldTimeMs;
     if (Array.isArray(data.hazards)) world.hazards = data.hazards;
     if (typeof data.nextHazardId === 'number') world.nextHazardId = data.nextHazardId;
+    if (data.found) world.found = { ...data.found };
     world.nextId = data.nextId;
     world.playerId = data.playerId;
     if (data.control) world.control = { ...world.control, ...data.control };

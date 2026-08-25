@@ -1350,3 +1350,35 @@ canvas { display: block; }
   text-transform: uppercase;
   text-align: right;
 }
+
+/* A discovery is not an arrival and not a rare spawn: quieter than both,
+ * because it is a thing you found rather than a thing that turned up. */
+#zone-banner.found {
+  color: #b8d8a0;
+  font-size: 26px;
+  letter-spacing: 3px;
+  text-transform: none;
+}
+
+/* What is on you right now. There was no display for this at all: a defensive
+ * buff you cannot see is one you cannot time, and a blessing you walked half a
+ * zone to find is one you forget you are carrying. */
+#effects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+#effects .pip {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 2px 6px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 3px;
+  background: rgba(10, 13, 11, 0.7);
+  font-size: 11px;
+}
+#effects .pip.good .pip-name { color: #b8d8a0; }
+#effects .pip.bad .pip-name { color: #d08a72; }
+#effects .pip-left { color: #9c937c; font-variant-numeric: tabular-nums; }
