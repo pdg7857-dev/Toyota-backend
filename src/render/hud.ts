@@ -7,6 +7,8 @@ import { getQuest } from '../content/quests.js';
 import {
   MAX_LEVEL,
   MAX_SKILL_RANK,
+  POINTS_PER_LEVEL,
+  SKILL_POINTS_PER_LEVEL,
   SKILL_RANK_CRIT,
   SKILL_RANK_POWER,
   xpToNext,
@@ -153,6 +155,9 @@ export class Hud {
     overlays: HTMLElement;
     telegraph: HTMLElement;
     zoneBanner: HTMLElement;
+    levelCard: HTMLElement;
+    levelCardLevel: HTMLElement;
+    levelCardBody: HTMLElement;
     travelPrompt: HTMLElement;
     questLog: HTMLElement;
     questLogBody: HTMLElement;
@@ -282,6 +287,9 @@ export class Hud {
       overlays: this.q('#overlays'),
       telegraph: this.q('#telegraph-banner'),
       zoneBanner: this.q('#zone-banner'),
+      levelCard: this.q('#levelup'),
+      levelCardLevel: this.q('#levelup-level'),
+      levelCardBody: this.q('#levelup-body'),
       travelPrompt: this.q('#travel-prompt'),
       questLog: this.q('#quest-log'),
       questLogBody: this.q('#quest-log-body'),
@@ -346,6 +354,12 @@ export class Hud {
 
   handleEvents(events: SimEvent[], camera: THREE.Camera): void {
     const playerId = this.world.playerId;
+    // A level and the skills it granted arrive as separate events in the same
+    // tick. Collected rather than handled one at a time, because three lines
+    // scrolling past in a nine-line log is exactly the problem: this is the
+    // payoff of the whole grind and it wants to be one thing on screen.
+    let levelled: number | null = null;
+    const learned: string[] = [];
     for (const ev of events) {
       switch (ev.t) {
         case 'damage': {
@@ -404,6 +418,7 @@ export class Hud {
           break;
         case 'levelUp':
           this.log(`You have reached level ${ev.level}!`, 'log-good');
+          if (ev.entityId === playerId) levelled = ev.level;
           break;
         case 'captured': {
           this.log(
@@ -468,6 +483,7 @@ export class Hud {
         }
         case 'skillUnlocked':
           this.log(`New skill learned: ${getSkill(ev.skillId).name}.`, 'log-good');
+          if (ev.entityId === playerId) learned.push(ev.skillId);
           break;
         case 'questAccepted':
           this.log(`Quest accepted: ${getQuest(ev.questId).name}`, 'log-good');
@@ -617,6 +633,55 @@ export class Hud {
           break;
       }
     }
+    if (levelled !== null) this.showLevelCard(levelled, learned);
+  }
+
+  /**
+   * The level you just earned, and what it actually gave you.
+   *
+   * Twenty-eight thousand kills is what this game is, and a level was one grey
+   * line in a nine-line log — gone in seconds, usually mid-fight, and never
+   * read. The line stays, because the log is the record; the card is the
+   * moment.
+   *
+   * The half that is not celebration is the half that matters. A skill granted
+   * at level twelve used to appear in a slot silently, so the player found out
+   * about it by noticing a box had stopped being grey — which is not how
+   * anybody learns they can do something new. It is named, and so is the key
+   * it sits on, because a skill you cannot find is a skill you do not have.
+   */
+  private showLevelCard(level: number, learned: string[]): void {
+    const player = this.world.player;
+    const lines: string[] = [];
+
+    const points: string[] = [];
+    const plural = (n: number, word: string) => `+${n} ${word} point${n === 1 ? '' : 's'}`;
+    if (POINTS_PER_LEVEL > 0) points.push(plural(POINTS_PER_LEVEL, 'attribute'));
+    if (SKILL_POINTS_PER_LEVEL > 0) points.push(plural(SKILL_POINTS_PER_LEVEL, 'skill'));
+    if (points.length) lines.push(`<b>${points.join(' · ')}</b> — press C to spend`);
+
+    for (const skillId of learned) {
+      const slot = this.skillOrder.indexOf(skillId);
+      const key = slot >= 0 ? hotkeyLabel(slot) : null;
+      lines.push(
+        `New skill — <b>${getSkill(skillId).name}</b>` + (key ? ` on <b>${key}</b>` : ''),
+      );
+    }
+
+    // The door that just opened. A band's bottom is the one number a player
+    // has no way of knowing has been reached, and the alternative is finding
+    // out by walking to the end of the road and being turned back.
+    const exit = this.world.zone.exits.find((e) => e.minLevel === level);
+    if (exit) lines.push(`<b>${exit.label}</b> is open to you`);
+
+    if (player.level >= MAX_LEVEL) lines.push('There is nothing above this one.');
+
+    this.els.levelCardLevel.textContent = `Level ${level}`;
+    this.els.levelCardBody.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+    this.els.levelCard.classList.remove('show');
+    // Restart the animation rather than letting a second level be silent.
+    void this.els.levelCard.offsetWidth;
+    this.els.levelCard.classList.add('show');
   }
 
   /** Resolve a skill or mob-ability id to a display name. */
@@ -2763,6 +2828,8 @@ const TEMPLATE = `
   </div>
 
   <div id="zone-banner"></div>
+
+  <div id="levelup"><div id="levelup-level"></div><div id="levelup-body"></div></div>
 
   <div id="away-report" class="panel clickable">
     <h3><span id="away-title"></span><span id="away-close">✕</span></h3>

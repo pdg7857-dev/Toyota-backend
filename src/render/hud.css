@@ -1469,3 +1469,45 @@ canvas { display: block; }
 /* A lootable corpse that is not the one F would take. The gold mark over it
  * already says there is something there; the plate is only in the way. */
 .nameplate.muted { opacity: 0.4; }
+
+/* ------------------------------------------------------------- the level up */
+
+/* The payoff of twenty-eight thousand kills. It used to be one grey line in a
+ * nine-line log, which is to say it used to be nothing. Below the zone banner
+ * so the two can happen together — walking into Ardmoor at the level that
+ * opened it is exactly when they do. */
+#levelup {
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  transform: translateX(-50%);
+  text-align: center;
+  opacity: 0;
+  white-space: nowrap;
+  text-shadow: 0 2px 12px #000;
+}
+
+#levelup.show { animation: levelFade 5.2s ease-out forwards; }
+
+#levelup-level {
+  font-size: 30px;
+  letter-spacing: 6px;
+  text-transform: uppercase;
+  color: #ffe9a8;
+}
+
+#levelup-body {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: #d8cfb8;
+}
+
+#levelup-body b { color: var(--gold); }
+
+@keyframes levelFade {
+  0% { opacity: 0; transform: translate(-50%, 14px); }
+  10% { opacity: 1; transform: translate(-50%, 0); }
+  78% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -10px); }
+}

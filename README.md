@@ -433,6 +433,12 @@ and then it is worth knowing for a hundred levels.
 
 The target frame names it and says what to do about it.
 
+## The level you just earned
+
+A level tells you what it gave you: the points, the skill it granted and the
+key that skill sits on, and — when you have reached the bottom of the next
+band — the road that just opened.
+
 ## A camp that notices you are farming it
 
 Stand in one camp and empty it quickly and the place answers. The survivors

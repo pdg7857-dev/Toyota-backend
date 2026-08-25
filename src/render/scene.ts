@@ -49,6 +49,25 @@ const REFERENCE_AREA = 290 * 290;
  */
 const SHADOW_HALF = 150;
 
+/**
+ * How far away the sun is put, along the direction its theme gives it.
+ *
+ * A theme's `sun.position` reads as a direction and was used as a *position*,
+ * which put the light 55 metres above the player's head — closer to the ground
+ * than the shadow frustum is wide. A third of that frustum was therefore behind
+ * the light's own near plane, and everything in it came back as a hard-edged
+ * black wedge across a quarter of the screen. It is in every screenshot this
+ * project has ever taken and no assertion could see it: somebody had to stand
+ * at the stone circle and look at the shadow.
+ *
+ * Far enough that the whole frustum, plus the tallest ground in any zone, sits
+ * comfortably between `near` and `far`.
+ */
+const SUN_DISTANCE = 500;
+
+/** How much depth either side of that distance the shadow camera keeps. */
+const SHADOW_DEPTH = 360;
+
 /** Half-width of the box the ambient motes drift in. */
 const MOTE_SPAN = 90;
 
@@ -156,8 +175,8 @@ export class SceneRig {
     this.sun = new THREE.DirectionalLight(0xffffff, 1.5);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.near = 1;
-    this.sun.shadow.camera.far = 400;
+    this.sun.shadow.camera.near = SUN_DISTANCE - SHADOW_DEPTH;
+    this.sun.shadow.camera.far = SUN_DISTANCE + SHADOW_DEPTH;
     // Without a bias, a shadow frustum this size self-shadows the ground it is
     // lighting: the whole near field renders as one dark band with the lit
     // world beyond it, which reads as dusk falling in a circle around you.
@@ -250,8 +269,15 @@ export class SceneRig {
     this.streamCells(x, z);
     this.recentreMotes(x, z, force);
     // Keep the shadow frustum on the player, and the sun's direction fixed.
+    //
+    // Placed at a fixed *distance* along that direction rather than at the
+    // theme's literal offset. See `SUN_DISTANCE`: the offset is a direction and
+    // using it as a position put the light inside the shadow frustum.
     const dir = this.theme.sun.position;
-    this.sun.position.set(x + dir[0], this.sunHeight || dir[1], z + dir[2]);
+    const y = this.sunHeight || dir[1];
+    const len = Math.hypot(dir[0], y, dir[2]) || 1;
+    const k = SUN_DISTANCE / len;
+    this.sun.position.set(x + dir[0] * k, y * k, z + dir[2] * k);
     this.sun.target.position.set(x, 0, z);
     this.sun.target.updateMatrixWorld();
   }
@@ -703,6 +729,10 @@ export class SceneRig {
     // Directional light nearly goes out. Flat ground and no shadows are most
     // of what a person actually reads as "it is night".
     this.sun.intensity = theme.sun.intensity * (0.2 + 0.8 * day);
+    // And stops casting altogether once it is low enough not to be believed.
+    // A shadow at dead of night is a shadow of the moon, and a sun that low
+    // draws one the length of the whole visible ground.
+    this.sun.castShadow = day > 0.18;
     // Ambient never drops below half, and turns the colour of moonlight rather
     // than simply dimming. This line is what keeps the rule in
     // `content/daylight.ts`: night is a mood, not a legibility problem.

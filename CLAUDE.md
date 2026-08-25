@@ -1188,6 +1188,53 @@ Both halves are shown: the target frame names the trait beside the danger word
 and its tooltip carries **the answer**, because a player told "Venomous" and
 nothing else has been given a word rather than a decision.
 
+## The level you just earned
+
+The whole design of this game is twenty-eight thousand kills, and reaching a
+level — the thing all of them are for — was **one grey line in a nine-line
+log**. It arrived mid-fight, it scrolled away in seconds, and nothing on screen
+marked it. The bar showing unspent points was already doing more work than the
+moment itself.
+
+The line stays, because the log is the record. The card is the moment, and the
+half of it that is not celebration is the half that matters:
+
+- **What it gave you**, in points, with the key that spends them.
+- **The skill it granted, and the key that skill sits on.** A skill granted at
+  level twelve used to appear by a box quietly ceasing to be grey, which is not
+  how anybody finds out they can do something new. `hotkeyLabel` is read off
+  the bar itself, so the card cannot name a key the bar does not have.
+- **The road that just opened.** A band's bottom (`ZoneExit.minLevel`) is the
+  one number a player has no way of knowing they have reached, and the
+  alternative was walking three kilometres to the end of the road and being
+  turned back.
+
+A level and the skills it granted arrive as separate events in the same tick,
+so `handleEvents` collects them and draws once at the end of the batch. Three
+lines scrolling past one after another is precisely the problem being fixed.
+
+`smoke` levels the character for real — sets the experience a point short and
+kills something — rather than pushing a synthetic event, and checks the card
+against the *skill definition* rather than against a keyword.
+
+### And the sun was inside its own shadow frustum
+
+Found while chasing a black wedge across a quarter of the screen in every
+`look` picture ever taken. The wedge turned out to be a standing stone the
+camera was parked inside — see "Deliberately not built yet" — but the search
+turned up a real one beside it.
+
+A theme's `sun.position` reads as a *direction* and was being used as a
+**position**: the light sat 55 metres above the player's head, with a shadow
+frustum 300 metres wide. A third of that frustum was therefore behind the
+light's own near plane. The sun is now placed at a fixed `SUN_DISTANCE` along
+that direction, with `near`/`far` bracketing it, and the stones cast shadows
+that read as shadows rather than as blobs.
+
+It also stops casting at all once the sun is low enough not to be believed. A
+shadow at midnight is a shadow of the moon, and a sun that low draws one the
+length of the visible ground.
+
 ## The two-minute scale was empty
 
 The loop has a ten-second unit — a kill — and a forty-minute unit — a level —

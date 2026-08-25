@@ -1548,6 +1548,103 @@ async function main() {
     };
   });
 
+  // The level you just earned.
+  //
+  // The payoff of the whole design, and until now one grey line in a nine-line
+  // log — gone in seconds, usually mid-fight. What is worth asserting is not
+  // that a card appeared but that it *says what changed*: a skill granted at a
+  // level used to arrive by a box quietly ceasing to be grey.
+  const levelling = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const was = { level: me.level, xp: me.xp, points: me.unspentPoints, skills: me.skillPoints };
+
+    // A level that actually grants something, so the card has all three
+    // things to say rather than only the points.
+    const granted = Object.values(g.allSkills())
+      .filter((sk) => sk.classId === me.classId && !sk.taughtBy && sk.reqLevel > 1)
+      .sort((a, b) => b.reqLevel - a.reqLevel)[0];
+    me.level = granted.reqLevel - 1;
+    me.xp = Math.max(0, g.xpToNext(me.level) - 1);
+
+    const victim = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+    g.world.submit(me.id, { t: 'target', id: victim.id });
+    g.world.submit(me.id, { t: 'autoAttack', on: true });
+    const until = Date.now() + 20000;
+    while (!victim.dead && Date.now() < until) {
+      victim.pos = { x: me.pos.x + 2, z: me.pos.z };
+      victim.health = 1;
+      await new Promise((r) => setTimeout(r, 80));
+    }
+    g.world.submit(me.id, { t: 'autoAttack', on: false });
+    await new Promise((r) => setTimeout(r, 250));
+
+    const card = document.querySelector('#levelup');
+    const shown = card.classList.contains('show') && getComputedStyle(card).opacity > 0.2;
+    const head = document.querySelector('#levelup-level').textContent ?? '';
+    const body = document.querySelector('#levelup-body').textContent ?? '';
+    const keys = [...document.querySelectorAll('#levelup-body b')].map((b) => b.textContent);
+
+    // And again at the level that opens the road out. A band's bottom is the
+    // one number a player has no way of knowing they have reached, and the
+    // alternative is walking to the end of the road and being turned back.
+    const exit = g.world.zone.exits[0];
+    let door = '';
+    if (exit) {
+      me.level = exit.minLevel - 1;
+      me.xp = Math.max(0, g.xpToNext(me.level) - 1);
+      const second = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+      g.world.submit(me.id, { t: 'target', id: second.id });
+      g.world.submit(me.id, { t: 'autoAttack', on: true });
+      const stop = Date.now() + 20000;
+      while (!second.dead && Date.now() < stop) {
+        second.pos = { x: me.pos.x + 2, z: me.pos.z };
+        second.health = 1;
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      g.world.submit(me.id, { t: 'autoAttack', on: false });
+      await new Promise((r) => setTimeout(r, 250));
+      door = document.querySelector('#levelup-body').textContent ?? '';
+    }
+
+    me.level = was.level;
+    me.xp = was.xp;
+    me.unspentPoints = was.points;
+    me.skillPoints = was.skills;
+    return {
+      saysTheDoor: !!exit && door.includes(exit.label),
+      door: door.slice(0, 100),
+      shown,
+      head,
+      reached: head.includes(String(granted.reqLevel)),
+      saysPoints: /point/.test(body),
+      saysTheSkill: body.includes(granted.name),
+      // The key it sits on, which is the part that makes it findable.
+      saysTheKey: keys.some((k) => /^(⇧?[0-9])$/.test(k ?? '')),
+      skill: granted.name,
+      body: body.slice(0, 140),
+    };
+  });
+
+  // And a picture of it, because a card nobody looks at is a card that can be
+  // ugly for a year. Replayed through the HUD rather than by levelling again:
+  // the state is already back where it was and putting it out twice is not
+  // what is being photographed.
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.hud.handleEvents(
+      [
+        { t: 'levelUp', entityId: g.world.player.id, level: g.world.player.level },
+        ...(g.hud.skillForSlot(6)
+          ? [{ t: 'skillUnlocked', entityId: g.world.player.id, skillId: g.hud.skillForSlot(6) }]
+          : []),
+      ],
+      g.camera,
+    );
+  });
+  await wait(500);
+  await page.screenshot({ path: join(OUT, '20-levelup.png') });
+
   // The belt.
   //
   // Sixteen consumables, a two-clock cooldown system built so chaining them is
@@ -2148,6 +2245,11 @@ async function main() {
     ['a skill lights up when its moment arrives', timing.ok && timing.nearlyDead > 0],
     ['and is dark the rest of the time', timing.healthy === 0],
     ['a kill is written down', reckoning.counted && reckoning.byBase],
+    ['a level is a moment, not a log line', levelling.shown && levelling.reached],
+    ['and says what it gave you', levelling.saysPoints],
+    ['and names the skill it granted', levelling.saysTheSkill],
+    ['and the key that skill sits on', levelling.saysTheKey],
+    ['and the road that just opened', levelling.saysTheDoor],
     ['the reckoning adds it up', reckoning.total && reckoning.rows > 6],
     ['and says what the creature does', reckoning.saysTrait],
     ['the belt shows what you are carrying', belt.ok && belt.shown],
@@ -2276,6 +2378,7 @@ async function main() {
   console.log('muster:', JSON.stringify(muster), '| offer:', JSON.stringify(questOffer));
   console.log('timing:', JSON.stringify(timing));
   console.log('reckoning:', JSON.stringify(reckoning));
+  console.log('levelling:', JSON.stringify(levelling));
   console.log('belt:', JSON.stringify(belt));
   console.log('traits:', JSON.stringify(traits));
   console.log('alive:', JSON.stringify(alive));
