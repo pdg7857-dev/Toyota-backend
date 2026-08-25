@@ -80,6 +80,15 @@ timer; the only thing that produces a dragon is time. It sits at the top of its
 zone's band, it is the hardest fight there, and it carries the best weapon in
 the game.
 
+## The drop is the moment
+
+A rare or an epic says so, in its own colour, and tells you whether it beats
+what you are wearing. Everything below that goes quietly in the log, the same
+as it always did.
+
+At a trader, one row sells every trade good in your bags at once. It never
+touches gear.
+
 ## Other people
 
 The zone has four other adventurers in it, and they are the only part of this

@@ -147,6 +147,42 @@ The bar draws the debt as ground still to make up, sitting *ahead* of where you
 are — not as a bite taken out behind you. It has never taken anything away, and
 the bar must not imply that it has.
 
+## The drop is the moment
+
+A rare or an epic is the thing a player farmed a boss for an hour to get, and
+it arrived as one grey line in a nine-line log — exactly what a level used to
+do, and wrong for exactly the same reason. It gets a card, in the piece's own
+quality colour, and the loot sound at full volume rather than at three
+quarters: the same voice, unmistakably the good version of the one they hear
+four hundred times an hour.
+
+Two rules, and the second is the one that makes it worth reading:
+
+- **Nothing below rare, ever.** A card for the four hundredth Wolf Pelt would
+  teach the player to ignore the card, and then the epic goes past unnoticed
+  too. Everything else still goes to the log and nowhere else.
+- **It says whether it beats what you are wearing.** That is the question a
+  player actually asks of something they just picked up, and until now the only
+  way to answer it was to stop, open the bags and hover the thing. It runs the
+  same comparison the tooltips do, so the two can never disagree.
+
+Both cards are in the reserved set, so nameplates get out of their way while
+they are up — and only while they are up, because they are laid out even when
+faded and a permanent hole in the middle of the screen is worse than the
+collision.
+
+### And the trader takes the lot
+
+Merchant goods exist only to be sold, and a run brings back a dozen stacks of
+them. Clicking each one is not a decision, it is a chore wearing a decision's
+clothes; the only reason it was ever twelve clicks is that nobody had come back
+from a long trip and counted.
+
+One row, one click, and it **touches nothing but trade goods**. Selling a drop
+by mistake is the only irreversible thing in this shop, and a button that could
+do it is a button nobody dares press — which would leave the twelve clicks
+exactly where they were.
+
 ## The map moves while the game is closed
 
 `tickTerritory` made the war carry on without you, but only while the tab was
@@ -1004,13 +1040,18 @@ is called every time. What that buys:
   rule, against the name of the piece it would replace. When nothing differs it
   says so — silence reads as a broken tooltip.
 
-The last native `title=` left in the HUD was the one that mattered most: a
-quest **offer**. That row is the only place in the shop a player makes a
+Two native `title=` attributes outlived the conversion, and both were on rows
+where a player makes a decision. A quest **offer**: That row is the only place in the shop a player makes a
 decision, and it showed a name and a number with the job itself hidden behind a
 second's delay. It now says what the work is, why anybody wants it done and
 what it pays, and `smoke` checks the objective lines against the quest
 definition rather than against a keyword — so it cannot pass by accident on
 whichever chain the trader happens to be offering.
+
+And the **sell row**, which is where a player decides whether the thing they
+are about to hand over is worth keeping. It now shows the same comparison
+against what is worn that the bags do, because "is this better than mine" is
+the question, and a browser tooltip cannot answer it.
 
 It also caught a real bug by existing: **the open panels rebuilt their entire
 DOM every frame.** `title=` survived that because the browser re-reads the

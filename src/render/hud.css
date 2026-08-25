@@ -1511,3 +1511,57 @@ canvas { display: block; }
   78% { opacity: 1; transform: translate(-50%, 0); }
   100% { opacity: 0; transform: translate(-50%, -10px); }
 }
+
+/* ------------------------------------------------------------ the one drop */
+
+/* A rare or an epic, and nothing below it. The four hundredth Wolf Pelt gets
+ * the log, the same as always — a card for that would teach the player to
+ * ignore the card. Below the level card so the two can land together, which
+ * they do surprisingly often: a boss pays out both at once. */
+#drop {
+  position: absolute;
+  left: 50%;
+  top: 47%;
+  transform: translateX(-50%);
+  text-align: center;
+  opacity: 0;
+  white-space: nowrap;
+  text-shadow: 0 2px 12px #000;
+}
+
+#drop.show { animation: dropFade 4.6s ease-out forwards; }
+
+#drop-name {
+  font-size: 23px;
+  letter-spacing: 1.5px;
+  color: #e8e0c8;
+}
+
+#drop-name.q-uncommon { color: #7fc98a; }
+#drop-name.q-rare { color: #6f9fd8; }
+#drop-name.q-epic { color: #c07fd0; }
+
+#drop-body {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #cfc7b2;
+}
+
+#drop-body .muted { text-transform: uppercase; letter-spacing: 1px; font-size: 11px; }
+
+@keyframes dropFade {
+  0% { opacity: 0; transform: translate(-50%, 10px) scale(0.96); }
+  12% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  76% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -8px) scale(1); }
+}
+
+/* One click for a run's worth of trade goods. Set apart from the stacks below
+ * it, because it is the only row in the column that does more than one thing. */
+.vendor-row.sell-all {
+  border-bottom: 1px solid var(--panel-edge);
+  margin-bottom: 4px;
+  padding-bottom: 5px;
+  color: var(--gold);
+}

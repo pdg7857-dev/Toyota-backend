@@ -60,6 +60,33 @@ const MAX_LOG_LINES = 9;
  * takes, and two copies of a constant drift.
  */
 export const LOOT_RANGE = 4.5;
+/**
+ * The furniture a nameplate, a floating number or a speech bubble must not be
+ * drawn on top of.
+ *
+ * Panels that open and close are in here too: `offsetParent` sorts out which
+ * of them are actually on screen, and a character sheet is the *worst* case
+ * rather than an edge one — it is translucent, so a plate behind it reads
+ * straight through the numbers.
+ */
+const RESERVED_PANELS = [
+  '#minimap',
+  '#minimap-clock',
+  '#player-frame',
+  '#target-frame',
+  '#tracker',
+  '#right-panels',
+  '#realm-window',
+  '#journal-window',
+  '#quest-log',
+  '#vendor-window',
+  '#map-panel',
+  // The two cards. They are laid out even while faded, so what decides
+  // whether they count is whether they can actually be seen.
+  '#levelup',
+  '#drop',
+];
+
 /** Slots on the first hotkey row, bound to 1-9 then 0. */
 const PRIMARY_ROW_SLOTS = 10;
 
@@ -157,6 +184,9 @@ export class Hud {
     telegraph: HTMLElement;
     zoneBanner: HTMLElement;
     levelCard: HTMLElement;
+    dropCard: HTMLElement;
+    dropName: HTMLElement;
+    dropBody: HTMLElement;
     levelCardLevel: HTMLElement;
     levelCardBody: HTMLElement;
     travelPrompt: HTMLElement;
@@ -296,6 +326,9 @@ export class Hud {
       telegraph: this.q('#telegraph-banner'),
       zoneBanner: this.q('#zone-banner'),
       levelCard: this.q('#levelup'),
+    dropCard: this.q('#drop'),
+    dropName: this.q('#drop-name'),
+    dropBody: this.q('#drop-body'),
       levelCardLevel: this.q('#levelup-level'),
       levelCardBody: this.q('#levelup-body'),
       travelPrompt: this.q('#travel-prompt'),
@@ -576,6 +609,14 @@ export class Hud {
           );
           if (ev.gold > 0) names.push(`${ev.gold} gold`);
           if (names.length) this.log(`You loot ${names.join(', ')}.`, 'log-loot');
+          // The one piece worth stopping for. See `showDropCard`.
+          if (ev.entityId === playerId) {
+            const prize = ev.items
+              .map((s) => getItem(s.itemId))
+              .filter((it) => it.quality === 'rare' || it.quality === 'epic')
+              .sort((a, b) => Number(b.quality === 'epic') - Number(a.quality === 'epic'))[0];
+            if (prize) this.showDropCard(prize);
+          }
           break;
         }
         case 'castInterrupted':
@@ -945,6 +986,45 @@ export class Hud {
       line: '<span class="muted">Click it again on the map to take it off.</span>',
       where: { x: mark.x, z: mark.z, label: 'Your mark' },
     };
+  }
+
+  /**
+   * The one piece worth stopping for.
+   *
+   * A rare or an epic is the thing a player farmed a boss for an hour to get,
+   * and it arrived as one grey line in a nine-line log — exactly what a level
+   * used to do, and wrong for exactly the same reason. Everything below rare
+   * still goes to the log and nowhere else: a card for the four hundredth Wolf
+   * Pelt would teach the player to ignore the card.
+   *
+   * And the useful half again: it says whether it *beats what you are
+   * wearing*. That is the question a player actually asks of something they
+   * just picked up, and until now the only way to answer it was to open the
+   * bags and hover it.
+   */
+  private showDropCard(item: ItemDef): void {
+    const player = this.world.player;
+    const worn = item.slot && item.slot !== 'none' ? player.equipment?.[item.slot] : undefined;
+    const wornDef = worn ? getItem(worn) : null;
+
+    const lines: string[] = [];
+    lines.push(
+      `<span class="muted">${item.quality}${item.slot && item.slot !== 'none' ? ` · ${item.slot}` : ''}</span>`,
+    );
+    if (!canEquip(item, player.classId)) {
+      lines.push(`<span class="tip-down">Not for a ${player.classId}.</span>`);
+    } else if (wornDef) {
+      lines.push(compareItems(item, wornDef).join(' · '));
+    } else if (item.slot && item.slot !== 'none') {
+      lines.push('<span class="tip-up">Nothing in that slot yet.</span>');
+    }
+
+    this.els.dropName.className = `q-${item.quality}`;
+    this.els.dropName.textContent = item.name;
+    this.els.dropBody.innerHTML = lines.map((l) => `<div>${l}</div>`).join('');
+    this.els.dropCard.classList.remove('show');
+    void this.els.dropCard.offsetWidth;
+    this.els.dropCard.classList.add('show');
   }
 
   /** Which way the camera is facing, for the tracker arrow. */
@@ -1559,11 +1639,12 @@ export class Hud {
     // The minimap belongs to the map layer rather than to the HUD, but it is
     // in the same container and it is the single worst place for a plate to
     // land — it is the only opaque block in the top half of the screen.
-    for (const sel of ['#minimap', '#minimap-clock', '#player-frame', '#target-frame', '#tracker']) {
+    for (const sel of RESERVED_PANELS) {
       const el = document.querySelector<HTMLElement>(sel);
       if (!el || el.offsetParent === null) continue;
       const r = el.getBoundingClientRect();
-      if (r.width <= 0) continue;
+      if (r.width <= 0 || r.height <= 0) continue;
+      if (parseFloat(getComputedStyle(el).opacity) < 0.05) continue;
       this.reserved.push({ l: r.left - 4, t: r.top - 4, r: r.right + 4, b: r.bottom + 4 });
     }
   }
@@ -1949,6 +2030,43 @@ export class Hud {
       none.textContent = 'Nothing to sell';
       bags.appendChild(none);
     }
+    // The lot, in one click.
+    //
+    // Merchant goods exist only to be sold, and a run brings back a dozen
+    // stacks of them. Clicking each one is not a decision, it is a chore
+    // wearing a decision's clothes — and the only reason it was ever twelve
+    // clicks is that nobody had come back from a long trip and counted.
+    //
+    // It touches nothing but trade goods. Selling a drop by mistake is the one
+    // irreversible thing in this shop, and a button that could do it is a
+    // button nobody dares press.
+    const goods = inv.filter((st) => getItem(st.itemId).merchantGood);
+    if (goods.length > 1) {
+      const worth = goods.reduce((n, st) => n + sellPrice(getItem(st.itemId)) * st.qty, 0);
+      const kinds = goods.length;
+      const row = document.createElement('div');
+      row.className = 'vendor-row clickable sell-all';
+      row.innerHTML =
+        `<span>Sell the lot <span class="muted">${kinds} kinds</span></span>` +
+        `<span class="price sell">+${worth.toLocaleString()}g</span>`;
+      this.tip(row, () => ({
+        title: 'Sell every trade good',
+        lines: goods.map(
+          (st) =>
+            `${getItem(st.itemId).name} x${st.qty} — ` +
+            `${sellPrice(getItem(st.itemId)) * st.qty}g`,
+        ),
+        note: 'Gear is never touched.',
+        foot: `${worth.toLocaleString()} gold`,
+      }));
+      row.addEventListener('click', () => {
+        for (const st of goods) {
+          this.emit({ t: 'sell', vendorId: this.openVendorId!, itemId: st.itemId, qty: st.qty });
+        }
+      });
+      bags.appendChild(row);
+    }
+
     for (const stack of inv) {
       const item = getItem(stack.itemId);
       const unit = sellPrice(item);
@@ -1958,10 +2076,21 @@ export class Hud {
         `<span style="color:${QUALITY_COLORS[item.quality]}">${item.name}` +
         `${stack.qty > 1 ? ` <span class="muted">x${stack.qty}</span>` : ''}</span>` +
         `<span class="price sell">+${unit * stack.qty}g</span>`;
-      row.title =
-        stack.qty > 1
-          ? `Click to sell all ${stack.qty} for ${unit * stack.qty} gold (${unit} each)`
-          : `Click to sell for ${unit} gold`;
+      // The last native `title=` in the HUD, and the one that mattered most
+      // after the quest offer: this row is where a player decides whether the
+      // thing they are about to sell is worth keeping.
+      this.tip(row, () =>
+        itemTip(stack.itemId, {
+          equipped:
+            item.slot && item.slot !== 'none'
+              ? (player.equipment?.[item.slot as EquipSlot] ?? null)
+              : null,
+          foot:
+            stack.qty > 1
+              ? `Click to sell all ${stack.qty} for ${unit * stack.qty}g (${unit} each)`
+              : `Click to sell for ${unit}g`,
+        }),
+      );
       row.addEventListener('click', () =>
         this.emit({ t: 'sell', vendorId: this.openVendorId!, itemId: stack.itemId, qty: stack.qty }),
       );
@@ -2932,6 +3061,8 @@ const TEMPLATE = `
   <div id="zone-banner"></div>
 
   <div id="levelup"><div id="levelup-level"></div><div id="levelup-body"></div></div>
+
+  <div id="drop"><div id="drop-name"></div><div id="drop-body"></div></div>
 
   <div id="away-report" class="panel clickable">
     <h3><span id="away-title"></span><span id="away-close">✕</span></h3>

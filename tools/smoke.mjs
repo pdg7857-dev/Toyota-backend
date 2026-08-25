@@ -377,6 +377,45 @@ async function main() {
   });
   await wait(300);
 
+  // The lot, in one click.
+  //
+  // A run brings back a dozen stacks of trade goods and each used to want its
+  // own click. What is worth asserting is the half that makes it safe to
+  // press: it must never touch a piece of gear.
+  const sellAll = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const items = g.allItems();
+    const goods = Object.values(items).filter((it) => it.merchantGood).slice(0, 4);
+    const keep = Object.values(items).find((it) => it.slot === 'weapon');
+    if (goods.length < 2 || !keep) return { ok: false, why: 'not enough to sell' };
+
+    me.inventory = [
+      ...goods.map((it) => ({ itemId: it.id, qty: 3 })),
+      { itemId: keep.id, qty: 1 },
+    ];
+    g.hud.openVendor(
+      [...g.world.entities.values()].find((e) => e.kind === 'vendor').id,
+    );
+    await new Promise((r) => setTimeout(r, 300));
+
+    const row = document.querySelector('#vendor-bags .vendor-row.sell-all');
+    if (!row) return { ok: false, why: 'no sell-all row' };
+    const before = me.gold;
+    row.click();
+    await new Promise((r) => setTimeout(r, 400));
+
+    const left = (me.inventory ?? []).map((st) => st.itemId);
+    return {
+      ok: true,
+      paid: me.gold - before,
+      // Every trade good gone, and the weapon still there.
+      cleared: goods.every((it) => !left.includes(it.id)),
+      keptGear: left.includes(keep.id),
+      rows: document.querySelectorAll('#vendor-bags .vendor-row').length,
+    };
+  });
+
   const goldBefore = await page.evaluate(() => window.__game.world.player.gold);
   // Sell the first thing in the bags column.
   //
@@ -1681,6 +1720,11 @@ async function main() {
   // written across the minimap's clock. Checked as a rule over whatever the
   // run happens to have on screen rather than by contriving one plate: the
   // failure is a class, not a case.
+  // With the character sheet open, because a translucent panel is the worst
+  // case for this rather than an edge one: a plate behind it reads straight
+  // through the numbers.
+  await page.keyboard.press('c');
+  await wait(400);
   const tidy = await page.evaluate(async () => {
     const g = window.__game;
     const me = g.world.player;
@@ -1724,9 +1768,9 @@ async function main() {
       const fx = (me.pos.x - cam.position.x) / len;
       const fz = (me.pos.z - cam.position.z) / len;
       let best = null;
-      let bestGap = 40;
-      for (let ahead = 30; ahead <= 900; ahead += 10) {
-        for (let side = -700; side <= 700; side += 10) {
+      let bestGap = 60;
+      for (let ahead = 4; ahead <= 700; ahead += 6) {
+        for (let side = -600; side <= 600; side += 6) {
           const x = me.pos.x + fx * ahead - fz * side;
           const z = me.pos.z + fz * ahead + fx * side;
           const at = project(x, z);
@@ -1740,6 +1784,11 @@ async function main() {
       return best;
     };
 
+    // Two spots are aimed at rather than three: the character sheet is open
+    // for this and any plate landing on it is counted, but its box moves with
+    // whatever is in it and an aim that misses reports as the rule being
+    // broken. Two that always land is a check with teeth; a third that
+    // sometimes does not is a flake.
     const [onFrames, onMinimap] = ring;
     const framesSpot = aimAt('#player-frame');
     const miniSpot = aimAt('#minimap');
@@ -1753,9 +1802,26 @@ async function main() {
     }
     await new Promise((r) => setTimeout(r, 500));
 
-    const boxes = ['#minimap', '#minimap-clock', '#player-frame', '#target-frame', '#tracker']
+    const boxes = [
+      '#minimap',
+      '#minimap-clock',
+      '#player-frame',
+      '#target-frame',
+      '#tracker',
+      '#right-panels',
+      '#realm-window',
+      '#journal-window',
+      '#quest-log',
+      '#vendor-window',
+      '#map-panel',
+      '#levelup',
+      '#drop',
+    ]
       .map((s) => document.querySelector(s))
-      .filter((el) => el && el.offsetParent !== null)
+      .filter(
+        (el) =>
+          el && el.offsetParent !== null && parseFloat(getComputedStyle(el).opacity) >= 0.05,
+      )
       .map((el) => el.getBoundingClientRect());
     const plates = [...document.querySelectorAll('.nameplate')].filter(
       (p) => p.style.display === 'block',
@@ -1773,10 +1839,18 @@ async function main() {
       const r = p.getBoundingClientRect();
       return r.left < -1 || r.right > window.innerWidth + 1;
     }).length;
+    // Put them back, and let go of them. Leaving one with the player as its
+    // target leaves it hunting them through the next three checks — the same
+    // way the muster probe once left the character quietly farming hares.
     ring.forEach((e, i) => {
       e.pos = { ...home[i] };
       e.spawnPos = { ...home[i] };
+      e.targetId = null;
+      e.threat = {};
+      e.aiState = 'idle';
     });
+    g.world.submit(me.id, { t: 'target', id: null });
+    g.world.lastCombatTick.clear();
     return {
       boxes: boxes.length,
       plates: plates.length,
@@ -1787,6 +1861,9 @@ async function main() {
       aimed: !!framesSpot && !!miniSpot,
     };
   });
+
+  await page.keyboard.press('c');
+  await wait(300);
 
   // Other people, fighting real things.
   //
@@ -1819,10 +1896,17 @@ async function main() {
     const foe = g.world.entity(who.npcFoe);
     const max = g.world.statsOf(foe).maxHealth;
 
-    // Let it run long enough to be a fight rather than a pull.
-    await new Promise((r) => setTimeout(r, 2500));
-    const hurt = foe.health < max;
-    const came = Math.hypot(foe.pos.x - who.pos.x, foe.pos.z - who.pos.z) < 8;
+    // Watched rather than sampled at the end. A fight that reaches the floor
+    // *ends*, and the creature is handed back whole — so a single reading
+    // taken after the fact says "nothing happened" precisely when the most
+    // happened.
+    let hurt = false;
+    for (let i = 0; i < 80 && !hurt; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      hurt = foe.health < max;
+      if (who.npcFoe !== foe.id) break;
+    }
+    const came = Math.hypot(foe.pos.x - who.pos.x, foe.pos.z - who.pos.z) < 12;
     const view = g.views.get(who.id);
     const anim = view?.anim?.current ?? '';
 
@@ -1926,6 +2010,75 @@ async function main() {
     };
   });
 
+  // The drop that was worth the hour.
+  //
+  // A rare or an epic used to arrive as one grey line in a nine-line log,
+  // which is exactly what a level used to do and wrong for the same reason.
+  // What is worth asserting is the useful half: that it says whether the thing
+  // beats what you are already wearing.
+  const drop = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const items = g.allItems();
+    const worn = me.equipment?.weapon ? g.itemOf(me.equipment.weapon) : null;
+    // A weapon this character can actually use, so the card has a comparison
+    // to make rather than a refusal.
+    const prize = Object.values(items).find(
+      (it) =>
+        it.slot === 'weapon' &&
+        (it.quality === 'rare' || it.quality === 'epic') &&
+        g.canUse(it.id),
+    );
+    if (!prize) return { ok: false, why: 'no rare weapon for this class' };
+
+    // Through the real event, from a real corpse: the card reads the loot
+    // stream, and a hand-made event would prove only that the function works.
+    const victim = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+    victim.pos = { x: me.pos.x + 1, z: me.pos.z };
+    victim.dead = true;
+    victim.health = 0;
+    victim.corpseLoot = [{ itemId: prize.id, qty: 1 }];
+    victim.corpseGold = 3;
+    victim.respawnInMs = 120000;
+    g.world.submit(me.id, { t: 'loot', id: victim.id });
+    await new Promise((r) => setTimeout(r, 400));
+
+    const card = document.querySelector('#drop');
+    const shown = card.classList.contains('show') && getComputedStyle(card).opacity > 0.2;
+    const name = document.querySelector('#drop-name')?.textContent ?? '';
+    const body = document.querySelector('#drop-body')?.textContent ?? '';
+    const colour = getComputedStyle(document.querySelector('#drop-name')).color;
+
+    // And nothing at all for the four hundredth Wolf Pelt.
+    card.classList.remove('show');
+    const junk = Object.values(items).find((it) => it.merchantGood);
+    const second = [...g.world.entities.values()].find(
+      (e) => e.kind === 'mob' && !e.dead && e.id !== victim.id,
+    );
+    second.pos = { x: me.pos.x + 1, z: me.pos.z };
+    second.dead = true;
+    second.health = 0;
+    second.corpseLoot = [{ itemId: junk.id, qty: 2 }];
+    second.corpseGold = 1;
+    second.respawnInMs = 120000;
+    g.world.submit(me.id, { t: 'loot', id: second.id });
+    await new Promise((r) => setTimeout(r, 400));
+    const quiet = !document.querySelector('#drop').classList.contains('show');
+
+    return {
+      ok: true,
+      shown,
+      names: name === prize.name,
+      quality: /^rgb/.test(colour) && colour !== 'rgb(232, 224, 200)',
+      // The question a player actually asks of something they just picked up.
+      compares: worn ? /against your|The same as your/.test(body) : /Nothing in that slot/.test(body),
+      quiet,
+      prize: prize.name,
+      prizeId: prize.id,
+      body: body.slice(0, 120),
+    };
+  });
+
   // And a picture of it, because a card nobody looks at is a card that can be
   // ugly for a year. Replayed through the HUD rather than by levelling again:
   // the state is already back where it was and putting it out twice is not
@@ -1942,6 +2095,13 @@ async function main() {
       g.camera,
     );
   });
+  await page.evaluate((itemId) => {
+    const g = window.__game;
+    g.hud.handleEvents(
+      [{ t: 'lootGained', entityId: g.world.player.id, items: [{ itemId, qty: 1 }], gold: 3 }],
+      g.rig.camera,
+    );
+  }, drop.prizeId ?? null);
   await wait(500);
   await page.screenshot({ path: join(OUT, '20-levelup.png') });
 
@@ -2544,6 +2704,8 @@ async function main() {
     ['combat happened', state.log.some((l) => /hit|slain|died/i.test(l ?? ''))],
     ['vendor shop opened', vendorOpened],
     ['quest accepted from trader', questAccepted],
+    ['the trader takes the lot in one click', sellAll.ok && sellAll.cleared && sellAll.paid > 0],
+    ['and never touches a piece of gear', sellAll.keptGear],
     ['an offer says what the work is', questOffer.ok && questOffer.saysTheJob],
     ['and why anybody wants it done', questOffer.saysWhy],
     ['and what it pays', questOffer.saysThePay],
@@ -2571,6 +2733,9 @@ async function main() {
     ['somebody else pulls a real creature', pulling.ok && pulling.came],
     ['and it is a real fight', pulling.hurt && pulling.alive],
     ['and you get it back whole when you want it', pulling.handedBack],
+    ['a rare drop is a moment, not a log line', drop.ok && drop.shown && drop.names],
+    ['and says how it compares to what you wear', drop.compares],
+    ['and the four hundredth pelt says nothing', drop.quiet],
     ['a level is a moment, not a log line', levelling.shown && levelling.reached],
     ['and says what it gave you', levelling.saysPoints],
     ['and names the skill it granted', levelling.saysTheSkill],
@@ -2710,6 +2875,7 @@ async function main() {
   console.log('timing:', JSON.stringify(timing));
   console.log('reckoning:', JSON.stringify(reckoning));
   console.log('levelling:', JSON.stringify(levelling));
+  console.log('drop:', JSON.stringify(drop), '| sell-all:', JSON.stringify(sellAll));
   console.log('pulling:', JSON.stringify(pulling), '| tidy:', JSON.stringify(tidy));
   console.log('belt:', JSON.stringify(belt));
   console.log('traits:', JSON.stringify(traits));

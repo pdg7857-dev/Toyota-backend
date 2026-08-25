@@ -1,5 +1,6 @@
 import type { DamageType, Entity, EntityId, SimEvent } from '../sim/types.js';
 import type { World } from '../sim/world.js';
+import { getItem } from '../content/items.js';
 
 /**
  * Sound.
@@ -263,10 +264,21 @@ export class GameAudio {
           if (ev.entityId === me) this.play('playerDeath', 1);
           else this.play('death', this.gainFor(ev.entityId) * 0.8);
           break;
-        case 'lootGained':
+        case 'lootGained': {
           if (ev.gold > 0) this.play('coin', 0.7);
-          if (ev.items.length > 0) this.play('loot', 0.7);
+          if (ev.items.length === 0) break;
+          // A rare or an epic is the one drop in a thousand a player is
+          // actually listening for. Same voice, full volume — a whole new
+          // sound for it would be a second thing to learn, and the point is
+          // that this one is unmistakably the good version of the one they
+          // hear four hundred times an hour.
+          const prize = ev.items.some((st) => {
+            const q = getItem(st.itemId).quality;
+            return q === 'rare' || q === 'epic';
+          });
+          this.play('loot', prize ? 1 : 0.7);
           break;
+        }
         case 'levelUp':
           this.play('levelUp', 1);
           break;
