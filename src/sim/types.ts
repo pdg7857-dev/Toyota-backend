@@ -189,6 +189,48 @@ export interface ItemStack {
 
 export type SkillEffectKind = 'damage' | 'heal' | 'dot' | 'buff' | 'interrupt';
 
+/**
+ * A condition that makes a skill worth *timing* rather than worth pressing.
+ *
+ * Bosses ask questions and every creature now has a trait, but the player's
+ * side of twenty-eight thousand fights was "press whatever is off cooldown".
+ * Cooldowns alone produce an order, not a decision: there was never a moment
+ * where holding a button was better than pressing it.
+ *
+ * The rule is the one the boss kits and the creature traits already run under:
+ * **each has to have a different answer.** Two conditions that both mean "use
+ * it later" are one condition with two names.
+ *
+ * | Kind | Live when | The decision |
+ * |---|---|---|
+ * | `finisher` | the target is nearly dead | hold it for the kill |
+ * | `opener` | the target is not fighting you yet | open with it, or lose it |
+ * | `steady` | *you* are barely scratched | keep out of reach and it stays yours |
+ * | `onDot` | the target carries a burn of yours | land the dot first |
+ * | `desperate` | *you* are nearly dead | do not top yourself off |
+ */
+/**
+ * Conditions come in two sorts, and only one of them is worth *waiting* for.
+ *
+ * `finisher`, `opener` and `onDot` are facts about the **target**, so a player
+ * chooses when to spend the skill against them: that is a decision, and the
+ * balance harness models it with `timeSkills`.
+ *
+ * `desperate` and `steady` are facts about **you**. Holding a heal until you
+ * are nearly dead is not good play, it is worse play — the suite measured a
+ * Priest ending fights on *less* health for doing it. They are a reward for
+ * playing well earlier in the fight (not panicking; not getting hit), not a
+ * button to sit on, and nothing should ever be held for them.
+ */
+export const HOLDABLE_CONDITIONS = ['finisher', 'opener', 'onDot'] as const;
+
+export type SkillCondition =
+  | { kind: 'finisher'; below: number; multiplier: number }
+  | { kind: 'opener'; multiplier: number }
+  | { kind: 'steady'; above: number; multiplier: number }
+  | { kind: 'onDot'; dotId: string; multiplier: number }
+  | { kind: 'desperate'; below: number; multiplier: number };
+
 export interface SkillDef {
   id: string;
   name: string;
@@ -231,6 +273,14 @@ export interface SkillDef {
   taughtBy?: string;
   /** Zone that teaches it. Undefined for the level-granted starting kit. */
   zoneId?: string;
+  /**
+   * What makes this one worth timing. See `SkillCondition`.
+   *
+   * One per class, on the skill whose *name* already promises it — a skill
+   * called Assassinate that is worth no more on an unaware target than on one
+   * already swinging at you is a skill with a lie for a name.
+   */
+  when?: SkillCondition;
   description: string;
 }
 
@@ -793,6 +843,8 @@ export type SimEvent =
   | { t: 'swing'; sourceId: EntityId; targetId: EntityId }
   /** A skittish creature broke and ran. See `content/traits.ts`. */
   | { t: 'flees'; mobId: EntityId; name: string }
+  /** A skill went off with its condition live. See `SkillCondition`. */
+  | { t: 'wellTimed'; sourceId: EntityId; skillId: string }
   /** A landmark opened. Once per site, ever. See `content/discoveries.ts`. */
   | {
       t: 'discovered';

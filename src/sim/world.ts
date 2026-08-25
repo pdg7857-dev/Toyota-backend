@@ -12,6 +12,7 @@
  */
 import { Rng } from './rng.js';
 import {
+  conditionPower,
   GCD_MS,
   TICK_MS,
   addAttributes,
@@ -2913,13 +2914,68 @@ export class World {
     this.applySkillEffect(e, skill, targetId);
   }
 
+  /**
+   * Is this skill's condition live right now?
+   *
+   * All five read state that is *already* on the table — a health share, a
+   * distance, whether anything is fighting you, whether your own burn is on
+   * it — so nothing new is tracked and nothing can drift out of step with
+   * what the HUD is showing.
+   */
+  conditionMet(source: Entity, skill: SkillDef, targetId: EntityId | null): boolean {
+    const when = skill.when;
+    if (!when) return false;
+    const target = this.entities.get(targetId ?? -1);
+
+    switch (when.kind) {
+      case 'finisher': {
+        if (!target || target.dead) return false;
+        return target.health / this.statsOf(target).maxHealth <= when.below;
+      }
+      case 'opener': {
+        // Not fighting you *yet*. Threat rather than aiState, because a
+        // creature already chasing somebody else is still unaware of you — and
+        // because threat is what actually decides who it swings at.
+        if (!target || target.dead || target.kind !== 'mob') return false;
+        return (target.threat?.[source.id] ?? 0) <= 0;
+      }
+      case 'steady': {
+        // The mirror of `desperate`, and the Ranger's whole fantasy: a class
+        // that does not have to close is a class that should be rewarded for
+        // not being hit. The first attempt keyed on *distance*, which for a
+        // Ranger sitting at their own weapon range is true every second of
+        // every fight — a passive wearing a decision's clothes.
+        return source.health / this.statsOf(source).maxHealth >= when.above;
+      }
+      case 'onDot': {
+        if (!target || target.dead) return false;
+        return (target.effects ?? []).some(
+          (e) => e.kind === 'dot' && e.sourceAbilityId === when.dotId && e.sourceId === source.id,
+        );
+      }
+      case 'desperate': {
+        // Yours, not theirs. A heal is timed against how much trouble you are
+        // in, and topping yourself off at 90% should always be the wrong call.
+        return source.health / this.statsOf(source).maxHealth <= when.below;
+      }
+    }
+  }
+
   private applySkillEffect(source: Entity, skill: SkillDef, targetId: EntityId | null): void {
     const stats = this.statsOf(source);
     // What this character has invested in this particular skill. Rank 0 is the
     // skill exactly as it was taught; every point above that is a level the
     // player spent here instead of somewhere else.
     const rank = source.skillRanks?.[skill.id] ?? 0;
-    const power = stats.skillPower * skillRankPower(rank);
+    // The condition is read once, here, at the moment of the cast — not while
+    // the skill is winding up and not when it lands. A `finisher` that checked
+    // on resolution would reward pressing it early and hoping, which is the
+    // opposite of the decision it exists to create.
+    const timed = this.conditionMet(source, skill, targetId) ? conditionPower(skill) : 1;
+    const power = stats.skillPower * skillRankPower(rank) * timed;
+    if (timed !== 1) {
+      this.events.push({ t: 'wellTimed', sourceId: source.id, skillId: skill.id });
+    }
     /** Did this cast land double? Skills crit the same way swings do. */
     const rolls = (): boolean => this.rng.chance(skillCritChance(stats.critChance, rank));
 

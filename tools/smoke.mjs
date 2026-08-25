@@ -1308,6 +1308,67 @@ async function main() {
   await page.bringToFront();
   await wait(600);
 
+  // A skill worth waiting for, and the light that says when.
+  //
+  // Without the light the whole idea is invisible: a skill worth seventy-five
+  // percent more on something nearly dead, with nothing on screen saying when,
+  // is a skill nobody ever holds.
+  const timing = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    // Saved and restored: these are the shared definitions, and the
+    // boss-mechanics block below needs its boss to come at the player.
+    const aggro = new Map();
+    for (const def of g.allMobs()) {
+      aggro.set(def.id, def.aggroRadius);
+      def.aggroRadius = 0;
+    }
+    // High enough to actually own the skill. A locked slot never lights up,
+    // which is correct behaviour and a useless measurement.
+    const conditional = Object.values(g.allSkills()).find(
+      (sk) => sk.when && sk.classId === me.classId,
+    );
+    if (!conditional) return { ok: false, why: `${me.classId} has nothing to time` };
+    me.level = Math.max(me.level, conditional.reqLevel);
+
+    const victim = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+    if (!victim) return { ok: false, why: 'nothing alive to target' };
+    const home = { ...victim.pos };
+    victim.pos = { x: me.pos.x + 2, z: me.pos.z };
+    // Auto-attack is left on by earlier blocks, and a creature parked two
+    // metres away dies inside a second — the first version of this measured a
+    // corpse, whose condition is correctly false, and reported it as the light
+    // never coming on.
+    g.world.submit(me.id, { t: 'autoAttack', on: false });
+    g.world.submit(me.id, { t: 'target', id: victim.id });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const lit = () => [...document.querySelectorAll('#skill-bar .slot.live')].length;
+    const max = g.world.statsOf(victim).maxHealth;
+    victim.health = max;
+    await new Promise((r) => setTimeout(r, 250));
+    const healthy = lit();
+    victim.health = max * 0.12;
+    await new Promise((r) => setTimeout(r, 250));
+    const nearlyDead = lit();
+    const alive = !victim.dead;
+    victim.health = max;
+    victim.pos = home;
+    victim.spawnPos = { ...home };
+    for (const def of g.allMobs()) def.aggroRadius = aggro.get(def.id);
+    me.dead = false;
+    me.health = g.world.statsOf(me).maxHealth;
+
+    return {
+      ok: true,
+      healthy,
+      nearlyDead,
+      skill: conditional.name,
+      level: me.level,
+      alive,
+    };
+  });
+
   // The reckoning.
   const reckoning = await page.evaluate(async () => {
     const g = window.__game;
@@ -1934,6 +1995,8 @@ async function main() {
     ['every zone resolved a theme', themesMatched],
     ['entities stand on the terrain', standingOnGround],
     ['a creature in a lake wades rather than walking the bottom', wading],
+    ['a skill lights up when its moment arrives', timing.ok && timing.nearlyDead > 0],
+    ['and is dark the rest of the time', timing.healthy === 0],
     ['a kill is written down', reckoning.counted && reckoning.byBase],
     ['the reckoning adds it up', reckoning.total && reckoning.rows > 6],
     ['and says what the creature does', reckoning.saysTrait],
@@ -2060,6 +2123,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('wade:', JSON.stringify(wade));
+  console.log('timing:', JSON.stringify(timing));
   console.log('reckoning:', JSON.stringify(reckoning));
   console.log('belt:', JSON.stringify(belt));
   console.log('traits:', JSON.stringify(traits));

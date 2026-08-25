@@ -502,6 +502,11 @@ export class Hud {
           this.renderVendor();
           break;
         }
+        case 'wellTimed': {
+          if (ev.sourceId !== this.world.player.id) break;
+          this.log(`${getSkill(ev.skillId).name} — well timed.`, 'log-good');
+          break;
+        }
         case 'flees': {
           this.log(`${ev.name} breaks and runs.`, 'log-loot');
           break;
@@ -1325,6 +1330,13 @@ export class Hud {
     if (skill.range > 4) lines.push(`${Math.round(skill.range)}m range`);
     if (skill.durationMs) lines.push(`Lasts ${Math.round(skill.durationMs / 1000)}s`);
     if (rank > 0) lines.push(`Rank ${rank} — ${Math.round((skillRankPower(rank) - 1) * 100)}% stronger`);
+    if (skill.when) {
+      const live = this.world.conditionMet(player, skill, player.targetId ?? null);
+      lines.push(
+        `${CONDITION_WORDS[skill.when.kind]} — ` +
+          `${Math.round((skill.when.multiplier - 1) * 100)}% stronger${live ? ' (now)' : ''}`,
+      );
+    }
 
     // Why it is grey, and what to do about it. "Lv 44" on a slot tells a
     // player when, and nothing at all about what or how.
@@ -1363,6 +1375,16 @@ export class Hud {
       slot.el.classList.toggle('locked', underLevel);
       slot.el.classList.toggle('unlearned', !underLevel && unlearned);
       slot.el.classList.toggle('unaffordable', !locked && player.energy < skill.energyCost);
+      // Lit while its condition holds.
+      //
+      // Without this the whole idea is invisible: a skill that is worth
+      // seventy-five percent more on something nearly dead, with nothing on
+      // screen saying when, is a skill nobody ever holds — they press it off
+      // cooldown and never learn it was a decision. Read live from the sim so
+      // the light and the damage cannot disagree.
+      const live =
+        !locked && !!skill.when && this.world.conditionMet(player, skill, player.targetId ?? null);
+      slot.el.classList.toggle('live', live);
       slot.name.textContent = underLevel
         ? `Lv ${skill.reqLevel}`
         : unlearned
@@ -2495,6 +2517,15 @@ interface TipContent {
 function attrsOf(player: Entity, key: keyof Attributes): number {
   return player.attributes?.[key] ?? 0;
 }
+
+/** What each condition is called on screen. */
+const CONDITION_WORDS: Record<string, string> = {
+  finisher: 'On something nearly dead',
+  opener: 'On something that has not seen you',
+  steady: 'While you are barely scratched',
+  onDot: 'On something already burning',
+  desperate: 'When you are nearly gone',
+};
 
 function renderTip(c: TipContent): string {
   const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');

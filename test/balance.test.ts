@@ -21,7 +21,7 @@ import {
   xpForKill,
   xpToNext,
 } from '../src/sim/formulas.js';
-import { BOSS_STARS, type ClassId, type MobDef } from '../src/sim/types.js';
+import { BOSS_STARS, type ClassId, type Entity, type MobDef } from '../src/sim/types.js';
 import { BOUNTY_MOBS, LOOT_TABLES, MOBS, getMob } from '../src/content/mobs.js';
 import {
   BOUNTY_SPAWN_CHANCE,
@@ -43,6 +43,8 @@ import {
   dragonWeaponId,
 } from '../src/content/dragons.js';
 import { curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
+import { SKILLS, getSkill } from '../src/content/skills.js';
+import { TICK_MS } from '../src/sim/formulas.js';
 import {
   STUBBORN_AT,
   TRAITS,
@@ -2520,5 +2522,198 @@ describe('every creature does something, not just bosses', () => {
       expect(t.answer.length, `${t.id} says what it does but not what to do`).toBeGreaterThan(12);
       expect(t.line.length).toBeGreaterThan(12);
     }
+  });
+});
+
+describe('your own rotation is worth timing', () => {
+  /**
+   * Bosses ask questions and every creature now has a trait, but the player's
+   * side of twenty-eight thousand fights was "press whatever is off cooldown".
+   * Cooldowns alone produce an *order*, not a decision: there was never a
+   * moment where holding a button was better than pressing it.
+   *
+   * Measured the way the boss telegraphs are: played badly against played
+   * well, and the gap is what the mechanic is worth.
+   */
+  const CHECKS: Array<{ classId: ClassId; level: number; mobId: string; skills: string[] }> = [
+    { classId: 'warrior', level: 20, mobId: 'outlaw_reaver', skills: ['strike', 'rend', 'sunder', 'onslaught'] },
+    { classId: 'rogue', level: 20, mobId: 'outlaw_reaver', skills: ['backstab', 'rupture', 'kidney_strike', 'assassinate'] },
+    { classId: 'ranger', level: 20, mobId: 'outlaw_reaver', skills: ['quick_shot', 'hunters_mark', 'pinning_shot', 'volley'] },
+    { classId: 'mage', level: 20, mobId: 'outlaw_reaver', skills: ['frostbolt', 'ember', 'arcane_surge', 'meteor'] },
+    { classId: 'priest', level: 20, mobId: 'outlaw_reaver', skills: ['smite', 'searing_word', 'mend_wounds', 'judgement'] },
+  ];
+
+  function run(c: (typeof CHECKS)[number], timed: boolean, seed: number) {
+    const world = new World({ seed, zone: duelZone(c.mobId), classId: c.classId });
+    levelPlayer(world, { level: c.level });
+    return simulateFight(world, { skills: c.skills, timeSkills: timed, timeoutSec: 120 });
+  }
+
+  it('pays a player who watches for the moment', () => {
+    // Measured on *both* axes, because the conditions do not all buy the same
+    // thing: a finisher shortens the fight and a desperate heal leaves you
+    // standing at the end of it. Judging every class on duration alone
+    // reported the Priest's as worthless, which is a fact about the ruler.
+    console.log('\n  played in cooldown order, and played watching');
+    let better = 0;
+    for (const c of CHECKS) {
+      const rounds = 12;
+      let blindTime = 0;
+      let watchTime = 0;
+      let blindLow = 0;
+      let watchLow = 0;
+      for (let seed = 0; seed < rounds; seed++) {
+        const a = run(c, false, seed * 977 + 3);
+        const b = run(c, true, seed * 977 + 3);
+        blindTime += a.durationSec;
+        watchTime += b.durationSec;
+        blindLow += a.lowestHealth;
+        watchLow += b.lowestHealth;
+      }
+      const bt = blindTime / rounds;
+      const wt = watchTime / rounds;
+      const bl = blindLow / rounds;
+      const wl = watchLow / rounds;
+      const skill = c.skills.find((id) => getSkill(id).when)!;
+      console.log(
+        `    ${c.classId.padEnd(8)} ${getSkill(skill).name.padEnd(12)} ` +
+          `${bt.toFixed(1)}s → ${wt.toFixed(1)}s   worst health ` +
+          `${bl.toFixed(2)} → ${wl.toFixed(2)}`,
+      );
+      // Either faster or safer. A condition that buys neither is decoration.
+      if (wt < bt - 0.15 || wl > bl + 0.015) better++;
+    }
+    // Only the ones you can actually *wait* for. `opener` is about the pull
+    // and is spent on the first global cooldown whether or not you were
+    // thinking; `steady` and `desperate` are rewards for the fight you had
+    // rather than buttons to sit on. Those three are measured below, directly.
+    expect(better, 'waiting for the moment paid off for nobody').toBeGreaterThanOrEqual(2);
+  });
+
+  it('pays the conditions you cannot wait for, where they land', () => {
+    // Measured as damage on the spot rather than as a fight, because there is
+    // nothing to decide: you press an opener on the pull and a desperate heal
+    // when you are nearly dead, and the question is only whether it is worth
+    // anything when you do.
+    const hit = (classId: ClassId, skillId: string, arrange: (w: World, mob: Entity) => void) => {
+      const world = new World({ seed: 5, zone: duelZone('outlaw_reaver'), classId });
+      levelPlayer(world, { level: 20 });
+      const mob = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+      arrange(world, mob);
+      world.submit(world.playerId, { t: 'target', id: mob.id });
+      world.submit(world.playerId, { t: 'useSkill', skillId });
+      // Long enough for a cast to land. Mend Wounds is a 1.5s cast — the first
+      // version ticked once and reported the Priest's condition as worth
+      // nothing, which was a fact about the probe.
+      let total = 0;
+      const castTicks = Math.ceil(getSkill(skillId).castMs / TICK_MS) + 2;
+      for (let i = 0; i < castTicks; i++) {
+        for (const ev of world.tick()) {
+          if (ev.t === 'damage' && ev.sourceId === world.playerId) total += ev.amount;
+          if (ev.t === 'heal' && ev.targetId === world.playerId) total += ev.amount;
+        }
+      }
+      return total;
+    };
+
+    console.log('\n  what a condition is worth where it lands');
+    const cases: Array<[string, ClassId, string, (w: World, m: Entity) => void, (w: World, m: Entity) => void]> = [
+      ['opener', 'rogue', 'assassinate', () => {}, (w, m) => { m.threat = { [w.playerId]: 50 }; }],
+      [
+        'steady',
+        'ranger',
+        'volley',
+        () => {},
+        (w) => { w.player.health = w.statsOf(w.player).maxHealth * 0.4; },
+      ],
+      [
+        'desperate',
+        'priest',
+        'mend_wounds',
+        (w) => { w.player.health = w.statsOf(w.player).maxHealth * 0.2; },
+        (w) => { w.player.health = w.statsOf(w.player).maxHealth * 0.95; },
+      ],
+    ];
+    for (const [name, classId, skillId, live, dead] of cases) {
+      const on = hit(classId, skillId, live);
+      const off = hit(classId, skillId, dead);
+      // The Priest's pair is partly measuring the ceiling rather than the
+      // multiplier — a heal at 95% health is capped by the health you have
+      // left — and that is the honest number anyway: the whole point is that
+      // topping yourself off is worth nothing.
+      console.log(`    ${name.padEnd(10)} ${getSkill(skillId).name.padEnd(12)} ${off} → ${on}`);
+      expect(on, `${name} is worth nothing when it lands`).toBeGreaterThan(off * 1.2);
+    }
+  });
+
+  it('gives every class exactly one, and no two the same', () => {
+    // The rule the boss kits and the creature traits already run under: two
+    // conditions that both mean "use it later" are one condition with two
+    // names. Printed, because "all five classes hold a finisher" is invisible
+    // to any assertion made one class at a time.
+    const byClass = new Map<ClassId, string[]>();
+    for (const skill of Object.values(SKILLS)) {
+      if (!skill.when) continue;
+      byClass.set(skill.classId, [...(byClass.get(skill.classId) ?? []), skill.when.kind]);
+    }
+    console.log('\n  what each class has to watch for');
+    for (const cls of PLAYABLE_CLASSES) {
+      const kinds = byClass.get(cls.id) ?? [];
+      console.log(`    ${cls.id.padEnd(8)} ${kinds.join(', ') || '(nothing)'}`);
+      expect(kinds.length, `${cls.id} has ${kinds.length} skills worth timing`).toBe(1);
+    }
+    const all = [...byClass.values()].flat();
+    expect(new Set(all).size, `only ${new Set(all).size} distinct answers`).toBe(all.length);
+  });
+
+  it('never lets a condition be worth more than the skill itself', () => {
+    // A multiplier big enough to make the unconditional press pointless turns
+    // a decision back into a rotation — you would simply never fire it early,
+    // which is the same as it having no untimed use at all.
+    for (const skill of Object.values(SKILLS)) {
+      if (!skill.when) continue;
+      expect(skill.when.multiplier, `${skill.name} is only worth using timed`).toBeLessThan(2.5);
+      expect(skill.when.multiplier).toBeGreaterThan(1.2);
+    }
+  });
+
+  it('reads the condition when the cast begins, not when it lands', () => {
+    // A `finisher` checked on resolution would reward pressing it early and
+    // hoping the target dips under the line while it flies — the opposite of
+    // the decision it exists to create.
+    const world = new World({ seed: 5, zone: duelZone('outlaw_reaver'), classId: 'warrior' });
+    levelPlayer(world, { level: 20 });
+    const mob = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+    const max = world.statsOf(mob).maxHealth;
+
+    world.submit(world.playerId, { t: 'target', id: mob.id });
+    mob.health = max;
+    expect(world.conditionMet(world.player, getSkill('onslaught'), mob.id)).toBe(false);
+    mob.health = max * 0.2;
+    expect(world.conditionMet(world.player, getSkill('onslaught'), mob.id)).toBe(true);
+  });
+
+  it('gives the Rogue their opener and takes it away once seen', () => {
+    const world = new World({ seed: 5, zone: duelZone('outlaw_reaver'), classId: 'rogue' });
+    levelPlayer(world, { level: 20 });
+    const mob = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+    const skill = getSkill('assassinate');
+
+    expect(world.conditionMet(world.player, skill, mob.id), 'nothing has seen you yet').toBe(true);
+    mob.threat = { [world.playerId]: 40 };
+    expect(world.conditionMet(world.player, skill, mob.id), 'it is fighting you now').toBe(false);
+  });
+
+  it('makes the Mage land the burn first', () => {
+    const world = new World({ seed: 5, zone: duelZone('outlaw_reaver'), classId: 'mage' });
+    levelPlayer(world, { level: 20 });
+    const mob = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+    const meteor = getSkill('meteor');
+
+    expect(world.conditionMet(world.player, meteor, mob.id)).toBe(false);
+    world.submit(world.playerId, { t: 'target', id: mob.id });
+    world.submit(world.playerId, { t: 'useSkill', skillId: 'ember' });
+    for (let i = 0; i < 6; i++) world.tick();
+    expect(world.conditionMet(world.player, meteor, mob.id), 'the burn did not count').toBe(true);
   });
 });

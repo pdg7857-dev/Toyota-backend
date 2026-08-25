@@ -10,6 +10,7 @@ import type {
   DerivedStats,
   ItemDef,
   MobDef,
+  SkillCondition,
   StarRating,
 } from './types.js';
 import { BOSS_STARS } from './types.js';
@@ -159,6 +160,11 @@ export const STAR_LEVELS: Record<StarRating, number> = {
   5: 14,
   6: 20,
 };
+
+/** What a skill is worth when its condition is live. See `SkillCondition`. */
+export function conditionPower(skill: { when?: SkillCondition }): number {
+  return skill.when?.multiplier ?? 1;
+}
 
 export type ThreatBand = 'trivial' | 'easy' | 'even' | 'dangerous' | 'deadly';
 

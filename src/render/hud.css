@@ -1456,3 +1456,12 @@ canvas { display: block; }
   scrollbar-width: thin;
   display: none;
 }
+
+/* A skill whose condition is live right now. Without this the whole idea is
+ * invisible: a skill worth 75% more on something nearly dead, with nothing on
+ * screen saying when, is a skill nobody ever holds. */
+.slot.live {
+  border-color: #ffd25e;
+  box-shadow: 0 0 10px rgba(255, 210, 94, 0.45);
+}
+.slot.live .slot-name { color: #ffe9a8; }

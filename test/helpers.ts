@@ -1,3 +1,4 @@
+import { HOLDABLE_CONDITIONS } from '../src/sim/types.js';
 import { World } from '../src/sim/world.js';
 import {
   MAX_SKILL_RANK,
@@ -300,6 +301,14 @@ export interface FightOptions {
    */
   dodge?: boolean;
   /**
+   * Hold a conditional skill until its condition is live.
+   *
+   * Models a player who is watching for the moment rather than one pressing
+   * buttons in cooldown order. Off by default, so the floor stays the floor —
+   * see `SkillCondition` in `sim/types.ts`.
+   */
+  timeSkills?: boolean;
+  /**
    * Skill id to fire the moment the mob starts an interruptible cast. Models a
    * player who is actually watching for the heal, rather than one who mashes
    * the interrupt on cooldown and has it down when it matters.
@@ -337,6 +346,9 @@ interface PendingSlam {
  * actual play the harness models, because dodging is the mechanic that is
  * supposed to decide boss fights.
  */
+/** How long a watching player waits for a condition before giving up on it. */
+const HOLD_MS = 6000;
+
 export function simulateFight(world: World, options: FightOptions | string[] = {}): FightResult {
   const opts: FightOptions = Array.isArray(options) ? { skills: options } : options;
   const skills = opts.skills ?? [];
@@ -359,6 +371,8 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
   let selfHealed = 0;
   let lastMove = { x: 0, z: 0 };
   let lowestHealth = 1;
+  /** Tick at which each conditional skill started being held. See below. */
+  const heldSince = new Map<string, number>();
 
   const move = (x: number, z: number): void => {
     if (x === lastMove.x && z === lastMove.z) return;
@@ -431,7 +445,57 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
       // real player uses — spend the big button when it is up, filler when it
       // is not.
       ready.sort((a, b) => getSkill(b).cooldownMs - getSkill(a).cooldownMs);
-      for (const skillId of ready) world.submit(player.id, { t: 'useSkill', skillId });
+
+      // A conditional skill is held until its condition is live — but only for
+      // a harness that is modelling a player who is *watching*.
+      //
+      // This is the same split `dodge` and `interruptSkill` already make, and
+      // for the same reason: without it the suite measures only somebody
+      // pressing buttons in cooldown order, which is the floor. With both
+      // measured, the gap between them is what the timing is worth — exactly
+      // the comparison the boss telegraphs are judged on.
+      const ordered = opts.timeSkills
+        ? (() => {
+            // Against the mob directly, not `player.targetId`: commands drain
+            // during `tick`, so on the first pass the target is still null and
+            // every target-keyed condition reads false — which silently made
+            // the Rogue never fire their opener at all, and measured as
+            // watching for the moment costing a second and a half.
+            const live: string[] = [];
+            const filler: string[] = [];
+            for (const id of ready) {
+              const skill = getSkill(id);
+              if (!skill.when) {
+                filler.push(id);
+                continue;
+              }
+              if (world.conditionMet(player, skill, mob.id)) {
+                live.push(id);
+                heldSince.delete(id);
+                continue;
+              }
+              // Only a condition about the TARGET is worth waiting for. One
+              // about your own state is a reward for playing well earlier, and
+              // sitting on a heal until you are nearly dead is worse play, not
+              // better — measured as a Priest finishing fights on less health
+              // for doing it.
+              if (!(HOLDABLE_CONDITIONS as readonly string[]).includes(skill.when.kind)) {
+                filler.push(id);
+                continue;
+              }
+              // Hold it — but not for ever. A player waits for the moment and
+              // then gives up on it; a harness that waits indefinitely simply
+              // never fires the skill, which measured as the Rogue being three
+              // seconds *slower* for watching, because Assassinate's condition
+              // never comes back once something has seen you.
+              const since = heldSince.get(id) ?? i;
+              heldSince.set(id, since);
+              if ((i - since) * TICK_MS >= HOLD_MS) filler.push(id);
+            }
+            return [...live, ...filler];
+          })()
+        : ready;
+      for (const skillId of ordered) world.submit(player.id, { t: 'useSkill', skillId });
     }
 
     if (opts.dodge) {

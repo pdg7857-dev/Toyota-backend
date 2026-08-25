@@ -123,6 +123,9 @@ export const SKILLS: Record<string, SkillDef> = {
     kind: 'damage',
     weaponMultiplier: 3.2,
     flatPower: 20,
+    // Held for the kill. Onslaught off cooldown is an opener that happens to
+    // be big; Onslaught on something nearly dead is a decision.
+    when: { kind: 'finisher', below: 0.3, multiplier: 1.75 },
     damageType: 'physical',
     threatBonus: 35,
     description: 'Throw everything into one blow. 320% weapon damage.',
@@ -158,7 +161,11 @@ export const SKILLS: Record<string, SkillDef> = {
     range: 0,
     kind: 'heal',
     flatPower: 75,
-    description: 'Knit your wounds closed. A strong heal, but it can be delayed.',
+    // Worth far more when it is worth anything. A heal that pays the same at
+    // 90% health as at 20% is a heal you press on cooldown; this one is a
+    // reason to let a fight get frightening before you spend it.
+    when: { kind: 'desperate', below: 0.35, multiplier: 1.8 },
+    description: 'Knit your wounds closed. A strong heal, and far stronger when you are nearly gone.',
   },
   searing_word: {
     id: 'searing_word',
@@ -321,7 +328,10 @@ export const SKILLS: Record<string, SkillDef> = {
     flatPower: 20,
     damageType: 'physical',
     threatBonus: 30,
-    description: 'Empty the quiver. 310% weapon damage.',
+    // Untouched. A Ranger who has kept their distance shoots straighter, which
+    // is the one thing the class is *for* and which no number said until now.
+    when: { kind: 'steady', above: 0.8, multiplier: 1.55 },
+    description: 'Empty the quiver. 310% weapon damage, and more while you are unhurt.',
   },
 
   // === ROGUE — Dexterity, melee, burst =====================================
@@ -419,6 +429,10 @@ export const SKILLS: Record<string, SkillDef> = {
     kind: 'damage',
     weaponMultiplier: 3.4,
     flatPower: 18,
+    // On something that has not noticed you. A skill called Assassinate that
+    // is worth no more on an unaware target than on one already swinging at
+    // you is a skill with a lie for a name.
+    when: { kind: 'opener', multiplier: 2.1 },
     damageType: 'physical',
     threatBonus: 25,
     description: 'One committed strike. 340% weapon damage.',
@@ -519,6 +533,9 @@ export const SKILLS: Record<string, SkillDef> = {
     kind: 'damage',
     weaponMultiplier: 3.8,
     flatPower: 24,
+    // Ember first, then this. A two-button order the Mage actually has to
+    // think about, rather than a cooldown queue.
+    when: { kind: 'onDot', dotId: 'ember', multiplier: 1.6 },
     damageType: 'fire',
     threatBonus: 35,
     description: 'Call something down. 380% weapon damage, but it must be cast.',

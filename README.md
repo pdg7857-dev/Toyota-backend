@@ -405,6 +405,19 @@ have put down, the landmarks you have opened, the times you fell, and the
 hardest hit you have ever landed. It is also a bestiary: what a creature does
 is written down the first time you kill one.
 
+## One skill worth waiting for
+
+Every class has one skill that is worth far more at a particular moment, and
+the slot lights up when that moment arrives.
+
+| | |
+|---|---|
+| **Warrior** — Onslaught | On something nearly dead. Hold it for the kill. |
+| **Rogue** — Assassinate | On something that has not seen you. Open with it. |
+| **Mage** — Meteor | On something already burning. Ember first. |
+| **Ranger** — Volley | While you are barely scratched. Keep your distance. |
+| **Priest** — Mend Wounds | When you are nearly gone. Do not top yourself off. |
+
 ## Every creature fights like itself
 
 Bosses are not the only things with something to them. Every ordinary creature

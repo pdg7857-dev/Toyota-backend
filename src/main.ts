@@ -5,6 +5,7 @@ import { ITEMS, canEquip, getItem } from './content/items.js';
 import { MOBS, getMob } from './content/mobs.js';
 import { bodyPlanFor, weaponLookFor } from './content/bodies.js';
 import { traitFor } from './content/traits.js';
+import { SKILLS } from './content/skills.js';
 import { DAY_LENGTH_MS } from './content/daylight.js';
 import { getQuest } from './content/quests.js';
 import { getHolding } from './content/factions.js';
@@ -262,6 +263,7 @@ async function boot(): Promise<void> {
     dayLengthMs: DAY_LENGTH_MS,
     allMobs: () => Object.values(MOBS),
     allItems: () => ITEMS,
+    allSkills: () => SKILLS,
     weaponLookFor,
     /**
      * One item per weapon silhouette, for `tools/bestiary.mjs`. A shape nobody

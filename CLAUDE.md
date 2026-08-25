@@ -1058,6 +1058,61 @@ camp where three of the four play Priest reads as a bug in the population.
 for the same reason as `rareSpawns`: they walk and talk on the sim's `Rng`, so a
 populated arena is one where every seeded fight rolls different numbers.
 
+## Your own rotation is worth timing
+
+Bosses ask questions, and every creature now has a trait. The player's side of
+twenty-eight thousand fights was still "press whatever is off cooldown".
+Cooldowns alone produce an *order*, not a decision: there was never a moment
+where holding a button beat pressing it.
+
+`SkillCondition` is one skill per class that is worth more at a particular
+moment, and the rule is the one the boss kits and the traits already run under:
+**each has to have a different answer.**
+
+| Class | Skill | Live when | The decision |
+|---|---|---|---|
+| Warrior | Onslaught | the target is nearly dead | hold it for the kill |
+| Rogue | Assassinate | nothing has seen you yet | open with it, or lose it |
+| Mage | Meteor | the target carries your Ember | land the burn first |
+| Ranger | Volley | *you* are barely scratched | keep your distance and it stays yours |
+| Priest | Mend Wounds | *you* are nearly gone | do not top yourself off |
+
+It is read **once, when the cast begins** — a finisher checked on resolution
+would reward pressing it early and hoping the target dips under the line while
+it flies, which is the opposite of the decision it exists to create.
+
+**The slot lights up.** Without that the whole idea is invisible: a skill worth
+seventy-five percent more on something nearly dead, with nothing on screen
+saying when, is a skill nobody ever holds — they press it off cooldown and
+never learn it was a decision. The light reads live from the sim, so it and the
+damage cannot disagree.
+
+### Two sorts of condition, and only one is worth waiting for
+
+The suite is what separated them. `finisher`, `opener` and `onDot` are facts
+about the **target**, so a player chooses when to spend against them.
+`desperate` and `steady` are facts about **you** — and holding a heal until you
+are nearly dead is not good play, it is worse play: the harness measured a
+Priest finishing fights on *less* health for doing it. `HOLDABLE_CONDITIONS` is
+that distinction, `timeSkills` respects it, and the printed table measures the
+two sorts differently — a fight's length and lowest health for the ones you can
+wait for, and the damage on the spot for the ones you cannot.
+
+Three things the numbers caught:
+
+- **`atRange` was a passive wearing a decision's clothes.** A Ranger sitting at
+  their own weapon range is beyond twelve metres every second of every fight,
+  so the bonus was permanent and free. `steady` replaced it — the mirror of the
+  Priest's, and the actual class fantasy.
+- **A held skill has to be given up on.** The harness waited indefinitely, so
+  the Rogue simply never fired Assassinate once the fight had started —
+  measured as watching for the moment costing a second and a half.
+- **The harness read `player.targetId` before the target command had drained.**
+  Commands are queued and applied inside `tick`, so on the first pass the
+  target is still null and every target-keyed condition reads false. The Rogue
+  never got their opener at all, and the number that exposed it was the two
+  classes whose conditions were *supposed* to do nothing coming out identical.
+
 ## Every creature does something, not just the bosses
 
 Eight bosses in this game are excellent. Every one of the other twenty-eight

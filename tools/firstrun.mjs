@@ -194,6 +194,29 @@ await wait(600);
 await page.screenshot({ path: join(OUT, '7-danger.png') });
 console.log('danger:', JSON.stringify(danger));
 
+// A skill worth timing, lit while its moment is live.
+console.log('timing:', await page.evaluate(async () => {
+  const g = window.__game;
+  const me = g.world.player;
+  me.level = 20;
+  me.learnedSkills = [];
+  for (const def of g.allMobs()) def.aggroRadius = 0;
+  const victim = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+  victim.pos = { x: me.pos.x + 2, z: me.pos.z };
+  g.world.submit(me.id, { t: 'target', id: victim.id });
+  await new Promise((r) => setTimeout(r, 400));
+  const lit = () => [...document.querySelectorAll('#skill-bar .slot.live')].length;
+  victim.health = g.world.statsOf(victim).maxHealth;
+  await new Promise((r) => setTimeout(r, 250));
+  const healthy = lit();
+  victim.health = g.world.statsOf(victim).maxHealth * 0.15;
+  await new Promise((r) => setTimeout(r, 250));
+  const nearlyDead = lit();
+  return { healthy, nearlyDead };
+}));
+await wait(300);
+await page.screenshot({ path: join(OUT, '10-timing.png') });
+
 // A creature's trait, on the frame and on the plate.
 await page.evaluate(async () => {
   const g = window.__game;
@@ -375,6 +398,43 @@ console.log('potions:', await page.evaluate(() => {
     helpMentions: /potion|drink|quaff/i.test(help),
     // Bound to anything?
     keys: help.match(/\b[A-Z]\b/g)?.join('') ?? '',
+  };
+}));
+
+
+// A long look at the mid-game: what does a level-50 character in a new zone
+// actually have to work with?
+console.log('midzone:', await page.evaluate(async () => {
+  const g = window.__game;
+  const me = g.world.player;
+  g.world.travelTo('reach');
+  await new Promise((r) => setTimeout(r, 1400));
+  me.level = 50;
+  const zone = g.world.zone;
+  const d = (p) => Math.hypot(p.x - me.pos.x, p.z - me.pos.z);
+  const camps = new Map();
+  for (const sp of zone.spawns) {
+    const def = g.mobOf(sp.mobId);
+    const base = def.starOf ?? def.rareOf ?? def.id;
+    if (!camps.has(base)) camps.set(base, { n: 0, near: Infinity, level: g.mobOf(base).level });
+    const c = camps.get(base);
+    c.n++;
+    c.near = Math.min(c.near, d(sp.pos));
+  }
+  // What is worth killing at 50, and how far to the nearest of it.
+  const worth = [...camps]
+    .filter(([, c]) => Math.abs(c.level - 50) <= 5)
+    .sort((a, b) => a[1].near - b[1].near)
+    .slice(0, 4)
+    .map(([id, c]) => `${g.mobOf(id).name} lv${c.level} ${Math.round(c.near)}m x${c.n}`);
+  return {
+    zone: zone.id,
+    band: zone.levelRange,
+    campKinds: camps.size,
+    atMyLevel: worth,
+    quests: (me.quests ?? []).length,
+    sites: g.world.openSites().length,
+    exits: zone.exits.map((e) => `${e.label} ${e.minLevel}+`),
   };
 }));
 
