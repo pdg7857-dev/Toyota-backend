@@ -2100,6 +2100,8 @@ export class World {
         e.abilityCooldowns = e.abilityCooldowns ?? {};
         e.abilityCooldowns[ability.id] = ability.cooldownMs;
 
+        this.noteAbilitySeen(e, ability.id);
+
         if (ability.castMs > 0) {
           // Ground-targeted abilities stamp their landing spot now, while the
           // player is standing on it. That stamp is the whole mechanic: the
@@ -2854,6 +2856,27 @@ export class World {
    * once-an-hour creature and losing it in a tally of four hundred wolves is
    * losing the only part of the tally anybody would want to look at.
    */
+  /**
+   * Write down what a boss just did, the first time you are shown it.
+   *
+   * The same rule the bestiary runs under: what a creature does is learned by
+   * playing rather than by reading a tooltip on something already hitting you.
+   * A boss kit is four telegraphed abilities and the only way to find out what
+   * they were was to die to them, which is a fine way to learn it *once* and a
+   * poor way to remember it a fortnight later.
+   *
+   * Only when it is aimed at the player, and only for what has a name worth
+   * knowing — a creature working an adventurer over on the other side of the
+   * zone is not teaching anybody anything.
+   */
+  private noteAbilitySeen(mob: Entity, abilityId: string): void {
+    if (mob.targetId !== this.playerId) return;
+    const player = this.player;
+    player.seenAbilities = player.seenAbilities ?? [];
+    if (player.seenAbilities.includes(abilityId)) return;
+    player.seenAbilities.push(abilityId);
+  }
+
   private recordKill(player: Entity, def: MobDef): void {
     const base = baseMobId(def.rareOf ?? def.id);
     player.slain = player.slain ?? {};

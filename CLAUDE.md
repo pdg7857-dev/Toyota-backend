@@ -147,6 +147,34 @@ The bar draws the debt as ground still to make up, sitting *ahead* of where you
 are — not as a bite taken out behind you. It has never taken anything away, and
 the bar must not imply that it has.
 
+#### And what killed you
+
+Dying is the most instructive moment this game has and it said nothing about
+itself: a screen reading YOU DIED and a number in experience, which between
+them answer *what did it cost* and never *what should I have done*. Everything
+the recap says was already in the event stream; none of it had anywhere to go.
+
+Four lines at most, and each has to earn its line:
+
+- **What killed you, and with what.** A name and a blow.
+- **How fast, as a share of your own health.** "Two thirds of you in four
+  seconds" is the difference between a fight you misplayed and one you should
+  never have taken, and a raw number cannot tell you which.
+- **Whether you were standing in it.** The one thing a player could not have
+  worked out for themselves, and the answer to half the deaths in this game.
+- **What you were carrying and never drank.** `Q` and `X` exist because nobody
+  opens a backpack mid-fight; dying with a full belt is worth knowing exactly
+  once. Filtered by what you could actually have used, because a belt of
+  level-66 salves at level 24 is not a mistake and saying so teaches the wrong
+  lesson.
+
+It lives in the HUD rather than in the sim, because it is a thing to *say*
+rather than a fact about the world — nothing in `sim/` reads it, and a ring
+buffer of combat text is not state a server would send anybody. It is frozen at
+the moment of death rather than read off the buffer when the overlay draws: the
+buffer keeps trimming, and a recap that thinned out while the player was
+reading it would be a recap of nothing.
+
 ## The drop is the moment
 
 A rare or an epic is the thing a player farmed a boss for an hour to get, and
@@ -680,41 +708,6 @@ seeded fight — a test asserts the Rng state is untouched across a minute of it
 The cost is real and lands in one place: aggro is measured from where a
 creature *is*, so every clearance in the game — boss arenas, shopfronts, the
 arrival point — is now `aggroRadius + roam + margin`, and the tests say so.
-
-## What dying costs
-
-Death used to cost the walk back and nothing else, which in a game where a ★4
-kills you 18% of the time makes a bad pull free — and a fight with no downside
-is a fight with no tension. Both of the obvious prices are worse than no price:
-
-- **Losing gear** turns a bad pull into a shopping trip, and hits hardest at
-  exactly the moment the player was already having a bad time.
-- **Losing experience** lets a run of bad luck push a character *backwards*. A
-  level you have already earned should never be revocable; twenty-eight
-  thousand kills is not something to take away from somebody.
-
-So death is priced in the currency the whole game is denominated in, without
-ever subtracting from it: you take on a **debt**, and kills pay it down out of
-the same stream that levels you (`DEBT_REPAY_SHARE`). Progress never reverses;
-it slows, and then it stops slowing, and the player can always see the end of
-it. `npm test` prints what a death costs at each band — currently 20 to 290
-kills, always about 35% of the level it happened in.
-
-Three rules around it:
-
-- **Capped at one level's worth.** A losing streak that digs a hole deeper than
-  the level took to earn is "you lost a level" wearing a different name.
-- **Free below level 10.** The first ten levels are where a player learns which
-  fights are survivable; charging for that lesson teaches caution before the
-  game has taught competence.
-- **Your body is on the map.** Walk back to where you fell and press **V** and
-  the rest of the debt is cleared. This is the half that makes it a decision
-  rather than a tax: go back through the thing that killed you, or pay it off
-  in kills somewhere safer. Without it the walk back is dead time.
-
-The bar draws the debt as ground still to make up, sitting *ahead* of where you
-are — not as a bite taken out behind you. It has never taken anything away, and
-the bar must not imply that it has.
 
 ## The sun goes round, and the sky does things
 
@@ -1553,6 +1546,34 @@ two share a signature or if one repeats a kind, and one runs every boss played
 badly and played well and fails if the gap ever closes. The printed table is
 the part that matters — "these are the same fight" is invisible to any
 assertion made one boss at a time.
+
+### And a boss tells you what it has already done to you
+
+A kit is four telegraphed abilities and the only way to find out what they were
+was to die to them. That is a fine way to learn something once and a poor way
+to remember it a fortnight later, and it is the opposite of the rule the
+bestiary already runs under: **what a creature does is written down the first
+time it happens, and learned by playing rather than read off a tooltip on
+something that has not hit you yet.**
+
+`World.noteAbilitySeen` records an ability the first time it is aimed at *you*
+— a creature working an adventurer over on the other side of the zone teaches
+nobody anything — and the target frame's tooltip names it and says what to do
+about it. It also says how many you have **not** seen, because "three more you
+have not seen" is a different fight from "you have seen everything it does".
+
+`ABILITY_ANSWERS` is a `Record` over the kind union on purpose: adding a kind
+without deciding what the player is supposed to do about it stops compiling,
+which is the "it must have a different answer" rule enforced by the type system
+rather than by somebody remembering.
+
+The moment it existed it found a real bug in the content. Cadfael's slam was
+called **Cleaving Blow** — a circle wearing the name of the one other kind in
+this game that is *not* a circle — so the frame read "Cleaving Blow — get out of the circle": a name telling
+the player to go round the side of an AoE they are standing in the middle of.
+It is "Hammering Blow" now, and the boss-kit test prints every ability's name
+beside its kind and its answer, because that contradiction is invisible to any
+assertion and obvious in two columns.
 
 `fixate` and `hazard` stamp `Entity.castAt` when the cast *begins*. That stamp
 is the mechanic: the circle on the ground is a promise about where this will

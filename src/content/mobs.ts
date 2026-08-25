@@ -364,15 +364,21 @@ export const LOOT_TABLES: Record<string, LootTable> = {
 
 const CADFAEL_ABILITIES: MobAbilityDef[] = [
   {
+    // Named for the shape it makes, not for the weapon that makes it. It was
+    // "Cleaving Blow" for a long time, which is a circle wearing the name of
+    // the one other kind in this game that is *not* a circle — and the moment
+    // the target frame started saying what to do about a thing it had shown
+    // you, that name was telling the player to go round the side of an AoE
+    // they were standing in the middle of.
     id: 'cleaving_blow',
-    name: 'Cleaving Blow',
+    name: 'Hammering Blow',
     kind: 'heavySlam',
     cooldownMs: 18000,
     castMs: 2000,
     radius: 6,
     damageMultiplier: 3.4,
     interruptible: false,
-    telegraphText: 'Cadfael raises his cleaver for a wide swing!',
+    telegraphText: 'Cadfael brings his cleaver down on the ground!',
   },
   {
     id: 'rally_outlaws',

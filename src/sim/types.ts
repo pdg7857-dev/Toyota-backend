@@ -343,6 +343,25 @@ export type MobAbilityKind =
   /** Instant heal on the caster; punishes slow damage. */
   | 'mend';
 
+/**
+ * What to do about each kind, in words.
+ *
+ * A `Record` over the union on purpose: adding a kind without deciding what
+ * the player is supposed to do about it stops compiling, which is the rule
+ * "it must have a different answer" enforced by the type system rather than by
+ * somebody remembering. These are the words shown on the target frame once a
+ * boss has actually used the thing on you — see `World.noteAbilitySeen`.
+ */
+export const ABILITY_ANSWERS: Record<MobAbilityKind, string> = {
+  heavySlam: 'Get out of the circle.',
+  cleave: 'Go round the side — backing away keeps you in it.',
+  fixate: 'Keep moving. It lands where you were standing.',
+  hazard: 'Move out, and stay out.',
+  enrage: 'Nothing. It is the clock telling you to finish.',
+  summon: 'Interrupt it.',
+  mend: 'Interrupt it.',
+};
+
 export interface MobAbilityDef {
   id: string;
   name: string;
@@ -713,6 +732,14 @@ export interface Entity {
   namedSlain?: string[];
   /** Deaths, and the worst single hit taken and dealt. */
   record?: { deaths: number; biggestHit: number; worstTaken: number };
+  /**
+   * Boss abilities that have been aimed at you at least once.
+   *
+   * Player knowledge, like `namedSlain` and `found`: it saves, it catches up,
+   * and it is what the target frame reads to tell you what the thing in front
+   * of you is going to do. See `World.noteAbilitySeen`.
+   */
+  seenAbilities?: string[];
   /** Global cooldown remaining; blocks every skill while > 0. */
   gcdMs?: number;
   /** Normalized movement intent, held until the client changes it. */

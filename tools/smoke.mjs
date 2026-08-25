@@ -1286,10 +1286,16 @@ async function main() {
     killer.threat = { [player.id]: 100 };
     killer.autoAttack = true;
     g.world.submit(player.id, { t: 'target', id: killer.id });
-    const until = Date.now() + 12000;
+    const until = Date.now() + 14000;
     const killerMax = g.world.statsOf(killer).maxHealth;
+    const playerMax = g.world.statsOf(player).maxHealth;
+    // Held up for a couple of seconds first, so it is a fight and not an
+    // execution. The recap says how much of you went in how long, and a
+    // character pinned at one health from the start dies to a single blow —
+    // which measured as "the recap does not say how fast it happened".
+    const standUntil = Date.now() + 2600;
     while (!player.dead && Date.now() < until) {
-      player.health = 1;
+      player.health = Date.now() < standUntil ? playerMax : 1;
       killer.health = killerMax;
       await new Promise((r) => setTimeout(r, 100));
     }
@@ -1313,6 +1319,10 @@ async function main() {
     shown: getComputedStyle(document.querySelector('#death-overlay')).display !== 'none',
     cost: document.querySelector('#death-cost')?.textContent ?? '',
     debtBar: parseFloat(document.querySelector('#xp-debt')?.style.width ?? '0'),
+    // How it happened. The most instructive moment in the game used to say
+    // what it cost and nothing about itself.
+    recap: document.querySelector('#death-recap')?.textContent ?? '',
+    recapLines: document.querySelectorAll('#death-recap div').length,
   }));
   const reclaimed = await page.evaluate(async () => {
     const g = window.__game;
@@ -1809,6 +1819,74 @@ async function main() {
     };
   });
 
+  // What a boss does, once it has done it to you.
+  //
+  // A kit is four telegraphed abilities and the only way to find out what they
+  // were was to die to them — fine once, poor a fortnight later. The same rule
+  // the bestiary runs under: learned by playing, not read off a tooltip on
+  // something that has not hit you yet.
+  const kit = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const boss = [...g.world.entities.values()].find(
+      (e) => e.kind === 'mob' && !e.dead && (g.mobOf(e.defId).abilities ?? []).length > 1,
+    );
+    if (!boss) return { ok: false, why: 'no boss standing' };
+    const abilities = g.mobOf(boss.defId).abilities;
+
+    // Nothing known yet: the frame must not spoil what has not happened.
+    me.seenAbilities = [];
+    g.world.submit(me.id, { t: 'target', id: boss.id });
+    await new Promise((r) => setTimeout(r, 300));
+    const frame = document.querySelector('#target-frame');
+    const read = async () => {
+      frame.dispatchEvent(
+        new MouseEvent('mouseenter', { bubbles: true, clientX: 400, clientY: 400 }),
+      );
+      await new Promise((r) => setTimeout(r, 80));
+      const tip = document.querySelector('#tip');
+      const text = getComputedStyle(tip).display === 'none' ? '' : (tip.textContent ?? '');
+      frame.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+      return text;
+    };
+    const blank = await read();
+
+    // Now it uses one on you, through the real path: the mob has to be
+    // fighting the player for it to count, which is the whole rule.
+    boss.pos = { x: me.pos.x + 2, z: me.pos.z };
+    boss.spawnPos = { ...boss.pos };
+    boss.targetId = me.id;
+    boss.aiState = 'attacking';
+    boss.threat = { [me.id]: 100 };
+    boss.abilityCooldowns = {};
+    const until = Date.now() + 12000;
+    while ((me.seenAbilities ?? []).length === 0 && Date.now() < until) {
+      me.health = g.world.statsOf(me).maxHealth;
+      boss.health = g.world.statsOf(boss).maxHealth;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const learned = await read();
+    const shown = (me.seenAbilities ?? [])
+      .map((id) => abilities.find((a) => a.id === id)?.name)
+      .filter(Boolean);
+
+    g.world.submit(me.id, { t: 'target', id: null });
+    boss.targetId = null;
+    boss.threat = {};
+    boss.aiState = 'idle';
+    return {
+      ok: true,
+      boss: boss.name,
+      // Nothing before, the thing it used after, and an honest count of what
+      // is still unknown either way.
+      quietFirst: !abilities.some((a) => blank.includes(a.name)) && /more you have not seen/.test(blank),
+      names: shown.length > 0 && shown.every((n) => learned.includes(n)),
+      saysTheAnswer: /Get out of|Go round|Keep moving|Move out|Interrupt it|the clock/.test(learned),
+      shown,
+      learned: learned.slice(0, 160),
+    };
+  });
+
   // The reckoning.
   const reckoning = await page.evaluate(async () => {
     const g = window.__game;
@@ -1952,6 +2030,8 @@ async function main() {
       '#quest-log',
       '#vendor-window',
       '#map-panel',
+      '#away-report',
+      '#death-overlay',
       '#levelup',
       '#drop',
     ]
@@ -2882,6 +2962,9 @@ async function main() {
     ['only one corpse offers the loot key', muster.prompts <= 1],
     ['a skill lights up when its moment arrives', timing.ok && timing.nearlyDead > 0],
     ['and is dark the rest of the time', timing.healthy === 0],
+    ['a boss frame gives nothing away at first', kit.ok && kit.quietFirst],
+    ['and names what it has actually shown you', kit.names],
+    ['and what to do about it', kit.saysTheAnswer],
     ['a kill is written down', reckoning.counted && reckoning.byBase],
     ['the panels have their own screen to themselves',
       tidy.boxes > 2 && tidy.plates > 4 && tidy.aimed && tidy.over === 0],
@@ -2989,6 +3072,8 @@ async function main() {
     ['night keeps enough ambient to see by', skies[2].ambient >= skies[0].ambient * 0.45],
     ['the clock is on screen', /\d\d:\d\d/.test(clockShown)],
     ['dying opens a debt instead of taking a level', death.ok && death.owed > 0 && death.level === 30 && death.xp === 500],
+    ['the death screen says what killed you', /finished it/.test(deathUi.recap)],
+    ['and how fast it happened', /% of you/.test(deathUi.recap)],
     ['the death screen says what it cost', /experience owed/i.test(deathUi.cost) && deathUi.shown],
     ['the debt is drawn on the xp bar', deathUi.debtBar > 0],
     ['the debt survives the respawn', reclaimed.owedAfterRespawn > 0],
@@ -3031,6 +3116,7 @@ async function main() {
   console.log('timing:', JSON.stringify(timing));
   console.log('reckoning:', JSON.stringify(reckoning));
   console.log('levelling:', JSON.stringify(levelling));
+  console.log('kit:', JSON.stringify(kit));
   console.log('drop:', JSON.stringify(drop), '| sell-all:', JSON.stringify(sellAll));
   console.log('pulling:', JSON.stringify(pulling), '| tidy:', JSON.stringify(tidy));
   console.log('belt:', JSON.stringify(belt));

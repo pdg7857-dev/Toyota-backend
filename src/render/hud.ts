@@ -13,7 +13,7 @@ import {
   SKILL_RANK_POWER,
   xpToNext,
 } from '../sim/formulas.js';
-import { BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
+import { ABILITY_ANSWERS, BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
 import { ZONES } from '../content/zone.js';
 import { DRAGONS } from '../content/dragons.js';
 import { getMount } from '../content/mounts.js';
@@ -60,6 +60,15 @@ const MAX_LOG_LINES = 9;
  * takes, and two copies of a constant drift.
  */
 export const LOOT_RANGE = 4.5;
+
+/**
+ * How far back the death recap looks.
+ *
+ * Long enough to cover the pull that went wrong and short enough that the
+ * chip damage you took on the way in is not in it. A recap that reaches back
+ * a minute is a recap of the whole afternoon.
+ */
+const RECAP_WINDOW_MS = 8000;
 /**
  * The furniture a nameplate, a floating number or a speech bubble must not be
  * drawn on top of.
@@ -81,6 +90,10 @@ const RESERVED_PANELS = [
   '#quest-log',
   '#vendor-window',
   '#map-panel',
+  '#away-report',
+  // The whole screen, while it is up. Reading how you died past a nameplate
+  // for the thing that did it is worse than either on its own.
+  '#death-overlay',
   // The two cards. They are laid out even while faded, so what decides
   // whether they count is whether they can actually be seen.
   '#levelup',
@@ -180,6 +193,7 @@ export class Hud {
     volumeIcon: HTMLElement;
     volumeBar: HTMLElement;
     deathOverlay: HTMLElement;
+    deathRecap: HTMLElement;
     overlays: HTMLElement;
     telegraph: HTMLElement;
     zoneBanner: HTMLElement;
@@ -218,6 +232,22 @@ export class Hud {
   /** Hotkey order for this character's class, filled in at construction. */
   private skillOrder: string[] = [];
   private nameplates = new Map<EntityId, HTMLElement>();
+  /**
+   * The last few seconds of what has been hitting you, for the death recap.
+   *
+   * Kept in the HUD rather than in the sim, because it is a thing to *say*
+   * rather than a fact about the world — nothing in `sim/` reads it, and a
+   * ring buffer of combat text is not state a server would send anybody.
+   */
+  private recentHits: Array<{
+    at: number;
+    from: string;
+    amount: number;
+    ability: string | null;
+    telegraphed: boolean;
+  }> = [];
+  /** Frozen at the moment of death, so the recap does not decay while you read it. */
+  private lastStand: string[] | null = null;
   /**
    * Where the player has put their own mark, if anywhere.
    *
@@ -318,6 +348,7 @@ export class Hud {
       inventoryBody: this.q('#inventory-body'),
       xpDebt: this.q('#xp-debt'),
       deathCost: this.q('#death-cost'),
+      deathRecap: this.q('#death-recap'),
       volumeToast: this.q('#volume-toast'),
       volumeIcon: this.q('#volume-icon'),
       volumeBar: this.q('#volume-bar'),
@@ -417,6 +448,7 @@ export class Hud {
               dealt ? 'log-hit' : 'log-dmg',
             );
           }
+          if (ev.targetId === playerId) this.noteHit(source, ev.amount, ev.abilityId);
           this.float(
             camera,
             target,
@@ -441,8 +473,15 @@ export class Hud {
         case 'death': {
           const victim = this.world.entity(ev.entityId);
           if (!victim) break;
-          if (ev.entityId === playerId) this.log('You have died.', 'log-warn');
-          else if (ev.killerId === playerId) this.log(`You have slain ${victim.name}.`, 'log-hit');
+          if (ev.entityId === playerId) {
+            this.log('You have died.', 'log-warn');
+            // Frozen here rather than read off the buffer when the overlay
+            // draws: the buffer keeps trimming, and a recap that thinned out
+            // while the player was reading it would be a recap of nothing.
+            this.lastStand = this.deathRecap(ev.killerId);
+          } else if (ev.killerId === playerId) {
+            this.log(`You have slain ${victim.name}.`, 'log-hit');
+          }
           break;
         }
         case 'xpGained':
@@ -733,6 +772,96 @@ export class Hud {
     this.els.levelCard.classList.add('show');
   }
 
+  /**
+   * Note something that just hit you, for the recap.
+   *
+   * Telegraphed abilities are marked as they land, because that is the one
+   * thing the recap can say that the player could not have worked out: a slam
+   * that killed you is a slam you were standing in.
+   */
+  private noteHit(source: Entity, amount: number, abilityId: string | null): void {
+    const now = performance.now();
+    let telegraphed = false;
+    if (abilityId && source.kind === 'mob' && source.defId) {
+      const ability = getMob(source.defId).abilities?.find((a) => a.id === abilityId);
+      telegraphed = !!ability && ability.kind !== 'mend' && ability.kind !== 'summon';
+    }
+    this.recentHits.push({
+      at: now,
+      from: source.name,
+      amount,
+      ability: abilityId ? this.abilityName(source.id, abilityId) : null,
+      telegraphed,
+    });
+    while (this.recentHits.length > 0 && now - this.recentHits[0]!.at > RECAP_WINDOW_MS) {
+      this.recentHits.shift();
+    }
+  }
+
+  /**
+   * How it happened.
+   *
+   * Dying is the most instructive moment this game has and it said nothing
+   * about itself: a screen reading YOU DIED and a number in experience, which
+   * between them answer "what did it cost" and never "what should I have
+   * done". Everything here is already in the event stream; none of it had
+   * anywhere to go.
+   *
+   * Four lines at most, and each has to be worth a line:
+   *
+   * - **What killed you**, and with what. A name and a blow.
+   * - **How fast**, as a share of your own health. "Two thirds of you in four
+   *   seconds" is the difference between a fight you misplayed and one you
+   *   should never have taken, and a raw number cannot say which.
+   * - **Whether you were standing in it.** The one thing the player could not
+   *   have worked out for themselves, and the answer to half the deaths in
+   *   this game.
+   * - **What you were carrying and did not drink.** `Q` and `X` exist because
+   *   nobody opens a backpack mid-fight; dying with a full belt is worth
+   *   knowing exactly once.
+   */
+  private deathRecap(killerId: EntityId | null): string[] {
+    const player = this.world.player;
+    const max = this.world.statsOf(player).maxHealth;
+    const now = performance.now();
+    const window = this.recentHits.filter((h) => now - h.at <= RECAP_WINDOW_MS);
+    const lines: string[] = [];
+
+    const last = window[window.length - 1];
+    const killer = killerId !== null ? this.world.entity(killerId) : null;
+    const name = killer?.name ?? last?.from ?? null;
+    if (name) {
+      lines.push(
+        last?.ability
+          ? `<b>${name}</b> finished it with <b>${last.ability}</b> for ${last.amount}.`
+          : `<b>${name}</b> finished it for ${last?.amount ?? 0}.`,
+      );
+    }
+
+    if (window.length > 1) {
+      const took = window.reduce((n, h) => n + h.amount, 0);
+      const seconds = Math.max(1, Math.round((now - window[0]!.at) / 1000));
+      const share = Math.round((took / Math.max(1, max)) * 100);
+      lines.push(
+        `${took.toLocaleString()} damage in ${seconds}s — ${share}% of you, over ${window.length} blows.`,
+      );
+    }
+
+    if (window.some((h) => h.telegraphed)) {
+      lines.push('<span class="recap-warn">You were standing in something you could have left.</span>');
+    }
+
+    // Only what you could actually have drunk: a belt full of level-66 salves
+    // at level 24 is not a mistake, and saying so teaches the wrong lesson.
+    const potion = bestDrink(player, 'potion');
+    if (potion) {
+      lines.push(
+        `<span class="recap-warn">You were carrying a ${getItem(potion).name}. <b>Q</b> drinks it.</span>`,
+      );
+    }
+    return lines;
+  }
+
   /** Resolve a skill or mob-ability id to a display name. */
   private abilityName(sourceId: EntityId, id: string): string {
     const source = this.world.entity(sourceId);
@@ -859,6 +988,10 @@ export class Hud {
         owed > 0
           ? `${owed.toLocaleString()} experience owed. Walk back to where you fell and press V to take it back.`
           : 'That one was free.';
+      this.els.deathRecap.innerHTML = (this.lastStand ?? []).map((l) => `<div>${l}</div>`).join('');
+    } else if (this.lastStand !== null) {
+      this.lastStand = null;
+      this.recentHits.length = 0;
     }
 
     if (this.openVendorId !== null) {
@@ -1372,6 +1505,22 @@ export class Hud {
       `Level ${target.level}, ${'★'.repeat(def.stars)} — ${THREAT_WORDS[band]} for you`,
     ];
     if (trait) lines.push(trait.line);
+
+    // What this one has already shown you, and what to do about it.
+    //
+    // The same rule the bestiary runs under: what a creature does is learned
+    // by playing, not read off a tooltip on something that has not hit you
+    // yet. A boss kit is four telegraphed abilities and the only way to find
+    // out what they were was to die to them — a fine way to learn it once, and
+    // a poor way to remember it a fortnight later.
+    const kit = def.abilities ?? [];
+    const seen = this.world.player.seenAbilities ?? [];
+    const known = kit.filter((a) => seen.includes(a.id));
+    for (const ability of known) {
+      lines.push(`<b>${ability.name}</b> — ${ABILITY_ANSWERS[ability.kind]}`);
+    }
+    const unseen = kit.length - known.length;
+
     return {
       title: target.name,
       sub: def.stars >= BOSS_STARS ? 'boss' : 'creature',
@@ -1380,6 +1529,14 @@ export class Hud {
       // modifier: a player who is told "Venomous" and nothing else has been
       // given a word, not a decision.
       note: trait?.answer,
+      // Said out loud, because "it has three abilities and you have seen one"
+      // is a different fight from "you have seen all of them".
+      foot:
+        kit.length > 0
+          ? unseen > 0
+            ? `${unseen} more you have not seen.`
+            : 'You have seen everything it does.'
+          : undefined,
     };
   }
 
@@ -3106,6 +3263,7 @@ const TEMPLATE = `
 
   <div id="death-overlay">
     <h2>YOU DIED</h2>
+    <div id="death-recap"></div>
     <p id="death-cost"></p>
     <button id="respawn-btn" class="clickable">Return to the standing stones</button>
   </div>

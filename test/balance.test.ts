@@ -21,7 +21,13 @@ import {
   xpForKill,
   xpToNext,
 } from '../src/sim/formulas.js';
-import { BOSS_STARS, type ClassId, type Entity, type MobDef } from '../src/sim/types.js';
+import {
+  ABILITY_ANSWERS,
+  BOSS_STARS,
+  type ClassId,
+  type Entity,
+  type MobDef,
+} from '../src/sim/types.js';
 import { BOUNTY_MOBS, LOOT_TABLES, MOBS, baseMobId, getMob } from '../src/content/mobs.js';
 import {
   BOUNTY_SPAWN_CHANCE,
@@ -436,6 +442,7 @@ describe('boss fights are decided by play, not just stats', () => {
     // true of each boss individually. Printing the kits side by side is what
     // makes "these are the same fight" visible at all.
     const rows: string[] = [];
+    const named: string[] = [];
     const signatures = new Map<string, string[]>();
 
     for (const zone of Object.values(ZONES)) {
@@ -444,6 +451,16 @@ describe('boss fights are decided by play, not just stats', () => {
         if (def.stars < BOSS_STARS || def.dragon) continue;
         const kinds = (def.abilities ?? []).map((a) => a.kind);
         rows.push(`  ${def.name.padEnd(30)} ★${def.stars} (${String(def.level).padStart(3)})  ${kinds.join(', ')}`);
+        // And what each ability is *called*, beside what it is. The target
+        // frame now tells a player what to do about anything a boss has shown
+        // them, which makes a name that contradicts its own kind actively
+        // misleading: "Cleaving Blow — get out of the circle" sat in the game
+        // for a while, telling the player to go round the side of an AoE they
+        // were standing in the middle of. No assertion can see that; two
+        // columns side by side can.
+        for (const a of def.abilities ?? []) {
+          named.push(`  ${a.name.padEnd(22)} ${a.kind.padEnd(11)} ${ABILITY_ANSWERS[a.kind]}`);
+        }
         signatures.set(def.id, kinds);
 
         // Every boss must have something answered by *moving*. A boss whose
@@ -458,6 +475,10 @@ describe('boss fights are decided by play, not just stats', () => {
     }
 
     console.log('\nWHAT EACH BOSS ACTUALLY DOES\n' + rows.sort().join('\n'));
+    console.log(
+      '\nAND WHAT EACH ABILITY IS CALLED, BESIDE WHAT IT IS\n' +
+        [...new Set(named)].sort().join('\n'),
+    );
 
     // The check with teeth: no two bosses may be answered by exactly the same
     // set of moves. They can share a piece; they cannot share the whole kit.

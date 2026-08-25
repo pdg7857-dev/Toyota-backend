@@ -1565,3 +1565,20 @@ canvas { display: block; }
   padding-bottom: 5px;
   color: var(--gold);
 }
+
+/* -------------------------------------------------------- the death recap */
+
+/* How it happened. Above the cost, because "what should I have done" is a more
+ * useful thing to read than "what did it cost" and the eye takes the top line
+ * first. */
+#death-recap {
+  margin: 4px 0 12px;
+  max-width: 460px;
+  text-align: center;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: #ded4bd;
+}
+
+#death-recap b { color: #ffd9a0; }
+#death-recap .recap-warn { color: #ffb07a; }

@@ -80,6 +80,19 @@ timer; the only thing that produces a dragon is time. It sits at the top of its
 zone's band, it is the hardest fight there, and it carries the best weapon in
 the game.
 
+## What a boss has already shown you
+
+The first time a boss uses something on you it goes down in the target frame,
+with what to do about it — and how many of its tricks you still have not seen.
+Nothing is listed before it happens.
+
+## What killed you
+
+The death screen says how it happened: what finished you and with what, how
+much of you went in how many seconds, whether you were standing in something
+you could have walked out of, and whether you were carrying a potion you never
+drank.
+
 ## The drop is the moment
 
 A rare or an epic says so, in its own colour, and tells you whether it beats
