@@ -882,6 +882,30 @@ yellow, and nothing in the game ever said. `npm test` prints how every camp in
 every zone reads to a character at that zone's own level, because a scale where
 everything comes out "even" says nothing and no single assertion can see it.
 
+### The panels have their own screen to themselves
+
+Six hundred creatures project onto a window that already has furniture on it,
+and the first honest look at a *first kill* had an adventurer's nameplate
+written across the minimap's clock. Stacking order does not fix it: the panels
+are opaque but their labels are not, and a plate showing *through* a label is
+no better than one on top of it.
+
+`onFurniture` hides any plate, floating number or speech bubble whose anchor
+falls inside the frames, the tracker or the minimap. The boxes are cached
+rather than measured every frame — reading a layout box after writing six
+hundred plate positions forces a reflow per plate instead of one for the frame,
+and these panels only move when the window does.
+
+Plates are also pulled back inside the window when a long name would run off
+the edge, in a **separate pass** for the same reason: that one has to read
+layout, so it happens once, after all the writing.
+
+The check for it aims two creatures at the panels by *solving* for the spot —
+the same projection the plates use, scanned over ground the player can see —
+because a ring of creatures at melee range never lands up there and a check
+that cannot fail is decoration. Turning the rule off makes both halves fail,
+which is the only way to know they were ever doing anything.
+
 ### Loot you can see from across a camp
 
 The nameplate has always said "press F to loot" — from thirteen metres, in a

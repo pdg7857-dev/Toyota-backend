@@ -1674,6 +1674,120 @@ async function main() {
     };
   });
 
+  // Nothing is drawn on the furniture.
+  //
+  // Six hundred creatures project onto a screen that already has panels on it,
+  // and the first honest look at a first kill had an adventurer's nameplate
+  // written across the minimap's clock. Checked as a rule over whatever the
+  // run happens to have on screen rather than by contriving one plate: the
+  // failure is a class, not a case.
+  const tidy = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    // Stand a ring of creatures round the player so there is something to
+    // measure. Two plates on screen is not a test of anything; twelve spread
+    // over the window puts some of them under the panels and some of them off
+    // the edge, which is the whole point.
+    const ring = [...g.world.entities.values()]
+      .filter((e) => e.kind === 'mob' && !e.dead)
+      .slice(0, 12);
+    const home = ring.map((e) => ({ ...e.pos }));
+    ring.forEach((e, i) => {
+      const a = (i / ring.length) * Math.PI * 2;
+      const r = 6 + (i % 3) * 5;
+      e.pos = { x: me.pos.x + Math.sin(a) * r, z: me.pos.z + Math.cos(a) * r };
+    });
+
+    // And two put deliberately *under the panels*, because a ring at melee
+    // range never lands there and a check that cannot fail is decoration. The
+    // spot is solved rather than guessed: the same projection the plates use,
+    // scanned over ground the player can see, for the position that lands in
+    // the middle of the box. They keep their plates past the range cut because
+    // one is the target and one is hunting the player, which are the two
+    // things a plate always shows for.
+    const cam = g.rig.camera;
+    const scratch = cam.position.clone();
+    const project = (x, z) => {
+      scratch.set(x, g.rig.standAt(x, z) + 2, z).project(cam);
+      if (scratch.z > 1) return null;
+      return {
+        x: (scratch.x * 0.5 + 0.5) * window.innerWidth,
+        y: (-scratch.y * 0.5 + 0.5) * window.innerHeight,
+      };
+    };
+    const aimAt = (sel) => {
+      const el = document.querySelector(sel);
+      if (!el || el.offsetParent === null) return null;
+      const b = el.getBoundingClientRect();
+      const want = { x: (b.left + b.right) / 2, y: (b.top + b.bottom) / 2 };
+      const len = Math.hypot(me.pos.x - cam.position.x, me.pos.z - cam.position.z) || 1;
+      const fx = (me.pos.x - cam.position.x) / len;
+      const fz = (me.pos.z - cam.position.z) / len;
+      let best = null;
+      let bestGap = 40;
+      for (let ahead = 30; ahead <= 900; ahead += 10) {
+        for (let side = -700; side <= 700; side += 10) {
+          const x = me.pos.x + fx * ahead - fz * side;
+          const z = me.pos.z + fz * ahead + fx * side;
+          const at = project(x, z);
+          if (!at) continue;
+          const gap = Math.hypot(at.x - want.x, at.y - want.y);
+          if (gap >= bestGap) continue;
+          bestGap = gap;
+          best = { x, z };
+        }
+      }
+      return best;
+    };
+
+    const [onFrames, onMinimap] = ring;
+    const framesSpot = aimAt('#player-frame');
+    const miniSpot = aimAt('#minimap');
+    if (onFrames && framesSpot) {
+      onFrames.pos = framesSpot;
+      g.world.submit(me.id, { t: 'target', id: onFrames.id });
+    }
+    if (onMinimap && miniSpot) {
+      onMinimap.pos = miniSpot;
+      onMinimap.targetId = me.id;
+    }
+    await new Promise((r) => setTimeout(r, 500));
+
+    const boxes = ['#minimap', '#minimap-clock', '#player-frame', '#target-frame', '#tracker']
+      .map((s) => document.querySelector(s))
+      .filter((el) => el && el.offsetParent !== null)
+      .map((el) => el.getBoundingClientRect());
+    const plates = [...document.querySelectorAll('.nameplate')].filter(
+      (p) => p.style.display === 'block',
+    );
+    const over = plates.filter((p) => {
+      const r = p.getBoundingClientRect();
+      const x = r.left + r.width / 2;
+      const y = r.top + r.height / 2;
+      return boxes.some((b) => x >= b.left && x <= b.right && y >= b.top && y <= b.bottom);
+    });
+    // And none of them running off the side of the window: a plate is centred
+    // on the creature and does not wrap, so the end of a long name — which is
+    // where the trait word is — falls off the edge.
+    const clipped = plates.filter((p) => {
+      const r = p.getBoundingClientRect();
+      return r.left < -1 || r.right > window.innerWidth + 1;
+    }).length;
+    ring.forEach((e, i) => {
+      e.pos = { ...home[i] };
+      e.spawnPos = { ...home[i] };
+    });
+    return {
+      boxes: boxes.length,
+      plates: plates.length,
+      over: over.length,
+      clipped,
+      // Both aimed spots have to have been found, or nothing was ever put
+      // where the check is looking.
+      aimed: !!framesSpot && !!miniSpot,
+    };
+  });
+
   // Other people, fighting real things.
   //
   // They used to stand in a camp and fight it abstractly, which from sixty
@@ -2451,6 +2565,9 @@ async function main() {
     ['a skill lights up when its moment arrives', timing.ok && timing.nearlyDead > 0],
     ['and is dark the rest of the time', timing.healthy === 0],
     ['a kill is written down', reckoning.counted && reckoning.byBase],
+    ['the panels have their own screen to themselves',
+      tidy.boxes > 2 && tidy.plates > 4 && tidy.aimed && tidy.over === 0],
+    ['and no plate runs off the side of the window', tidy.clipped === 0],
     ['somebody else pulls a real creature', pulling.ok && pulling.came],
     ['and it is a real fight', pulling.hurt && pulling.alive],
     ['and you get it back whole when you want it', pulling.handedBack],
@@ -2593,7 +2710,7 @@ async function main() {
   console.log('timing:', JSON.stringify(timing));
   console.log('reckoning:', JSON.stringify(reckoning));
   console.log('levelling:', JSON.stringify(levelling));
-  console.log('pulling:', JSON.stringify(pulling));
+  console.log('pulling:', JSON.stringify(pulling), '| tidy:', JSON.stringify(tidy));
   console.log('belt:', JSON.stringify(belt));
   console.log('traits:', JSON.stringify(traits));
   console.log('alive:', JSON.stringify(alive));

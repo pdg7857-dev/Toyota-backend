@@ -761,7 +761,9 @@ export class Hud {
     const height = entity.kind === 'mob' ? getMob(entity.defId!).view.height : 1.8;
     const base = this.groundAt(entity.pos.x, entity.pos.z);
     const screen = this.toScreen(camera, entity.pos.x, base + height + 1.5, entity.pos.z);
-    if (!screen) return;
+    // Same rule as the plates: a damage number sitting on the minimap's clock
+    // is two unreadable things instead of one.
+    if (!screen || this.onFurniture(screen.x, screen.y)) return;
     const el = document.createElement('div');
     el.className = `float ${cls}`;
     el.textContent = text;
@@ -1533,8 +1535,49 @@ export class Hud {
     }
   }
 
+  /**
+   * The parts of the screen a nameplate must not be drawn on.
+   *
+   * Six hundred creatures project onto a screen that already has furniture on
+   * it, and a plate landing on the minimap's clock or across the target frame
+   * is two unreadable things instead of one. Stacking order does not fix it:
+   * the panels are opaque but their labels are not, and a plate showing
+   * *through* a label is no better.
+   *
+   * Cached rather than measured every frame. Reading a layout box after
+   * writing six hundred plate positions forces a reflow, and these panels only
+   * move when the window does.
+   */
+  private reserved: Array<{ l: number; t: number; r: number; b: number }> = [];
+  private reservedAt = -1e9;
+
+  private updateReserved(): void {
+    const now = performance.now();
+    if (now - this.reservedAt < 700) return;
+    this.reservedAt = now;
+    this.reserved = [];
+    // The minimap belongs to the map layer rather than to the HUD, but it is
+    // in the same container and it is the single worst place for a plate to
+    // land — it is the only opaque block in the top half of the screen.
+    for (const sel of ['#minimap', '#minimap-clock', '#player-frame', '#target-frame', '#tracker']) {
+      const el = document.querySelector<HTMLElement>(sel);
+      if (!el || el.offsetParent === null) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0) continue;
+      this.reserved.push({ l: r.left - 4, t: r.top - 4, r: r.right + 4, b: r.bottom + 4 });
+    }
+  }
+
+  private onFurniture(x: number, y: number): boolean {
+    for (const r of this.reserved) {
+      if (x >= r.l && x <= r.r && y >= r.t && y <= r.b) return true;
+    }
+    return false;
+  }
+
   private updateNameplates(camera: THREE.Camera): void {
     const player = this.world.player;
+    this.updateReserved();
     // Which corpse the loot key would actually take. Only that one gets the
     // prompt: kill four things standing together and four "press F to loot"
     // plates land on top of each other and none of them can be read. The gold
@@ -1587,7 +1630,12 @@ export class Hud {
         distance < range ||
         (lootable && distance < range * 1.5);
 
-      if (!screen || !relevant || (entity.dead && !lootable)) {
+      if (
+        !screen ||
+        !relevant ||
+        (entity.dead && !lootable) ||
+        this.onFurniture(screen.x, screen.y)
+      ) {
         plate.style.display = 'none';
         continue;
       }
@@ -1643,6 +1691,31 @@ export class Hud {
         this.chatter.delete(id);
       }
     }
+    this.keepPlatesOnScreen();
+  }
+
+  /**
+   * Pull a plate back inside the window if its label runs off the edge.
+   *
+   * A plate is centred on the creature and does not wrap, so anything near the
+   * right-hand edge loses the end of itself — which is where the trait word
+   * sits, and "Blackthorn the Outlaw Reaver 18 ★★★★ Pa" is a worse label than
+   * one nudged forty pixels.
+   *
+   * A separate pass on purpose: this reads layout, and reading layout in the
+   * middle of writing six hundred plate positions forces a reflow per plate
+   * instead of one for the frame.
+   */
+  private keepPlatesOnScreen(): void {
+    const width = window.innerWidth;
+    for (const plate of this.nameplates.values()) {
+      if (plate.style.display !== 'block') continue;
+      const half = plate.offsetWidth / 2;
+      if (half <= 0) continue;
+      const x = parseFloat(plate.style.left);
+      const clamped = Math.max(half + 2, Math.min(width - half - 2, x));
+      if (clamped !== x) plate.style.left = `${clamped}px`;
+    }
   }
 
   /**
@@ -1667,7 +1740,7 @@ export class Hud {
     );
     const distance = Math.hypot(entity.pos.x - player.pos.x, entity.pos.z - player.pos.z);
     // Traders are landmarks, so they stay legible from much further than a mob.
-    if (!screen || distance > 55) {
+    if (!screen || distance > 55 || this.onFurniture(screen.x, screen.y)) {
       plate.style.display = 'none';
       return;
     }
@@ -1709,7 +1782,7 @@ export class Hud {
     const distance = Math.hypot(entity.pos.x - player.pos.x, entity.pos.z - player.pos.z);
     // Readable from further off than a mob: the point of them is being seen
     // across a field, and a plate that only resolves in melee range never is.
-    if (!screen || distance > NAMEPLATE_RANGE * 2.5) {
+    if (!screen || distance > NAMEPLATE_RANGE * 2.5 || this.onFurniture(screen.x, screen.y)) {
       plate.style.display = 'none';
       return;
     }
