@@ -481,12 +481,150 @@ async function main() {
         props: g.rig.scene.children.length,
       };
     });
+    // Can you actually see a creature standing on this ground?
+    //
+    // Caer Dubh shipped once as black shapes on a black hill, and the answer
+    // at the time was a floor on the light. That is only half of it: a light
+    // floor cannot help a creature whose own colour is within a few percent of
+    // the ground's, which the Sunken Wood's smugglers and Caer Dubh's
+    // Blackshields both were.
+    //
+    // Measured in *pixels*, off the frame the renderer actually produced.
+    // Every other way of asking this — the material colour, the theme's light
+    // multiplier — is a proxy, and the proxies all read fine while the picture
+    // was a silhouette.
+    // Stood square in front of the camera at a readable distance, with the
+    // ground behind it rather than the sky: the question is whether it reads
+    // against the ground, and a creature on the horizon is a different one.
+    // Placed in one turn and measured in the next, because the views lerp
+    // toward a position the sim has told them about and a creature teleported
+    // and rendered in the same breath is drawn where it used to be.
+    const placed = await page.evaluate(() => {
+      const g = window.__game;
+      const me = g.world.player;
+      // The *worst* creature in the zone, not whichever one the iteration
+      // happened to reach first: the question is whether the hardest thing to
+      // see here still reads, and a run that picks a different creature every
+      // time is a measurement of nothing.
+      const lum = (hex) =>
+        (0.2126 * ((hex >> 16) & 255) + 0.7152 * ((hex >> 8) & 255) + 0.0722 * (hex & 255)) / 255;
+      const ground =
+        (lum(g.rig.theme.ground.dry) + lum(g.rig.theme.ground.damp)) / 2;
+      let mob = null;
+      let worst = Infinity;
+      for (const e of g.world.entities.values()) {
+        if (e.kind !== 'mob' || e.dead) continue;
+        const def = g.mobOf(e.defId);
+        if (def.horse || def.dragon) continue;
+        const gap = Math.abs(lum(def.view.color) - ground);
+        if (gap >= worst) continue;
+        worst = gap;
+        mob = e;
+      }
+      if (!mob) return null;
+      // Blinded while it poses. Seven metres is inside anything's aggro, and a
+      // creature left fighting the player is a creature the next four checks
+      // are quietly measuring instead of what they think they are.
+      window.__poseHome = { pos: { ...mob.pos }, spawn: { ...mob.spawnPos } };
+      window.__poseAggro = new Map();
+      for (const def of g.allMobs()) {
+        window.__poseAggro.set(def.id, def.aggroRadius);
+        def.aggroRadius = 0;
+      }
+      const cam = g.rig.camera;
+      const len = Math.hypot(me.pos.x - cam.position.x, me.pos.z - cam.position.z) || 1;
+      const fx = (me.pos.x - cam.position.x) / len;
+      const fz = (me.pos.z - cam.position.z) / len;
+      mob.pos = { x: me.pos.x + fx * 7, z: me.pos.z + fz * 7 };
+      mob.dead = false;
+      mob.health = g.world.statsOf(mob).maxHealth;
+      return mob.id;
+    });
+    await wait(700);
+    seen.contrast = await page.evaluate((mobId) => {
+      const g = window.__game;
+      const mob = g.world.entity(mobId ?? -1);
+      if (!mob) return { ok: false, why: 'nothing alive here' };
+
+      const r = g.rig.renderer;
+      r.render(g.rig.scene, g.rig.camera);
+
+      // Copied out in the same task as the render: the drawing buffer is not
+      // preserved, so a read one frame later is a read of a cleared canvas.
+      const src = r.domElement;
+      const flat = document.createElement('canvas');
+      flat.width = src.width;
+      flat.height = src.height;
+      const ctx = flat.getContext('2d');
+      ctx.drawImage(src, 0, 0);
+
+      const lumOf = (x, y, w, h) => {
+        const d = ctx.getImageData(x, y, w, h).data;
+        let sum = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          sum += (0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]) / 255;
+        }
+        return sum / (d.length / 4);
+      };
+
+      const v = g.views.get(mob.id);
+      if (!v) return { ok: false, why: 'it has no view' };
+      const p = v.group.position.clone();
+      p.y += g.mobOf(mob.defId).view.height * 0.55;
+      p.project(g.rig.camera);
+      const px = (p.x * 0.5 + 0.5) * src.width;
+      const py = (-p.y * 0.5 + 0.5) * src.height;
+      const box = Math.round(src.width * 0.012);
+      if (px < box * 6 || px > src.width - box * 6 || py < box || py > src.height - box) {
+        return { ok: false, why: 'it did not land on screen' };
+      }
+      const body = lumOf(Math.round(px - box / 2), Math.round(py - box / 2), box, box);
+      const left = lumOf(Math.round(px - box * 5), Math.round(py - box / 2), box, box);
+      const right = lumOf(Math.round(px + box * 4), Math.round(py - box / 2), box, box);
+      const ground = (left + right) / 2;
+      return {
+        ok: true,
+        mob: mob.name,
+        body: +body.toFixed(3),
+        ground: +ground.toFixed(3),
+        gap: +Math.abs(body - ground).toFixed(3),
+        at: [Math.round(px), Math.round(py)],
+      };
+    }, placed);
+
+    // Put it back where it was standing, and give everything its eyes again.
+    await page.evaluate((mobId) => {
+      const g = window.__game;
+      const mob = g.world.entity(mobId ?? -1);
+      const home = window.__poseHome;
+      if (mob && home) {
+        mob.pos = { ...home.pos };
+        mob.spawnPos = { ...home.spawn };
+        mob.targetId = null;
+        mob.threat = {};
+        mob.aiState = 'idle';
+      }
+      for (const def of g.allMobs()) {
+        const was = window.__poseAggro?.get(def.id);
+        if (was !== undefined) def.aggroRadius = was;
+      }
+      g.world.lastCombatTick.clear();
+      g.world.player.threat = {};
+      g.world.submit(g.world.player.id, { t: 'autoAttack', on: false });
+      g.world.submit(g.world.player.id, { t: 'target', id: null });
+    }, placed);
+
     looks.push(seen);
     await page.screenshot({ path: join(OUT, `08-${i}-${zoneId}.png`) });
   }
   const distinctSkies = new Set(looks.map((l) => l.sky)).size;
   const themesMatched = looks.every((l) => l.theme && l.theme.length > 0);
   const standingOnGround = looks.every((l) => Math.abs(l.groundGap) < 0.05);
+  // 0.08 is a floor rather than a target: the four zones measure 0.14 to 0.27
+  // as they stand, and anything near this number is a creature authored into
+  // the colour of its own ground. Printed as well as bounded, because a
+  // number that only fails is a number nobody watches drift.
+  const readable = looks.every((l) => l.contrast?.ok && l.contrast.gap >= 0.08);
 
   // Back to the Fenmarch for the boss scene below.
   await page.evaluate(() => window.__game.world.travelTo('fenmarch'));
@@ -1961,7 +2099,7 @@ async function main() {
       await new Promise((r) => setTimeout(r, 80));
     }
     g.world.submit(me.id, { t: 'autoAttack', on: false });
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, 800));
 
     const card = document.querySelector('#levelup');
     const shown = card.classList.contains('show') && getComputedStyle(card).opacity > 0.2;
@@ -2041,7 +2179,10 @@ async function main() {
     victim.corpseGold = 3;
     victim.respawnInMs = 120000;
     g.world.submit(me.id, { t: 'loot', id: victim.id });
-    await new Promise((r) => setTimeout(r, 400));
+    // Long enough for the card to have faded *in*: it reaches full opacity a
+    // little over half a second in, and reading it at four hundred
+    // milliseconds measures the animation rather than the card.
+    await new Promise((r) => setTimeout(r, 900));
 
     const card = document.querySelector('#drop');
     const shown = card.classList.contains('show') && getComputedStyle(card).opacity > 0.2;
@@ -2062,7 +2203,7 @@ async function main() {
     second.corpseGold = 1;
     second.respawnInMs = 120000;
     g.world.submit(me.id, { t: 'loot', id: second.id });
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 600));
     const quiet = !document.querySelector('#drop').classList.contains('show');
 
     return {
@@ -2486,9 +2627,19 @@ async function main() {
     // and see whether anything on the player changed angle.
     const leg = [...meView.joints.values()][0];
     const before = leg ? leg.rotation.x : 0;
+    g.world.player.dead = false;
+    g.world.player.health = g.world.statsOf(g.world.player).maxHealth;
     g.world.submit(g.world.player.id, { t: 'move', dir: { x: 0, z: 1 } });
-    await new Promise((r) => setTimeout(r, 500));
-    const after = leg ? leg.rotation.x : 0;
+    // The widest the leg gets from where it started, sampled across a whole
+    // stride rather than read once at the end. A walk cycle is a cycle: the
+    // single reading came back at the same angle it left about one run in
+    // five, and reported that limbs do not move.
+    let swung = 0;
+    for (let i = 0; i < 14; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      if (leg) swung = Math.max(swung, Math.abs(leg.rotation.x - before));
+    }
+    const after = before + swung;
     g.world.submit(g.world.player.id, { t: 'move', dir: { x: 0, z: 0 } });
 
     return {
@@ -2699,7 +2850,11 @@ async function main() {
     // `n / n XP` and had been quietly failing since the bar was reformatted.
     ['xp bar shown', /[\d,]+ \/ [\d,]+/.test(state.xp)],
     ['a target was acquired', state.targetVisible && state.target.length > 0],
-    ['nameplates rendering', state.nameplates > 0],
+    // Off the deliberate line-up rather than off whatever happened to be on
+    // screen when the snapshot was taken. The snapshot version failed about
+    // one run in three — not because plates were broken but because the run
+    // had wandered somewhere empty, which is a measurement of the walk.
+    ['nameplates rendering', tidy.plates > 0],
     ['closed to weapon range', reached],
     ['combat happened', state.log.some((l) => /hit|slain|died/i.test(l ?? ''))],
     ['vendor shop opened', vendorOpened],
@@ -2715,6 +2870,7 @@ async function main() {
     ['every zone has its own sky', distinctSkies === 4],
     ['every zone resolved a theme', themesMatched],
     ['entities stand on the terrain', standingOnGround],
+    ['and can be told apart from it', readable],
     ['a creature in a lake wades rather than walking the bottom', wading],
     ['the camera keeps its distance in the open', camera.ok && camera.open > camera.wanted * 0.7],
     ['and comes in rather than into a stone', camera.behind < camera.open * 0.75],
@@ -2897,7 +3053,16 @@ async function main() {
   console.log('away:', JSON.stringify(backdated), JSON.stringify(away), 'dismissed:', awayDismissed);
   console.log('people:', JSON.stringify(people), '|', JSON.stringify(crowdUi), '|', JSON.stringify(crowdTarget));
   console.log('taught:', JSON.stringify(taught), '| bar:', JSON.stringify(bar));
-  console.log('zones:', looks.map((l) => `${l.zone}/${l.theme} sky#${l.sky.toString(16)}`).join('  '));
+  console.log(
+    'zones:',
+    looks
+      .map(
+        (l) =>
+          `${l.zone}/${l.theme} sky#${l.sky.toString(16)}` +
+          ` ${l.contrast?.ok ? `${l.contrast.mob} ${l.contrast.body} v ground ${l.contrast.ground}` : (l.contrast?.why ?? '?')}`,
+      )
+      .join('\n       '),
+  );
   if (errors.length || returningErrors.length)
     console.log('\nerrors:\n' + [...errors, ...returningErrors].join('\n'));
   console.log(`\nscreenshots in ${OUT}`);

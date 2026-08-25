@@ -72,6 +72,22 @@ if (ZONE !== 'fenmarch') {
   await wait(1500);
 }
 
+// Blind the creatures and put the character at the zone's own level.
+//
+// This tool teleports a level-1 character wherever it is told, and the Sunken
+// Wood's outlaws hit for two thousand: two of the four zones photographed
+// their own death screen for a while, which is a picture of the HUD rather
+// than of the place.
+await page.evaluate(() => {
+  const g = window.__game;
+  for (const def of g.allMobs()) def.aggroRadius = 0;
+  const me = g.world.player;
+  me.level = Math.max(me.level, g.world.zone.levelRange[0]);
+  me.dead = false;
+  me.health = g.world.statsOf(me).maxHealth;
+});
+await wait(400);
+
 if (process.env.AT) {
   const [x, z] = process.env.AT.split(',').map(Number);
   const yaw = Number(process.env.YAW ?? 0);

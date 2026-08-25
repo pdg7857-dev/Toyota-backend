@@ -1684,6 +1684,30 @@ Themes also carry a minimum light level, asserted by test. Caer Dubh was first
 authored at true dusk and shipped with the mobs as black shapes on a black
 hill — atmosphere is not worth a fight you cannot read.
 
+### And the picture is what says whether they can be
+
+That light floor is a proxy, and a proxy cannot see a creature whose *own*
+colour is the same as the ground it stands on. Standing in the Sunken Wood and
+in Caer Dubh, the smugglers and the Blackshields both looked like holes rather
+than people, and every proxy in the suite read fine.
+
+So `smoke` measures it in **pixels**, off the frame the renderer actually
+produced: the creature whose authored colour is nearest to the ground's is
+stood seven metres in front of the camera, the frame is rendered, and the
+luminance of a patch of its body is compared with the ground either side of it.
+
+The answer was that there is no bug. All four zones read at 0.14 to 0.27 where
+the floor is 0.08, and a first attempt at "fixing" it — lifting a creature's
+colour away from the ground's — made Caer Dubh **worse** by this measure,
+because the Blackshields are dark on light ground and brightening them moved
+them toward it. What was actually wrong with the picture was interior detail on
+a backlit figure, which is a different problem and not one contrast solves.
+
+The measurement stayed. A creature authored into the colour of its own ground
+is a real thing to guard against, it is invisible to every structural
+assertion, and this is now the only check in the suite that looks at what the
+player looks at.
+
 ## Everything was a capsule
 
 A wolf, a stag, an outlaw, a heron and a dragon were the same object in five
@@ -1977,6 +2001,28 @@ arena has no `dragonId`, the respawn guard keyed off the entity rather than the
 definition, and `respawnMs: 0` meant *respawn immediately*: it healed to full on
 the tick it died. A number that does not move when you change the inputs is not
 a balance problem, it is a bug.
+
+### Four checks that were measuring the clock
+
+Found by running the suite twice in a row rather than once, which is worth
+doing after any change that moves the timing about:
+
+- **"nameplates rendering"** counted whatever plates happened to be visible
+  when a snapshot was taken. It failed about one run in three, not because
+  plates were broken but because the run had wandered somewhere empty — a
+  measurement of the walk. It reads off the deliberate line-up now.
+- **"limbs actually move"** read one leg angle before a walk and one after. A
+  walk cycle is a cycle: about one run in five it came back to the same angle
+  it left. It takes the widest deviation across a whole stride now.
+- **The two cards** were read four hundred milliseconds after the event, and
+  they fade in over five hundred and fifty. Half the time the check was
+  measuring the animation.
+- **The threat-colour check** read the nameplates after putting its line-up
+  back out of reach — see "The panels have their own screen to themselves".
+
+None of these were bugs in the game, and all four would have gone on failing
+at random until somebody stopped trusting the suite. A check that fails a
+twentieth of the time is worse than no check at all.
 
 **`smoke` waits for the game to be running, not for a stopwatch.** Every check
 was written against a fixed 1500ms boot, and the first run after a rebuild is

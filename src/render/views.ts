@@ -99,6 +99,8 @@ export class EntityView {
   private dressed: THREE.Object3D | null = null;
   /** Height this body was authored at, for re-fitting a swapped model. */
   private readonly builtHeight: number;
+  /** The colour this body goes back to when the damage flash ends. */
+  private readonly baseColor: number;
   /** True once real art is standing where the capsule was. */
   get hasModel(): boolean {
     return this.dressed !== null;
@@ -152,8 +154,11 @@ export class EntityView {
     // Vertex colours carry the per-part shading — a tusk reads as bone, a
     // blade as steel — and the material colour multiplies them, so the damage
     // flash still reddens the whole body with one assignment.
+    // Remembered rather than looked up off the definition on every frame for
+    // every entity, which is what the flash reset used to do.
+    this.baseColor = view.color;
     this.material = new THREE.MeshStandardMaterial({
-      color: view.color,
+      color: this.baseColor,
       roughness: 0.7,
       metalness: 0.05,
       vertexColors: true,
@@ -364,7 +369,7 @@ export class EntityView {
   }
 
   /** `alpha` is the fraction of the way through the current sim tick. */
-  update(alpha: number, dtMs: number, selected: boolean, baseColor: number): void {
+  update(alpha: number, dtMs: number, selected: boolean): void {
     this.group.position.lerpVectors(this.prev, this.next, alpha);
     this.group.rotation.y = lerpAngle(this.prevFacing, this.nextFacing, alpha);
     this.selectionRing.visible = selected;
@@ -377,7 +382,7 @@ export class EntityView {
       this.material.color.setHex(0xff5555);
       for (const m of this.modelMaterials) m.emissive.setHex(0x882222);
     } else {
-      this.material.color.setHex(baseColor);
+      this.material.color.setHex(this.baseColor);
       for (const m of this.modelMaterials) m.emissive.setHex(0x000000);
     }
 
@@ -1180,12 +1185,6 @@ export class ViewManager {
         view.group.visible = false;
         continue;
       }
-      const baseColor =
-        entity.kind === 'mob'
-          ? getMob(entity.defId!).view.color
-          : entity.kind === 'vendor'
-            ? getVendor(entity.vendorId!).view.color
-            : CLASSES[entity.classId ?? 'warrior'].color;
       if (entity.kind === 'player') view.setMount(entity.mounted ?? null);
       view.setGear(entity);
       if (entity.kind === 'mob') {
@@ -1193,7 +1192,7 @@ export class ViewManager {
           entity.dead && ((entity.corpseLoot?.length ?? 0) > 0 || (entity.corpseGold ?? 0) > 0);
         view.setLootMark(carrying, getMob(entity.defId!).view.height);
       }
-      view.update(alpha, dtMs, entity.id === targetId, baseColor);
+      view.update(alpha, dtMs, entity.id === targetId);
       // Corpses stay visible but sink out of the way until they respawn.
       view.group.visible = !entity.dead || entity.kind === 'mob';
       if (entity.dead && entity.kind === 'mob') {
