@@ -144,6 +144,23 @@ import {
   type DiscoverySite,
 } from '../content/discoveries.js';
 import { zoneStructures as structuresOf } from '../content/structures.js';
+import {
+  PACK_MAX_ALLIES,
+  PACK_PER_ALLY,
+  PACK_RANGE,
+  SKITTISH_AT,
+  SKITTISH_LEASH,
+  SKITTISH_MS,
+  SKITTISH_SPEED,
+  STUBBORN_AT,
+  STUBBORN_DAMAGE,
+  VENOM_MAX_STACKS,
+  VENOM_MAX_TICK,
+  VENOM_MS,
+  VENOM_SHARE,
+  VENOM_TICK_MS,
+  traitFor,
+} from '../content/traits.js';
 import { getSkill, skillsForClass } from '../content/skills.js';
 import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
 import { CLASSES, ZONES, getZone, type ZoneDef } from '../content/zone.js';
@@ -1285,6 +1302,12 @@ export class World {
       damageMultiplier *= eff.damageMultiplier ?? 1;
       stats.moveSpeed += eff.moveSpeedBonus ?? 0;
     }
+
+    // A creature's trait, which is the only thing an ordinary mob does that a
+    // stat block cannot. See `content/traits.ts`.
+    if (e.kind === 'mob' && !e.dead) {
+      damageMultiplier *= this.traitDamage(e);
+    }
     if (damageMultiplier !== 1) {
       stats.damageMin *= damageMultiplier;
       stats.damageMax *= damageMultiplier;
@@ -1430,6 +1453,7 @@ export class World {
     this.tickHazards();
     this.tickCasts();
     this.tickAi();
+    this.tickPacks();
     this.tickMobAbilities();
     this.tickMovement();
     this.tickSwings();
@@ -1670,6 +1694,7 @@ export class World {
             this.leashMob(e);
             break;
           }
+          if (this.tickSkittish(e, def, target)) break;
           e.targetId = target.id;
           const d = dist(e.pos.x, e.pos.z, target.pos.x, target.pos.z);
           e.aiState = d <= this.statsOf(e).attackRange ? 'attacking' : 'chasing';
@@ -1694,6 +1719,94 @@ export class World {
         }
       }
     }
+  }
+
+  /**
+   * Count each fighting creature's packmates, once a tick.
+   *
+   * Only what is actually in combat: a mob standing in its camp has no use for
+   * a damage multiplier, and that is the difference between five creatures
+   * being counted and six hundred.
+   */
+  private tickPacks(): void {
+    for (const mob of this.entities.values()) {
+      if (mob.kind !== 'mob' || mob.dead) continue;
+      if (mob.aiState !== 'chasing' && mob.aiState !== 'attacking') {
+        mob.packAllies = 0;
+        continue;
+      }
+      const def = getMob(mob.defId!);
+      if (traitFor(def)?.id !== 'pack') continue;
+      // Its own kind only. A wolf takes no comfort from the boar next to it,
+      // and counting everything in range would make a mixed camp — which is
+      // most of them — into one large pack.
+      const base = baseMobId(def.rareOf ?? mob.defId!);
+      let allies = 0;
+      for (const other of this.entities.values()) {
+        if (other === mob || other.kind !== 'mob' || other.dead) continue;
+        if (baseMobId(getMob(other.defId!).rareOf ?? other.defId!) !== base) continue;
+        if (dist(mob.pos.x, mob.pos.z, other.pos.x, other.pos.z) > PACK_RANGE) continue;
+        allies++;
+        if (allies >= PACK_MAX_ALLIES) break;
+      }
+      mob.packAllies = allies;
+    }
+  }
+
+  /**
+   * A skittish creature turns and runs when it is badly hurt.
+   *
+   * Returns true if it is running, which takes it out of the ordinary chase
+   * for the rest of the tick.
+   *
+   * The answer is *the opposite* of every other trait's: this one wants you to
+   * decide whether the kill is worth the chase. It runs once — `fled` is set
+   * for good — because a creature that bolts every time it dips below the line
+   * is a creature you can never finish, and "unkillable" is not a mechanic, it
+   * is a bug that reads as one.
+   */
+  private tickSkittish(mob: Entity, def: MobDef, target: Entity): boolean {
+    const trait = traitFor(def);
+    if (trait?.id !== 'skittish') return false;
+
+    if ((mob.fleeingMs ?? 0) > 0) {
+      mob.fleeingMs = (mob.fleeingMs ?? 0) - TICK_MS;
+      if ((mob.fleeingMs ?? 0) <= 0) {
+        mob.fleeingMs = 0;
+        return false;
+      }
+      // Directly away, at a scramble. Not toward its spawn: a creature that
+      // flees *home* is a creature you can head off, which turns a decision
+      // into a routine.
+      const away = Math.atan2(mob.pos.x - target.pos.x, mob.pos.z - target.pos.z);
+      const step = (this.statsOf(mob).moveSpeed * SKITTISH_SPEED * TICK_MS) / 1000;
+      let x = mob.pos.x + Math.sin(away) * step;
+      let z = mob.pos.z + Math.cos(away) * step;
+      // Never out of its own leash. Past it the ordinary leash check sends it
+      // home and heals it to full, which makes a creature that flees at 28%
+      // health one you can only kill by bursting the last quarter in three
+      // seconds — unkillable by any other means, which is not a trait, it is
+      // a bug that reads as one.
+      const spawn = mob.spawnPos!;
+      const out = dist(x, z, spawn.x, spawn.z);
+      const cap = def.leashRadius * SKITTISH_LEASH;
+      if (out > cap) {
+        const back = cap / out;
+        x = spawn.x + (x - spawn.x) * back;
+        z = spawn.z + (z - spawn.z) * back;
+      }
+      mob.pos = { x, z };
+      mob.facing = away;
+      mob.aiState = 'chasing';
+      return true;
+    }
+
+    if (mob.fled) return false;
+    if (mob.health / this.statsOf0(mob) > SKITTISH_AT) return false;
+    mob.fled = true;
+    mob.fleeingMs = SKITTISH_MS;
+    this.events.push({ t: 'flees', mobId: mob.id, name: mob.name });
+    return true;
   }
 
   /**
@@ -2118,6 +2231,42 @@ export class World {
     }
   }
 
+  /**
+   * What a creature's trait is doing to its damage right now.
+   *
+   * Both of the damage traits are *conditional*, and that is the whole design:
+   * a flat bonus is a bigger number and changes nothing, while a bonus that
+   * turns on when its own kind is beside it — or when it is nearly dead —
+   * gives the fight a shape and gives the player something to do about it.
+   */
+  private traitDamage(mob: Entity): number {
+    const trait = traitFor(getMob(mob.defId!));
+    if (!trait) return 1;
+
+    // Read, never counted. `statsOf` is called many times per entity per tick
+    // and there are six hundred creatures in a zone, so scanning for packmates
+    // in here is a quarter of a million distance checks a tick — which is what
+    // it was, and `smoke` reported it as the simulation blowing its budget.
+    // `tickPacks` does the counting once, and only for what is fighting.
+    if (trait.id === 'pack') return 1 + (mob.packAllies ?? 0) * PACK_PER_ALLY;
+
+    if (trait.id === 'stubborn') {
+      const share = mob.health / this.statsOf0(mob);
+      return share <= STUBBORN_AT ? STUBBORN_DAMAGE : 1;
+    }
+    return 1;
+  }
+
+  /**
+   * Max health without going back through `statsOf`.
+   *
+   * `traitDamage` is called *from* `statsOf`, and a stubborn creature asking
+   * for its own health share would otherwise recurse forever.
+   */
+  private statsOf0(mob: Entity): number {
+    return Math.max(1, deriveMobStats(getMob(mob.defId!)).maxHealth);
+  }
+
   private tickSwings(): void {
     for (const e of this.entities.values()) {
       if (e.dead || !e.autoAttack) continue;
@@ -2151,7 +2300,51 @@ export class World {
         continue;
       }
       this.applyDamage(e.id, target, result.amount, result.crit, stats.damageType, null);
+      this.applyVenom(e, target, stats);
     }
+  }
+
+  /**
+   * A venomous creature's bite stacks, and the poison outlives it.
+   *
+   * The answer is not "kill it faster" for its own sake — it is that a fight
+   * you are *winning slowly* against a venomous thing is a fight you are
+   * losing, which is a genuinely different decision from every other creature
+   * in the game. The stack persisting past its death is what makes pulling a
+   * second one while poisoned a real mistake rather than an inconvenience.
+   */
+  private applyVenom(mob: Entity, target: Entity, stats: DerivedStats): void {
+    if (mob.kind !== 'mob') return;
+    const trait = traitFor(getMob(mob.defId!));
+    if (trait?.id !== 'venomous') return;
+
+    target.effects = target.effects ?? [];
+    const existing = target.effects.filter((e) => e.sourceAbilityId === 'venom');
+    if (existing.length >= VENOM_MAX_STACKS) {
+      // Refresh rather than add: a cap that silently drops the newest stack
+      // makes a long fight *safer* than a short one, which is backwards.
+      for (const e of existing) e.remainingMs = VENOM_MS;
+      return;
+    }
+    target.effects.push({
+      id: `venom:${this.nextId++}`,
+      kind: 'dot',
+      sourceId: mob.id,
+      sourceAbilityId: 'venom',
+      remainingMs: VENOM_MS,
+      tickMs: VENOM_TICK_MS,
+      sinceTickMs: 0,
+      damageType: 'nature',
+      dotPower: Math.max(
+        1,
+        Math.round(
+          Math.min(
+            ((stats.damageMin + stats.damageMax) / 2) * VENOM_SHARE,
+            this.statsOf(target).maxHealth * VENOM_MAX_TICK,
+          ),
+        ),
+      ),
+    });
   }
 
   private tickRegen(): void {
@@ -2220,6 +2413,8 @@ export class World {
       e.pos = { ...e.spawnPos! };
       e.roamGoal = null;
       e.roamWaitMs = 0;
+      e.fled = false;
+      e.fleeingMs = 0;
       e.targetId = null;
       e.threat = {};
       e.effects = [];

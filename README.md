@@ -391,6 +391,21 @@ a locked one says how to get it — a level, or a tome and the zone it comes
 from. An item says how every one of its numbers compares to the piece you are
 wearing in that slot.
 
+## Every creature fights like itself
+
+Bosses are not the only things with something to them. Every ordinary creature
+carries one trait, and its family decides which — so it is worth learning once
+and then it is worth knowing for a hundred levels.
+
+| | |
+|---|---|
+| **Pack** — wolves, hounds, and people who fight in bands | They hit harder with their own kind beside them. Pull one away. |
+| **Skittish** — hares, goats, stags, herons | They break and run once badly hurt. Finish it, or let it go. |
+| **Venomous** — adders, eels, pike | The bite stacks, and the poison outlives the thing that gave it. Shorten the fight. |
+| **Stubborn** — bears, boars, berserkers | Far harder once cornered. Hold your defence for the end. |
+
+The target frame names it and says what to do about it.
+
 ## Mechanics worth knowing
 
 **Bosses telegraph, and no two ask the same thing.** A shape appears on the

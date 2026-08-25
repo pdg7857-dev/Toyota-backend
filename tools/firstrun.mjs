@@ -110,6 +110,30 @@ console.log('after loot:', await page.evaluate(() => ({
 })));
 
 
+// A quarter of an hour in: what does the screen say to somebody who has been
+// levelling for a while and has never read a wiki?
+const midgame = await page.evaluate(async () => {
+  const g = window.__game;
+  const me = g.world.player;
+  me.level = 18;
+  me.xp = 900;
+  me.gold = 2400;
+  await new Promise((r) => setTimeout(r, 700));
+  const q = g.world.player.quests ?? [];
+  return {
+    quests: q.length,
+    questLog: document.querySelector('#tracker')?.textContent?.replace(/\s+/g, ' ').trim().slice(0, 130),
+    // Things a player at this point has probably never been told.
+    skillPoints: me.skillPoints ?? 0,
+    unspent: me.unspentPoints ?? 0,
+    bags: (me.inventory ?? []).length,
+    consumables: (me.inventory ?? []).filter((s) => g.itemOf(s.itemId).consumable).length,
+    learned: (me.learnedSkills ?? []).length,
+    stable: (me.stable ?? []).length,
+  };
+});
+console.log('midgame:', JSON.stringify(midgame));
+
 // Danger, and loot you can see from across a camp.
 const danger = await page.evaluate(async () => {
   const g = window.__game;
@@ -169,6 +193,43 @@ const danger = await page.evaluate(async () => {
 await wait(600);
 await page.screenshot({ path: join(OUT, '7-danger.png') });
 console.log('danger:', JSON.stringify(danger));
+
+// A creature's trait, on the frame and on the plate.
+await page.evaluate(async () => {
+  const g = window.__game;
+  const me = g.world.player;
+  me.level = 12;
+  for (const def of g.allMobs()) def.aggroRadius = 0;
+  const wolves = Object.values(g.allMobs()).filter(
+    (m) => g.traitFor(m)?.id === 'pack' && m.level <= 14 && m.stars < 5,
+  );
+  const mobs = [...g.world.entities.values()].filter((e) => e.kind === 'mob' && !e.dead).slice(0, 4);
+  mobs.forEach((e, i) => {
+    const def = wolves[0];
+    e.defId = def.id;
+    e.name = def.name;
+    e.level = def.level;
+    e.pos = { x: me.pos.x + (i - 1.5) * 3, z: me.pos.z + 7 };
+    e.spawnPos = { ...e.pos };
+    e.health = g.world.statsOf(e).maxHealth;
+  });
+  g.world.submit(me.id, { t: 'target', id: mobs[1].id });
+  g.rig.stream(me.pos.x, me.pos.z, true);
+  const calm = setInterval(() => {
+    for (const e of g.world.entities.values()) if (e.kind === 'mob') { e.ai = 'idle'; e.targetId = null; }
+    me.dead = false;
+    me.health = g.world.statsOf(me).maxHealth;
+  }, 80);
+  await new Promise((r) => setTimeout(r, 1200));
+  clearInterval(calm);
+});
+await page.hover('#target-frame');
+await wait(500);
+await page.screenshot({ path: join(OUT, '8-trait.png') });
+console.log('trait:', await page.evaluate(() => ({
+  frame: document.querySelector('#target-threat')?.textContent,
+  tip: document.querySelector('#tip')?.textContent?.slice(0, 160),
+})));
 
 // Tooltips. Sixteen skill slots and a bagful of gear, and until now not one of
 // them said what it was.

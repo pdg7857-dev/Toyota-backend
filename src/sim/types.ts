@@ -665,6 +665,22 @@ export interface Entity {
    * re-rolls from the entity and has no way back to the point that made it.
    */
   plainSpawn?: boolean;
+  /**
+   * A skittish creature has already broken once this life. See
+   * `content/traits.ts` — it runs once, because one that bolts every time it
+   * dips below the line is one you can never finish.
+   */
+  fled?: boolean;
+  /** Milliseconds left of running away. */
+  fleeingMs?: number;
+  /**
+   * Packmates within reach, counted once a tick by `tickPacks`.
+   *
+   * Stored rather than derived because `statsOf` reads it and `statsOf` runs
+   * many times per entity per tick — counting in there was a quarter of a
+   * million distance checks a tick with six hundred creatures in a zone.
+   */
+  packAllies?: number;
   /** Set on the entity a dragon is currently being represented by. */
   dragonId?: string;
   aiState?: 'idle' | 'chasing' | 'attacking' | 'returning' | 'dead';
@@ -757,6 +773,8 @@ export interface ActorCommand {
 
 export type SimEvent =
   | { t: 'swing'; sourceId: EntityId; targetId: EntityId }
+  /** A skittish creature broke and ran. See `content/traits.ts`. */
+  | { t: 'flees'; mobId: EntityId; name: string }
   /** A landmark opened. Once per site, ever. See `content/discoveries.ts`. */
   | {
       t: 'discovered';

@@ -56,6 +56,7 @@ input / HUD click ──> Command ──> World.submit()
 | `src/content/mounts.ts` | The herds, and what riding each one is worth. |
 | `src/content/luxury.ts` | The one shop that is not a safety net. |
 | `src/content/discoveries.ts` | What the landmarks are hiding, and what it is worth. |
+| `src/content/traits.ts` | The one thing each creature does that a stat block cannot. |
 | `src/content/adventurers.ts` | Who else is out there, and what they say. |
 | `src/content/structures.ts` | The things somebody built, and where they stand. |
 | `src/render/` | three.js, DOM, input. Nothing gameplay-authoritative. |
@@ -986,6 +987,70 @@ camp where three of the four play Priest reads as a bug in the population.
 `ZoneDef.adventurers: false` switches them off, and every test arena sets it,
 for the same reason as `rareSpawns`: they walk and talk on the sim's `Rng`, so a
 populated arena is one where every seeded fight rolls different numbers.
+
+## Every creature does something, not just the bosses
+
+Eight bosses in this game are excellent. Every one of the other twenty-eight
+thousand fights was identical: a health bar with a swing timer. "Decided by
+play, not stats" was true of ★5 and ★6 and of nothing else, and a hundred hours
+of a hundred-level game are spent on the *other* ratings.
+
+A **trait** (`content/traits.ts`) is the trash-mob answer, and it is
+deliberately not a smaller telegraph. A telegraph costs a wind-up, a circle on
+the ground and a decision, which is right once a fight and absurd forty times a
+minute. A trait is a standing fact about a creature that changes how you fight
+it and costs nothing to read.
+
+The rule for adding one is the rule the boss kits already run under: **it must
+have a different answer.**
+
+| Trait | What it does | What you do about it |
+|---|---|---|
+| `pack` | Hits harder for every friend of its own kind nearby | Pull one away, or fight where they are thin |
+| `skittish` | Breaks and runs when badly hurt | Finish it before it turns, or let it go |
+| `venomous` | Its bite stacks a poison that outlives it | Shorten the fight |
+| `stubborn` | Hits far harder once cornered | Hold your defence for the end, not the opening |
+
+Assigned by **creature family**, not per mob, for the same reason body plans
+are: most of the bestiary south of the Fenmarch is generated, and the point is
+that a family reads as itself — wolves are dangerous in numbers, adders poison
+you, bears get worse when you hurt them, hares run. That is something a player
+learns once and uses for a hundred levels. `npm test` prints what lives where
+and what it does, because "every creature in Ardmoor is Stubborn" is invisible
+to any assertion made one creature at a time.
+
+**Bosses never have one.** They have kits, which are a bigger version of the
+same idea, and a trait on top of four telegraphed abilities is another number
+on the one fight in the game that does not need one.
+
+### What the numbers had to learn
+
+Every one of these was measured, and every first guess was wrong:
+
+- **A dot lands without mitigation.** Venom at a sixth of the creature's swing
+  per stack was adding more than half its mitigated output again as raw damage:
+  a Warrior lost nine times in ten to a Blackwater Eel at 42. It is now a
+  thirtieth, *and* capped at a share of the victim's own maximum health —
+  because a rare spawn hits for `RARE_TOUGHNESS` times its host, and
+  `Deepmaw the Great Pike` poisoned a Warrior to death eleven times in twelve.
+  Same lesson the impact bursts had to learn: a raw number means different
+  things to different victims.
+- **A `beast` moves at exactly the player's base speed.** A creature fleeing
+  at full pelt can never be caught, so the chase is a stalemate until something
+  times out — which the grind table reported as a fight with no length at all.
+  It scrambles at 72% now, and it is clamped inside its own leash, because past
+  the leash the ordinary check sends it home and heals it to full: a creature
+  that flees at 28% would then be killable only by bursting the last quarter in
+  three seconds. "You cannot kill this" is not a mechanic.
+- **`statsOf` is the hottest path in the sim.** Counting packmates inside it is
+  a quarter of a million distance checks a tick with six hundred creatures in a
+  zone; `tickPacks` counts once, and only for what is actually fighting.
+  `traitFor` is memoised for the same reason — forty `includes` calls per
+  `statsOf` took the tick from 1.4ms to 2.4ms and `smoke` was right to notice.
+
+Both halves are shown: the target frame names the trait beside the danger word
+and its tooltip carries **the answer**, because a player told "Venomous" and
+nothing else has been given a word rather than a decision.
 
 ## Bosses must be decided by play, not stats
 

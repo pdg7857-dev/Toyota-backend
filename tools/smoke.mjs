@@ -1292,6 +1292,54 @@ async function main() {
   await page.bringToFront();
   await wait(600);
 
+  // What a creature does that a stat block cannot.
+  const traits = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    // A creature with a trait, targeted, so the frame and the plate both have
+    // to say what it is.
+    const withTrait = [...g.world.entities.values()].find(
+      (e) => e.kind === 'mob' && !e.dead && g.traitFor(g.mobOf(e.defId)),
+    );
+    if (!withTrait) return { ok: false, why: 'nothing in this zone has a trait' };
+    withTrait.pos = { x: me.pos.x + 3, z: me.pos.z };
+    g.world.submit(me.id, { t: 'target', id: withTrait.id });
+    await new Promise((r) => setTimeout(r, 400));
+    const trait = g.traitFor(g.mobOf(withTrait.defId));
+    const frame = document.querySelector('#target-threat').textContent ?? '';
+
+    // And the frame's own tooltip, which carries the answer. The HUD is
+    // `pointer-events: none` so the canvas behind it swallows a hover on any
+    // panel nobody marked `hoverable` — the target frame's tip was unreachable
+    // for a while and no assertion could see it, because the *text* was there.
+    const el = document.querySelector('#target-frame');
+    const box = el.getBoundingClientRect();
+    const at = { clientX: box.left + 20, clientY: box.top + 10, bubbles: true };
+    el.dispatchEvent(new MouseEvent('mouseenter', at));
+    el.dispatchEvent(new MouseEvent('mousemove', at));
+    await new Promise((r) => setTimeout(r, 80));
+    const tipEl = document.querySelector('#tip');
+    const tipText = tipEl.style.display === 'block' ? tipEl.textContent : '';
+    el.dispatchEvent(new MouseEvent('mouseleave', at));
+    const reachable = getComputedStyle(el).pointerEvents !== 'none';
+    const plate = [...document.querySelectorAll('.nameplate.hostile .np-trait')]
+      .map((n) => n.textContent)
+      .filter(Boolean);
+    return {
+      ok: true,
+      name: withTrait.name,
+      trait: trait.id,
+      // Both places, because the frame is what you read before pulling and the
+      // plate is what you read while deciding which of four to pull.
+      inFrame: frame.includes(trait.name),
+      tipReachable: reachable,
+      tipHasAnswer: tipText.includes(trait.answer),
+      onPlate: plate.includes(trait.name),
+      // And the answer, which is the half that makes it a mechanic.
+      answer: trait.answer.length > 12,
+    };
+  });
+
   // The world between fights.
   //
   // Everything in a zone that moved used to be a health bar, and a world whose
@@ -1779,6 +1827,10 @@ async function main() {
     ['every zone resolved a theme', themesMatched],
     ['entities stand on the terrain', standingOnGround],
     ['a creature in a lake wades rather than walking the bottom', wading],
+    ['a creature says what it does that a stat block cannot', traits.ok && traits.inFrame],
+    ['and says it on its nameplate too', traits.onPlate],
+    ['and the frame can actually be hovered', traits.tipReachable],
+    ['and says what to do about it', traits.tipHasAnswer],
     ['there are birds in the sky', alive.flocks > 0],
     ['a flock breaks up when you walk into it', alive.scattered > 3],
     ['and nothing ambient can ever be targeted', alive.taggable === 0],
@@ -1894,6 +1946,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('wade:', JSON.stringify(wade));
+  console.log('traits:', JSON.stringify(traits));
   console.log('alive:', JSON.stringify(alive));
   console.log('found:', JSON.stringify(found));
   console.log('danger:', JSON.stringify(danger));

@@ -4,6 +4,7 @@ import { CLASSES, FENMARCH } from './content/zone.js';
 import { ITEMS, canEquip, getItem } from './content/items.js';
 import { MOBS, getMob } from './content/mobs.js';
 import { bodyPlanFor, weaponLookFor } from './content/bodies.js';
+import { traitFor } from './content/traits.js';
 import { DAY_LENGTH_MS } from './content/daylight.js';
 import { getQuest } from './content/quests.js';
 import { getHolding } from './content/factions.js';
@@ -257,6 +258,7 @@ async function boot(): Promise<void> {
     canUse: (itemId: string) => canEquip(getItem(itemId), world.player.classId),
     mobOf: (mobId: string) => getMob(mobId),
     bodyPlanFor: (mobId: string) => bodyPlanFor(getMob(mobId)),
+    traitFor: (mob: unknown) => traitFor(mob as Parameters<typeof traitFor>[0]),
     dayLengthMs: DAY_LENGTH_MS,
     allMobs: () => Object.values(MOBS),
     allItems: () => ITEMS,

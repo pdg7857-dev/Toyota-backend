@@ -33,6 +33,12 @@ canvas { display: block; }
 
 #hud .clickable { pointer-events: auto; }
 
+/* Takes a hover but not a click. The HUD is `pointer-events: none` so the
+ * world behind it stays clickable, which means a tooltip on a panel nobody
+ * marked never fires at all — the target frame's carried one for a while and
+ * it was unreachable. */
+#hud .hoverable { pointer-events: auto; }
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--panel-edge);
@@ -1382,3 +1388,14 @@ canvas { display: block; }
 #effects .pip.good .pip-name { color: #b8d8a0; }
 #effects .pip.bad .pip-name { color: #d08a72; }
 #effects .pip-left { color: #9c937c; font-variant-numeric: tabular-nums; }
+
+/* A creature's trait, beside the danger word and on its nameplate. Quiet on
+ * the plate — it is a standing fact about the creature, not an alarm. */
+#target-threat .trait { color: #c7b8e0; }
+.nameplate .np-trait {
+  margin-left: 5px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: #a99cc4;
+  opacity: 0.85;
+}

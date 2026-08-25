@@ -16,6 +16,7 @@ import { ZONES } from '../content/zone.js';
 import { DRAGONS } from '../content/dragons.js';
 import { getMount } from '../content/mounts.js';
 import { BOONS } from '../content/discoveries.js';
+import { traitFor } from '../content/traits.js';
 import {
   THREAT_WORDS,
   skillRankPower,
@@ -201,6 +202,9 @@ export class Hud {
     container.appendChild(this.root);
     this.cacheElements();
     this.buildSkillBar();
+    // The target frame explains itself on hover: the danger scale in words,
+    // and what the creature's trait means and what to do about it.
+    this.tip(this.els.targetFrame, () => this.targetTip());
 
     this.root.querySelector('#respawn-btn')!.addEventListener('click', () => {
       this.emit({ t: 'respawn' });
@@ -485,6 +489,10 @@ export class Hud {
         case 'bought': {
           this.log(`Bought ${getItem(ev.itemId).name} for ${ev.gold} gold.`, 'log-loot');
           this.renderVendor();
+          break;
+        }
+        case 'flees': {
+          this.log(`${ev.name} breaks and runs.`, 'log-loot');
           break;
         }
         case 'discovered': {
@@ -1030,6 +1038,28 @@ export class Hud {
     };
   }
 
+  /** The danger scale and the creature's trait, spelled out. */
+  private targetTip(): TipContent | null {
+    const target = this.world.entity(this.world.player.targetId ?? -1);
+    if (!target || target.kind !== 'mob') return null;
+    const def = getMob(target.defId!);
+    const band = threatBand(threatGap(target.level, def.stars, this.world.player.level));
+    const trait = traitFor(def);
+    const lines = [
+      `Level ${target.level}, ${'★'.repeat(def.stars)} — ${THREAT_WORDS[band]} for you`,
+    ];
+    if (trait) lines.push(trait.line);
+    return {
+      title: target.name,
+      sub: def.stars >= BOSS_STARS ? 'boss' : 'creature',
+      lines,
+      // The answer is the half that makes a trait a mechanic rather than a
+      // modifier: a player who is told "Venomous" and nothing else has been
+      // given a word, not a decision.
+      note: trait?.answer,
+    };
+  }
+
   private updateTargetFrame(): void {
     const target = this.world.entity(this.world.player.targetId ?? -1);
     if (!target) {
@@ -1063,7 +1093,12 @@ export class Hud {
     const mob = target.kind === 'mob' && !target.dead ? getMob(target.defId!) : null;
     if (mob) {
       const band = threatBand(threatGap(target.level, mob.stars, this.world.player.level));
-      this.els.targetThreat.textContent = THREAT_WORDS[band];
+      const trait = traitFor(mob);
+      // The trait beside the danger word, because they answer the same
+      // question: "even fight" and "even fight, Venomous" are not the same
+      // afternoon, and a trait nobody can see is a trait nobody learns.
+      this.els.targetThreat.innerHTML =
+        THREAT_WORDS[band] + (trait ? ` · <span class="trait">${trait.name}</span>` : '');
       this.els.targetThreat.style.color = THREAT_COLOURS[band];
       this.els.targetThreat.style.display = 'block';
     } else {
@@ -1295,9 +1330,11 @@ export class Hud {
       } else if (lootable) {
         name.textContent = `${entity.name} — press F to loot`;
       } else {
+        const trait = def ? traitFor(def) : null;
         name.innerHTML =
           `${entity.name} <span class="np-lvl">${entity.level}</span>` +
-          `<span class="stars ${starClass(stars)}">${starText(stars)}</span>`;
+          `<span class="stars ${starClass(stars)}">${starText(stars)}</span>` +
+          (trait ? `<span class="np-trait">${trait.name}</span>` : '');
       }
       // Coloured by what it would do to you, on the same five-step scale the
       // map uses. The map has always been coloured and the nameplate — the
@@ -2356,7 +2393,7 @@ const TEMPLATE = `
     <div id="effects"></div>
   </div>
 
-  <div id="target-frame" class="frame panel">
+  <div id="target-frame" class="frame panel hoverable">
     <div class="frame-name"><span id="target-name"></span><span id="target-level" class="frame-level"></span></div>
     <div id="target-hp" class="bar bar-hp"><div class="bar-fill"></div><div class="bar-label"></div></div>
     <div id="target-threat"></div>

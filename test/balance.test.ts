@@ -22,7 +22,7 @@ import {
   xpToNext,
 } from '../src/sim/formulas.js';
 import { BOSS_STARS, type ClassId, type MobDef } from '../src/sim/types.js';
-import { BOUNTY_MOBS, LOOT_TABLES, MOBS } from '../src/content/mobs.js';
+import { BOUNTY_MOBS, LOOT_TABLES, MOBS, getMob } from '../src/content/mobs.js';
 import {
   BOUNTY_SPAWN_CHANCE,
   RARES,
@@ -43,6 +43,12 @@ import {
   dragonWeaponId,
 } from '../src/content/dragons.js';
 import { curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
+import {
+  STUBBORN_AT,
+  TRAITS,
+  VENOM_MAX_STACKS,
+  traitFor,
+} from '../src/content/traits.js';
 import { consumableDropFor } from '../src/content/consumables.js';
 import { FENMARCH, PLAYABLE_CLASSES, ZONES, roadDistance, roadPoints } from '../src/content/zone.js';
 import { getTheme, terrainHeight } from '../src/content/terrain.js';
@@ -2301,5 +2307,218 @@ describe('the world can kill you', () => {
     // skill and a bad pull is a real story.
     expect(rate, 'two at once is free').toBeGreaterThan(0.25);
     expect(rate, 'two at once is a death sentence').toBeLessThan(0.9);
+  });
+});
+
+describe('every creature does something, not just bosses', () => {
+  /**
+   * Eight bosses in this game are excellent and every one of the twenty-eight
+   * thousand other fights was identical: a health bar with a swing timer.
+   * "Decided by play, not stats" was true of ★5 and ★6 and of nothing else,
+   * and a hundred hours of a hundred-level game are spent on the other ratings.
+   *
+   * These tests measure each trait doing the thing it exists to do. They are
+   * deliberately *mechanism* tests rather than win-rate tests: the whole suite
+   * above already says the fights are winnable, and what has to be shown here
+   * is that a trait is a shape rather than a number.
+   */
+  const skillsFor = (mobId: string): string[] =>
+    MOBS[mobId]!.stars >= BOSS_STARS ? [] : ['strike', 'rend'];
+
+  it('prints what every creature in the game is like to fight', () => {
+    // The table is the point, exactly as it is for the boss kits. "Every
+    // creature in Ardmoor is Stubborn" is invisible to any assertion made one
+    // creature at a time, and it is the failure that matters most here —
+    // four traits arranged into one experience is no better than none.
+    const rows = new Map<string, string[]>();
+    for (const zone of Object.values(ZONES)) {
+      const seen = new Set<string>();
+      for (const sp of zone.spawns) {
+        const def = getMob(sp.mobId);
+        if (def.stars >= BOSS_STARS || def.horse || def.dragon) continue;
+        const base = def.starOf ?? def.rareOf ?? def.id;
+        if (seen.has(base)) continue;
+        seen.add(base);
+        const trait = traitFor(def);
+        const key = `${zone.id}:${trait?.id ?? 'none'}`;
+        rows.set(key, [...(rows.get(key) ?? []), getMob(base).name]);
+      }
+    }
+    console.log('\n  what lives where, and what it does');
+    for (const zone of Object.keys(ZONES)) {
+      const line: string[] = [];
+      for (const t of ['pack', 'skittish', 'venomous', 'stubborn', 'none']) {
+        const names = rows.get(`${zone}:${t}`);
+        if (names?.length) line.push(`${t} ${names.length}`);
+      }
+      console.log(`    ${zone.padEnd(10)} ${line.join(', ')}`);
+    }
+    // Every zone has to offer more than one kind of fight.
+    for (const zone of Object.keys(ZONES)) {
+      const kinds = ['pack', 'skittish', 'venomous', 'stubborn'].filter(
+        (t) => (rows.get(`${zone}:${t}`)?.length ?? 0) > 0,
+      );
+      expect(kinds.length, `${zone} is all one kind of fight`).toBeGreaterThan(1);
+    }
+    // And nothing may be left with no behaviour at all in the ordinary bands.
+    const orphans = rows.get('fenmarch:none') ?? [];
+    console.log(`    ${'no trait'.padEnd(10)} ${orphans.join(', ') || '(none in the Fenmarch)'}`);
+  });
+
+  it('makes a pack worse than the same creature alone', () => {
+    // The mechanism, isolated: one wolf against four wolves is not merely four
+    // times the health, it is four wolves each hitting harder for the company.
+    const mobId = 'bog_wolf';
+    let alone = 0;
+    let together = 0;
+    for (let seed = 0; seed < 6; seed++) {
+      const solo = new World({ seed: seed * 31 + 5, zone: duelZone(mobId), classId: 'warrior' });
+      levelPlayer(solo, { level: 12 });
+      alone += simulateFight(solo, { skills: skillsFor(mobId), timeoutSec: 120 }).lowestHealth;
+
+      const packed = new World({
+        seed: seed * 31 + 5,
+        zone: pullZone(mobId, 4),
+        classId: 'warrior',
+      });
+      levelPlayer(packed, { level: 12 });
+      together += simulateFight(packed, { skills: skillsFor(mobId), timeoutSec: 120 }).lowestHealth;
+    }
+    console.log(
+      `\n  pack       alone ${(alone / 6).toFixed(2)} health left at worst, ` +
+        `four together ${(together / 6).toFixed(2)}`,
+    );
+    expect(together / 6, 'a pack is no worse than one of them').toBeLessThan(alone / 6);
+  });
+
+  it('makes a venomous creature cost more the longer it takes', () => {
+    // The answer to `venomous` is "shorten the fight", which is only an answer
+    // if a long fight actually costs more. Measured as poison taken against
+    // fight length rather than as a win rate.
+    const world = new World({ seed: 404, zone: duelZone('fen_adder'), classId: 'warrior' });
+    levelPlayer(world, { level: 5 });
+    const player = world.player;
+    world.submit(player.id, { t: 'target', id: [...world.entities.values()].find((e) => e.kind === 'mob')!.id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+
+    // Measured across the ramp rather than across the whole fight: the stacks
+    // cap, so once a creature has bitten five times the poison is flat, and
+    // comparing two windows after that point measures nothing.
+    let opening = 0;
+    let settled = 0;
+    for (let i = 0; i < 400; i++) {
+      for (const ev of world.tick()) {
+        if (ev.t !== 'damage' || ev.targetId !== player.id || ev.damageType !== 'nature') continue;
+        if (i < 80) opening += ev.amount;
+        else if (i < 160) settled += ev.amount;
+      }
+      // Kept alive on purpose: this is a measurement of the poison, not of
+      // whether an adder can kill a level-5 Warrior.
+      player.health = world.statsOf(player).maxHealth;
+    }
+    const stacks = player.effects.filter((e) => e.sourceAbilityId === 'venom').length;
+    console.log(
+      `  venomous   ${opening} poison in the first four seconds, ` +
+        `${settled} in the next four, ${stacks} stacks standing`,
+    );
+    expect(opening, 'nothing was poisoned at all').toBeGreaterThan(0);
+    // It ramps: the stacks are the mechanic, so staying in longer costs more.
+    expect(settled).toBeGreaterThan(opening);
+    expect(stacks).toBeLessThanOrEqual(VENOM_MAX_STACKS);
+  });
+
+  it('makes a stubborn creature hit harder at the end than at the start', () => {
+    const world = new World({ seed: 77, zone: duelZone('marsh_bear'), classId: 'warrior' });
+    levelPlayer(world, { level: 20 });
+    const player = world.player;
+    const mob = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+    world.submit(player.id, { t: 'target', id: mob.id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+
+    // Held at a health share rather than fought down to one. A creature that
+    // crosses the line naturally has only two or three swings left before it
+    // dies, which is far too small a sample to measure anything with — the
+    // first version of this recorded zero swings while cornered and reported
+    // it as "being cornered changed nothing".
+    const max = world.statsOf(mob).maxHealth;
+    const sample = (share: number): { hits: number; total: number } => {
+      const out = { hits: 0, total: 0 };
+      for (let i = 0; i < 600; i++) {
+        mob.health = max * share;
+        for (const ev of world.tick()) {
+          if (ev.t !== 'damage' || ev.targetId !== player.id || ev.sourceId !== mob.id) continue;
+          out.hits++;
+          out.total += ev.amount;
+        }
+        player.health = world.statsOf(player).maxHealth;
+      }
+      return out;
+    };
+    const healthy = sample(0.9);
+    const cornered = sample(STUBBORN_AT - 0.05);
+    const before = healthy.total / Math.max(1, healthy.hits);
+    const after = cornered.total / Math.max(1, cornered.hits);
+    console.log(`  stubborn   ${before.toFixed(0)} a swing healthy, ${after.toFixed(0)} cornered`);
+    expect(healthy.hits, 'the fight never got going').toBeGreaterThan(2);
+    expect(cornered.hits, 'the creature never got cornered').toBeGreaterThan(1);
+    expect(after, 'being cornered changed nothing').toBeGreaterThan(before * 1.1);
+  });
+
+  it('lets a skittish creature run, but never lets it get away', () => {
+    // The trap this exists to avoid: it flees past its leash, goes home,
+    // heals to full, and can only be killed by bursting the last quarter in
+    // three seconds. "You cannot kill this" is not a mechanic.
+    const world = new World({ seed: 12, zone: duelZone('moor_hare'), classId: 'warrior' });
+    levelPlayer(world, { level: 2 });
+    const mob = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+    const spawn = { ...mob.spawnPos! };
+    const def = getMob(mob.defId!);
+
+    const outcome = simulateFight(world, { skills: skillsFor('moor_hare'), timeoutSec: 90 });
+    console.log(
+      `  skittish   ${outcome.playerWon ? 'killed' : 'escaped'} in ${outcome.durationSec.toFixed(1)}s, ` +
+        `ran ${mob.fled ? 'once' : 'never'}`,
+    );
+    expect(mob.fled, 'it never broke').toBe(true);
+    expect(outcome.playerWon, 'it got away for good').toBe(true);
+    expect(outcome.timedOut).toBe(false);
+    // And it stayed on its own ground while it ran.
+    expect(Math.hypot(mob.pos.x - spawn.x, mob.pos.z - spawn.z)).toBeLessThanOrEqual(
+      def.leashRadius,
+    );
+  });
+
+  it('never gives a boss a trait on top of its kit', () => {
+    // Bosses have kits, which are a bigger version of the same idea. Stacking
+    // a trait on four telegraphed abilities is another number on the one fight
+    // in the game that does not need one.
+    for (const def of Object.values(MOBS)) {
+      if (def.stars < BOSS_STARS && !def.dragon) continue;
+      expect(traitFor(def), `${def.name} has a trait as well as a kit`).toBeNull();
+    }
+  });
+
+  it('gives a star variant and a rare the trait of the creature they are', () => {
+    // A Snarling Bog Wolf is still a wolf and `Mirefang the Bog Wolf` is still
+    // a wolf. Their own ids say nothing about that, and the lesson has been
+    // learned twice already.
+    for (const def of Object.values(MOBS)) {
+      const base = def.starOf ?? def.rareOf;
+      if (!base || !MOBS[base]) continue;
+      if (MOBS[base]!.stars >= BOSS_STARS) continue;
+      expect(traitFor(def)?.id ?? null, `${def.name} does not fight like a ${MOBS[base]!.name}`)
+        .toBe(traitFor(MOBS[base]!)?.id ?? null);
+    }
+  });
+
+  it('gives every trait a different answer', () => {
+    // The rule the boss kits already run under. Two traits that both mean
+    // "kill it faster" are one trait with two names.
+    const answers = Object.values(TRAITS).map((t) => t.answer);
+    expect(new Set(answers).size).toBe(answers.length);
+    for (const t of Object.values(TRAITS)) {
+      expect(t.answer.length, `${t.id} says what it does but not what to do`).toBeGreaterThan(12);
+      expect(t.line.length).toBeGreaterThan(12);
+    }
   });
 });
