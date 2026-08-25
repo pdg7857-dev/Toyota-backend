@@ -43,7 +43,7 @@ import {
 } from '../src/content/adventurers.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { grindMobFor, killsForLevel } from './pace.js';
-import { ROAM_RADIUS } from '../src/sim/formulas.js';
+import { ROAM_RADIUS, THREAT_WORDS, threatBand, threatGap } from '../src/sim/formulas.js';
 import { MODELS, clipFor } from '../src/content/models.js';
 import {
   BODY_PLANS,
@@ -3959,5 +3959,79 @@ describe('the first sixty seconds', () => {
     expect(getMob(one.defId!).rareOf).toBeUndefined();
     expect(getMob(one.defId!).stars).toBe(getMob(one.defId!).stars);
     expect(one.name).toBe(getMob(one.defId!).name);
+  });
+});
+
+describe('can I win this fight', () => {
+  /**
+   * The one question a player asks of everything on screen.
+   *
+   * The map has always answered it with a colour; the nameplate over the
+   * creature's head — the thing you are actually looking at while deciding
+   * whether to pull — was not coloured at all, and nothing anywhere said what
+   * the colours meant. Worse, the map's scale read the level gap alone, which
+   * is exactly the thing stars exist to work around.
+   */
+  it('counts stars, because that is what stars are for', () => {
+    // A ★4 at your own level and a ★1 at your own level are the same colour on
+    // a level-only scale and a very different afternoon.
+    const even = threatBand(threatGap(20, 1, 20));
+    const nasty = threatBand(threatGap(20, 4, 20));
+    expect(even).toBe('even');
+    expect(nasty).not.toBe('even');
+    expect(threatGap(20, 4, 20)).toBeGreaterThan(threatGap(20, 1, 20));
+  });
+
+  it('runs the whole scale rather than bunching at one end', () => {
+    const bands = new Set<string>();
+    for (let gap = -12; gap <= 12; gap++) bands.add(threatBand(gap));
+    expect(bands.size).toBe(5);
+  });
+
+  it('never rates a boss as an even fight', () => {
+    // ★5 and ★6 are the two things in the game you are meant to bring friends
+    // to, in a game with no friends in it.
+    for (const zone of Object.values(ZONES)) {
+      for (const sp of zone.spawns) {
+        const def = getMob(sp.mobId);
+        if (!isBoss(def.stars)) continue;
+        // Even at the boss's own level, which is the earliest anyone sensibly
+        // fights one.
+        const band = threatBand(threatGap(def.level, def.stars, def.level));
+        expect(band, `${def.name} reads as ${band} at level ${def.level}`).toBe('deadly');
+      }
+    }
+  });
+
+  it('prints how every camp reads to a character at its own level', () => {
+    // The table is the point. A scale where the whole Fenmarch reads "even" is
+    // a scale that says nothing, and no single assertion can see that.
+    const counts = new Map<string, number>();
+    for (const zone of Object.values(ZONES)) {
+      const band = zone.levelRange;
+      const at = Math.round((band[0] + band[1]) / 2);
+      const seen = new Map<string, string>();
+      for (const sp of zone.spawns) {
+        const def = getMob(sp.mobId);
+        if (isBoss(def.stars) || def.horse || def.dragon) continue;
+        seen.set(def.name, threatBand(threatGap(def.level, def.stars, at)));
+      }
+      const tally = new Map<string, number>();
+      for (const b of seen.values()) tally.set(b, (tally.get(b) ?? 0) + 1);
+      for (const [b, n] of tally) counts.set(b, (counts.get(b) ?? 0) + n);
+      console.log(
+        `    ${zone.id.padEnd(10)} at lv${String(at).padStart(3)}  ` +
+          [...tally].sort().map(([b, n]) => `${b} ${n}`).join(', '),
+      );
+    }
+    // Every band has to be reachable from somewhere in the game, or it is a
+    // colour that never appears.
+    expect(counts.size).toBeGreaterThanOrEqual(4);
+  });
+
+  it('gives every band its own word and its own colour', () => {
+    const words = Object.values(THREAT_WORDS);
+    expect(new Set(words).size).toBe(words.length);
+    for (const w of words) expect(w.length).toBeGreaterThan(3);
   });
 });

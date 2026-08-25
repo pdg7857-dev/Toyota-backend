@@ -114,6 +114,8 @@ export class EntityView {
   private held: THREE.Mesh[] = [];
   /** Overhead "interact with me" marker; vendors only. */
   private marker: THREE.Mesh | null = null;
+  /** A small gold mark over a corpse that still has something on it. */
+  private lootMark: THREE.Mesh | null = null;
   /** The horse under the player, when they are riding one. */
   private mount: THREE.Group | null = null;
   private mountId: string | null = null;
@@ -403,7 +405,47 @@ export class EntityView {
       this.marker.rotation.y += dtMs * 0.0022;
       this.marker.position.y += Math.sin(performance.now() * 0.0022) * 0.0025;
     }
+    if (this.lootMark) {
+      // Turning rather than bobbing: a corpse's own fade is already moving,
+      // and two things drifting at once reads as a rendering fault.
+      this.lootMark.rotation.y += dtMs * 0.003;
+    }
     this.anim.update(dtMs);
+  }
+
+  /**
+   * Mark a corpse that still has something on it.
+   *
+   * The nameplate already says "press F to loot" — from thirteen metres, in a
+   * camp where you have just killed four things and the plates are stacked on
+   * top of each other. What is needed is the opposite of a label: something
+   * with no text that reads at any distance, so "there is loot over there" is
+   * answered by looking rather than by walking back to check.
+   */
+  setLootMark(on: boolean, height: number): void {
+    if (on === (this.lootMark !== null)) return;
+    if (!on) {
+      this.lootMark!.geometry.dispose();
+      (this.lootMark!.material as THREE.Material).dispose();
+      this.group.remove(this.lootMark!);
+      this.lootMark = null;
+      return;
+    }
+    const mark = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.2, 0),
+      // Unlit and depth-written-through, so it is legible against a dark hill
+      // and through the grass a corpse is lying in.
+      new THREE.MeshBasicMaterial({
+        color: 0xf0c94c,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+      }),
+    );
+    mark.position.y = height + 0.7;
+    mark.userData.entityId = this.id;
+    this.group.add(mark);
+    this.lootMark = mark;
   }
 
   /**
@@ -485,6 +527,10 @@ export class EntityView {
     for (const mesh of this.held) {
       mesh.geometry.dispose();
       (mesh.material as THREE.Material).dispose();
+    }
+    if (this.lootMark) {
+      this.lootMark.geometry.dispose();
+      (this.lootMark.material as THREE.Material).dispose();
     }
     this.material.dispose();
   }
@@ -1029,6 +1075,11 @@ export class ViewManager {
             : CLASSES[entity.classId ?? 'warrior'].color;
       if (entity.kind === 'player') view.setMount(entity.mounted ?? null);
       view.setGear(entity);
+      if (entity.kind === 'mob') {
+        const carrying =
+          entity.dead && ((entity.corpseLoot?.length ?? 0) > 0 || (entity.corpseGold ?? 0) > 0);
+        view.setLootMark(carrying, getMob(entity.defId!).view.height);
+      }
       view.update(alpha, dtMs, entity.id === targetId, baseColor);
       // Corpses stay visible but sink out of the way until they respawn.
       view.group.visible = !entity.dead || entity.kind === 'mob';

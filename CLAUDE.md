@@ -748,6 +748,42 @@ nothing new is stored and reloading never replays the tutorial:
 Gated on level 1, so a veteran who has just spent their last coin is never told
 how to loot a corpse.
 
+## Can I win this fight
+
+The one question a player asks of everything on screen, and the game answered
+it in exactly one place: a colour on the **map**. The nameplate over the
+creature's head — the thing you are actually looking at while deciding whether
+to pull — was not coloured at all. This file has claimed otherwise for a while
+("the same five-step scale as a nameplate"), which is how long it had been
+wrong.
+
+Worse, the map's scale read the **level gap alone**, which is precisely the
+thing stars exist to work around: `STAR_MODIFIERS` is there so an encounter can
+be made harder *without* raising its level, so a ★4 at your level and a ★1 at
+your level were the same colour and a very different afternoon.
+
+So `threatGap` and `threatBand` live in `sim/formulas.ts` with the rest of the
+balance maths, and the map, the nameplate and the target frame all read them.
+`STAR_LEVELS` is what a rating is worth in levels, fitted to the health and
+damage multipliers beside it — a ★4 ordinary creature reads about four and a
+half levels above its own, and a boss is off the scale on purpose (a test
+walks every boss in the game and fails if one ever reads as an even fight).
+
+And the frame **says it in words**. A five-step colour ramp is a convention
+nobody is born knowing: a new player has no idea whether orange is worse than
+yellow, and nothing in the game ever said. `npm test` prints how every camp in
+every zone reads to a character at that zone's own level, because a scale where
+everything comes out "even" says nothing and no single assertion can see it.
+
+### Loot you can see from across a camp
+
+The nameplate has always said "press F to loot" — from thirteen metres, in a
+camp where you have just killed four things and the plates are stacked on top
+of one another. What that needs is the opposite of a label: `EntityView.setLootMark`
+puts a small unlit gold mark over a corpse that still has something on it, so
+"there is loot over there" is answered by looking rather than by walking back to
+check. `smoke` asserts it at forty metres, well past any nameplate.
+
 ## Nothing told you what anything did
 
 Sixteen skill slots, ten of them reading `Lv 44` and nothing else. A bagful of

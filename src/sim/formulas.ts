@@ -135,6 +135,61 @@ export function xpTotalForLevel(level: number): number {
  * "close fight" band rather than flipping from impossible to trivial in a few
  * levels) while a ★4 still meaningfully outclasses a ★1 of the same level.
  */
+/**
+ * How dangerous a creature is to you, in five steps.
+ *
+ * The one question a player asks of everything on screen, and until now the
+ * only answer in the game was a colour on the *map* keyed to the level gap
+ * alone — while the nameplate over the creature's head, the thing you actually
+ * look at, was not coloured at all.
+ *
+ * Level gap alone is also wrong. Stars exist precisely so an encounter can be
+ * made harder *without* raising its level (see `STAR_MODIFIERS`), so a ★4 at
+ * your level and a ★1 at your level are the same colour on a level-only scale
+ * and a very different afternoon. `STAR_LEVELS` is what a rating is worth in
+ * levels, fitted to the health and damage multipliers above: a ★4 ordinary
+ * creature reads about four levels above its own, and a boss is off the scale
+ * on purpose.
+ */
+export const STAR_LEVELS: Record<StarRating, number> = {
+  1: 0,
+  2: 1.5,
+  3: 3,
+  4: 4.5,
+  5: 14,
+  6: 20,
+};
+
+export type ThreatBand = 'trivial' | 'easy' | 'even' | 'dangerous' | 'deadly';
+
+/** The gap that decides the band: level difference plus what the stars are worth. */
+export function threatGap(mobLevel: number, stars: StarRating, playerLevel: number): number {
+  return mobLevel + STAR_LEVELS[stars] - playerLevel;
+}
+
+export function threatBand(gap: number): ThreatBand {
+  if (gap >= 6) return 'deadly';
+  if (gap >= 2.5) return 'dangerous';
+  if (gap >= -2.5) return 'even';
+  if (gap >= -6) return 'easy';
+  return 'trivial';
+}
+
+/**
+ * What each band is called on screen.
+ *
+ * Words as well as a colour, because a five-step colour ramp is a convention
+ * nobody is born knowing — a new player has no idea whether orange is worse
+ * than yellow, and the game never says.
+ */
+export const THREAT_WORDS: Record<ThreatBand, string> = {
+  trivial: 'no threat',
+  easy: 'an easy kill',
+  even: 'an even fight',
+  dangerous: 'dangerous',
+  deadly: 'deadly',
+};
+
 export const STAR_MODIFIERS: Record<StarRating, { health: number; damage: number; defense: number }> = {
   1: { health: 1.0, damage: 1.0, defense: 1.0 },
   2: { health: 1.4, damage: 1.08, defense: 1.12 },

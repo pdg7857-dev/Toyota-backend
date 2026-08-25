@@ -1292,6 +1292,90 @@ async function main() {
   await page.bringToFront();
   await wait(600);
 
+  // Can I win this fight, and is that corpse worth walking to.
+  const danger = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    // Blinded, not pacified — putting `ai` back to idle on a timer loses to
+    // the aggro check, which runs every tick and only has to win once. Saved
+    // and restored: these are the shared definitions, and the boss-mechanics
+    // block below needs its boss to actually come at the player.
+    const aggro = new Map();
+    for (const def of g.allMobs()) {
+      aggro.set(def.id, def.aggroRadius);
+      def.aggroRadius = 0;
+    }
+    const calm = setInterval(() => {
+      for (const e of g.world.entities.values()) {
+        if (e.kind === 'mob') { e.ai = 'idle'; e.targetId = null; }
+      }
+      me.dead = false;
+      me.health = g.world.statsOf(me).maxHealth;
+    }, 80);
+
+    // Three creatures spanning the scale, standing next to each other. The
+    // colour has to differ, or the scale is decoration.
+    const all = Object.values(g.allMobs()).filter((m) => m.stars < 5 && !m.horse && !m.dragon);
+    const near = (lvl, stars) =>
+      all.filter((m) => m.stars === stars).reduce((b, m) =>
+        Math.abs(m.level - lvl) < Math.abs(b.level - lvl) ? m : b);
+    const mobs = [...g.world.entities.values()].filter((e) => e.kind === 'mob' && !e.dead).slice(0, 3);
+    const want = [near(me.level - 12, 1), near(me.level, 1), near(me.level + 6, 4)];
+    mobs.forEach((e, i) => {
+      const def = want[i];
+      e.defId = def.id;
+      e.name = def.name;
+      e.level = def.level;
+      e.pos = { x: me.pos.x + (i - 1) * 4, z: me.pos.z + 6 };
+      e.spawnPos = { ...e.pos };
+      e.dead = false;
+      e.health = g.world.statsOf(e).maxHealth;
+    });
+
+    // A corpse with coin on it, well beyond the range a nameplate carries.
+    const far = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !mobs.includes(e));
+    far.pos = { x: me.pos.x + 40, z: me.pos.z + 30 };
+    far.dead = true;
+    far.corpseGold = 12;
+    far.respawnInMs = 120000;
+    await new Promise((r) => setTimeout(r, 900));
+
+    g.world.submit(me.id, { t: 'target', id: mobs[2].id });
+    await new Promise((r) => setTimeout(r, 300));
+    const deadly = document.querySelector('#target-threat').textContent;
+    g.world.submit(me.id, { t: 'target', id: mobs[0].id });
+    await new Promise((r) => setTimeout(r, 300));
+    const trivial = document.querySelector('#target-threat').textContent;
+    clearInterval(calm);
+    for (const def of g.allMobs()) def.aggroRadius = aggro.get(def.id);
+    // Put the lineup back out of reach before the aggro goes back on. Left
+    // standing four metres away, three creatures picked for being harder than
+    // the player promptly killed them, and every later check ran against a
+    // corpse — whose view is hidden, so the impact burst probe measured
+    // nothing and read as "the camera no longer shakes".
+    for (const e of mobs) {
+      e.pos = { x: me.pos.x + 900, z: me.pos.z + 900 };
+      e.spawnPos = { ...e.pos };
+    }
+    me.dead = false;
+    me.health = g.world.statsOf(me).maxHealth;
+
+    const colours = [...document.querySelectorAll('.nameplate.hostile')]
+      .filter((p) => p.style.display === 'block')
+      .map((p) => p.querySelector('.np-name')?.style.color)
+      .filter(Boolean);
+    const farView = g.views.get(far.id);
+    return {
+      colours: [...new Set(colours)].length,
+      deadly,
+      trivial,
+      // Visible at forty metres, where a nameplate is long gone: "there is
+      // loot over there" should be answered by looking, not by walking back.
+      marked: !!farView && farView.lootMark !== null,
+      farAway: Math.round(Math.hypot(far.pos.x - me.pos.x, far.pos.z - me.pos.z)),
+    };
+  });
+
   // Tooltips.
   //
   // Sixteen skill slots and a bagful of gear, and until now not one of them
@@ -1592,6 +1676,10 @@ async function main() {
     ['every zone resolved a theme', themesMatched],
     ['entities stand on the terrain', standingOnGround],
     ['a creature in a lake wades rather than walking the bottom', wading],
+    ['nameplates are coloured by what they would do to you', danger.colours >= 2],
+    ['the target frame says the danger in words', danger.deadly !== danger.trivial],
+    ['and says it about the right creature', /deadly|dangerous/.test(danger.deadly ?? '')],
+    ['a corpse with loot on it is marked from across a camp', danger.marked && danger.farAway > 25],
     ['a bag item says what it is', tips.bag.length > 20],
     ['and how it compares to what you are wearing', tips.compares],
     ['a skill says what it costs', tips.knownHasCost],
@@ -1695,6 +1783,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('wade:', JSON.stringify(wade));
+  console.log('danger:', JSON.stringify(danger));
   console.log('tips:', JSON.stringify(tips));
   console.log('bodies:', JSON.stringify(bodies), '| gear:', JSON.stringify(gear));
   console.log('map:', JSON.stringify(mapState), 'closed:', mapClosed);

@@ -1,6 +1,7 @@
 import type { World } from '../sim/world.js';
 import type { Entity, Vec2 } from '../sim/types.js';
-import { isBoss } from '../sim/types.js';
+import { isBoss, type StarRating } from '../sim/types.js';
+import { threatBand, threatGap, type ThreatBand } from '../sim/formulas.js';
 import type { ZoneDef } from '../content/zone.js';
 import type { HeightField, ZoneTheme } from '../content/terrain.js';
 import type { StructureDef } from '../content/structures.js';
@@ -40,18 +41,27 @@ const MINIMAP_RANGE = 190;
 const MINIMAP_SIZE = 178;
 
 /**
- * How a creature's level compares to yours, as a colour.
+ * How dangerous a creature is to you, as a colour.
  *
- * Deliberately the same five-step read as every tab-target game's nameplates,
- * because it is the only thing on the map that answers "can I fight that": a
- * dot's colour is a decision, its position is only a fact.
+ * The five-step read every tab-target game uses, because on the map it is the
+ * only thing that answers "can I fight that": a dot's colour is a decision,
+ * its position is only a fact.
+ *
+ * The band itself comes from `sim/formulas.ts` so the map, the nameplate over
+ * the creature's head and the target frame cannot disagree about what a thing
+ * is worth — which they did, because the map read the level gap and the
+ * nameplate read nothing at all.
  */
-function levelColour(diff: number): string {
-  if (diff >= 5) return '#e05a4a';
-  if (diff >= 2) return '#e0913f';
-  if (diff >= -2) return '#e3d24a';
-  if (diff >= -5) return '#66b04a';
-  return '#8a8f86';
+export const THREAT_COLOURS: Record<ThreatBand, string> = {
+  deadly: '#e05a4a',
+  dangerous: '#e0913f',
+  even: '#e3d24a',
+  easy: '#66b04a',
+  trivial: '#8a8f86',
+};
+
+function threatColour(gap: number): string {
+  return THREAT_COLOURS[threatBand(gap)]!;
 }
 
 /** One word each, because it goes under a 178px circle. */
@@ -394,7 +404,10 @@ export class MapView {
     if (def.dragon) return { color: '#ff4d3d', r: 8, ring: true };
     if (isBoss(def.stars)) return { color: '#ff8a5c', r: 7, ring: true };
     if (def.rareOf) return { color: '#f2d06b', r: 6, ring: true };
-    return { color: levelColour(def.level - player.level), r: 4 + def.stars * 0.5 };
+    return {
+      color: threatColour(threatGap(def.level, def.stars, player.level)),
+      r: 4 + def.stars * 0.5,
+    };
   }
 
   // --------------------------------------------------------------- full map
@@ -428,7 +441,7 @@ export class MapView {
     const camps = this.campsOf(zone);
     for (const camp of camps) {
       const [x, y] = at(camp.pos);
-      const colour = levelColour(camp.level - player.level);
+      const colour = threatColour(threatGap(camp.level, camp.stars, player.level));
       ctx.fillStyle = colour;
       ctx.globalAlpha = 0.26;
       ctx.beginPath();
@@ -447,7 +460,12 @@ export class MapView {
       if (labelled.has(camp.name)) continue;
       labelled.add(camp.name);
       const [x, y] = at(camp.pos);
-      label(`${camp.name} ${camp.level}`, x, y - 16 - camp.count * 1.3, levelColour(camp.level - player.level));
+      label(
+        `${camp.name} ${camp.level}`,
+        x,
+        y - 16 - camp.count * 1.3,
+        threatColour(threatGap(camp.level, camp.stars, player.level)),
+      );
     }
 
     // Landmarks.
@@ -532,9 +550,9 @@ export class MapView {
     this.title.textContent = `${zone.name} — levels ${zone.levelRange[0]}–${zone.levelRange[1]}`;
     this.hint.innerHTML =
       `<span class="map-you">◉ you</span>` +
-      `<span style="color:${levelColour(-6)}">● trivial</span>` +
-      `<span style="color:${levelColour(0)}">● even</span>` +
-      `<span style="color:${levelColour(6)}">● deadly</span>` +
+      `<span style="color:${THREAT_COLOURS.trivial}">● trivial</span>` +
+      `<span style="color:${THREAT_COLOURS.even}">● even</span>` +
+      `<span style="color:${THREAT_COLOURS.deadly}">● deadly</span>` +
       `<span style="color:#ff9a5c">★ boss</span>` +
       `<span style="color:#57c6f0">● trader</span>` +
       `<span style="color:#8fe0a0">● road out</span>` +
@@ -550,8 +568,17 @@ export class MapView {
    * Grouping by "same creature, within a camp's width" is what turns the layout
    * back into the thing it was authored as.
    */
-  private campsOf(zone: ZoneDef): Array<{ pos: Vec2; name: string; level: number; count: number }> {
-    const out: Array<{ pos: Vec2; name: string; level: number; count: number; sum: Vec2 }> = [];
+  private campsOf(
+    zone: ZoneDef,
+  ): Array<{ pos: Vec2; name: string; level: number; stars: StarRating; count: number }> {
+    const out: Array<{
+      pos: Vec2;
+      name: string;
+      level: number;
+      stars: StarRating;
+      count: number;
+      sum: Vec2;
+    }> = [];
     for (const spawn of zone.spawns) {
       const def = getMob(spawn.mobId);
       if (isBoss(def.stars)) continue;
@@ -567,12 +594,16 @@ export class MapView {
         found.sum.z += spawn.pos.z;
         found.pos = { x: found.sum.x / found.count, z: found.sum.z / found.count };
         found.level = Math.max(found.level, getMob(base).level);
+        // The hardest thing in the camp decides its colour: a camp is a place
+        // you go and fight, and the pull that kills you is the one that counts.
+        found.stars = Math.max(found.stars, def.stars) as StarRating;
       } else {
         out.push({
           pos: { ...spawn.pos },
           sum: { ...spawn.pos },
           name: getMob(base).name,
           level: getMob(base).level,
+          stars: def.stars,
           count: 1,
         });
       }

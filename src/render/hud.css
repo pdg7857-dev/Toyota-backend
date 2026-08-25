@@ -1340,3 +1340,13 @@ canvas { display: block; }
 #tip .q-uncommon { color: #83b866; }
 #tip .q-rare { color: #6f9fd8; }
 #tip .q-epic { color: #c07fd0; }
+
+/* The danger read, in words. A five-step colour ramp is a convention nobody is
+ * born knowing, and the frame is the one place with room to spell it out. */
+#target-threat {
+  margin-top: 3px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: right;
+}

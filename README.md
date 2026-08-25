@@ -357,6 +357,12 @@ road, and the arrow in the corner points at it. Kill it and the arrow points at
 what it dropped. Loot that and the arrow points at the trader, who keeps a
 chain of work that runs all the way to the bosses.
 
+Target anything and the frame tells you what it will do to you — *an even
+fight*, *dangerous*, *deadly* — and its nameplate is coloured to match, on the
+same five-step scale the map uses. Stars count towards it, not just levels: a
+★4 at your own level is not an even fight and the game now says so. A corpse
+with something still on it wears a gold mark you can see from across a camp.
+
 Hover anything. A skill says what it costs, how long it takes and what it does;
 a locked one says how to get it — a level, or a tome and the zone it comes
 from. An item says how every one of its numbers compares to the piece you are

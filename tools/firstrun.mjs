@@ -110,6 +110,66 @@ console.log('after loot:', await page.evaluate(() => ({
 })));
 
 
+// Danger, and loot you can see from across a camp.
+const danger = await page.evaluate(async () => {
+  const g = window.__game;
+  const me = g.world.player;
+  me.level = 10;
+  // Three creatures spanning the scale, side by side in front of the camera.
+  const all = Object.values(g.allMobs()).filter((m) => m.stars < 5 && !m.horse && !m.dragon);
+  const pick = (lvl, stars) =>
+    all.find((m) => m.level === lvl && m.stars === stars) ??
+    all.reduce((b, m) => (Math.abs(m.level - lvl) < Math.abs(b.level - lvl) ? m : b));
+  const want = [pick(2, 1), pick(10, 1), pick(18, 4)];
+  const mobs = [...g.world.entities.values()].filter((e) => e.kind === 'mob' && !e.dead).slice(0, 3);
+  const out = [];
+  mobs.forEach((e, i) => {
+    const def = want[i] ?? want[0];
+    e.defId = def.id;
+    e.name = def.name;
+    e.level = def.level;
+    e.pos = { x: me.pos.x + (i - 1) * 5, z: me.pos.z + 9 };
+    e.spawnPos = { ...e.pos };
+    e.health = g.world.statsOf(e).maxHealth;
+    e.ai = 'idle';
+    out.push(`${def.name} lv${def.level} ★${def.stars}`);
+  });
+  g.world.submit(me.id, { t: 'target', id: mobs[2].id });
+
+  // And a corpse with something on it, well outside nameplate range.
+  const far = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !mobs.includes(e));
+  far.pos = { x: me.pos.x + 26, z: me.pos.z + 20 };
+  far.dead = true;
+  far.corpseGold = 12;
+  far.respawnInMs = 90000;
+
+  // Nothing in this probe is a fight: the first version stood a level-10
+  // character next to a ★4 and photographed the death screen.
+  for (const def of g.allMobs()) def.aggroRadius = 0;
+  const calm = setInterval(() => {
+    for (const e of g.world.entities.values()) {
+      if (e.kind === 'mob') { e.ai = 'idle'; e.target = null; }
+    }
+    me.dead = false;
+    me.health = g.world.statsOf(me).maxHealth;
+  }, 80);
+  await new Promise((r) => setTimeout(r, 1200));
+  clearInterval(calm);
+  const marks = [...g.views.all].filter((v) => v.lootMark).length;
+  return {
+    lineup: out,
+    plates: [...document.querySelectorAll('.nameplate.hostile')]
+      .filter((p) => p.style.display === 'block')
+      .map((p) => p.querySelector('.np-name')?.style.color)
+      .filter(Boolean),
+    threat: document.querySelector('#target-threat')?.textContent,
+    lootMarks: marks,
+  };
+});
+await wait(600);
+await page.screenshot({ path: join(OUT, '7-danger.png') });
+console.log('danger:', JSON.stringify(danger));
+
 // Tooltips. Sixteen skill slots and a bagful of gear, and until now not one of
 // them said what it was.
 await page.evaluate(async () => {

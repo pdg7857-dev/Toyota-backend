@@ -15,7 +15,13 @@ import { BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
 import { ZONES } from '../content/zone.js';
 import { DRAGONS } from '../content/dragons.js';
 import { getMount } from '../content/mounts.js';
-import { skillRankPower } from '../sim/formulas.js';
+import {
+  THREAT_WORDS,
+  skillRankPower,
+  threatBand,
+  threatGap,
+} from '../sim/formulas.js';
+import { THREAT_COLOURS } from './map.js';
 import {
   FACTIONS,
   HOLDINGS,
@@ -104,6 +110,7 @@ export class Hud {
     targetLevel: HTMLElement;
     targetHp: HTMLElement;
     targetHpLabel: HTMLElement;
+    targetThreat: HTMLElement;
     castBar: HTMLElement;
     castFill: HTMLElement;
     castLabel: HTMLElement;
@@ -219,6 +226,7 @@ export class Hud {
       targetLevel: this.q('#target-level'),
       targetHp: this.q('#target-hp .bar-fill'),
       targetHpLabel: this.q('#target-hp .bar-label'),
+      targetThreat: this.q('#target-threat'),
       castBar: this.q('#cast-bar'),
       castFill: this.q('#cast-bar .bar-fill'),
       castLabel: this.q('#cast-bar .bar-label'),
@@ -955,6 +963,21 @@ export class Hud {
     this.els.targetHpLabel.textContent = combatant
       ? `${Math.ceil(Math.max(0, target.health))} / ${stats.maxHealth}`
       : '';
+
+    // And what it is going to do to you, in words.
+    //
+    // A five-step colour ramp is a convention nobody is born knowing: a new
+    // player has no idea whether orange is worse than yellow, and nothing in
+    // the game ever said. The frame is the one place there is room to say it.
+    const mob = target.kind === 'mob' && !target.dead ? getMob(target.defId!) : null;
+    if (mob) {
+      const band = threatBand(threatGap(target.level, mob.stars, this.world.player.level));
+      this.els.targetThreat.textContent = THREAT_WORDS[band];
+      this.els.targetThreat.style.color = THREAT_COLOURS[band];
+      this.els.targetThreat.style.display = 'block';
+    } else {
+      this.els.targetThreat.style.display = 'none';
+    }
   }
 
   private updateCastBar(player: Entity): void {
@@ -1185,6 +1208,14 @@ export class Hud {
           `${entity.name} <span class="np-lvl">${entity.level}</span>` +
           `<span class="stars ${starClass(stars)}">${starText(stars)}</span>`;
       }
+      // Coloured by what it would do to you, on the same five-step scale the
+      // map uses. The map has always been coloured and the nameplate — the
+      // thing you are actually looking at while deciding whether to pull —
+      // never was, which is precisely backwards.
+      name.style.color =
+        def && !entity.dead
+          ? THREAT_COLOURS[threatBand(threatGap(entity.level, def.stars, player.level))]
+          : '';
       plate.classList.toggle('is-boss', stars >= BOSS_STARS);
 
       const bar = plate.querySelector<HTMLElement>('.np-bar')!;
@@ -2236,6 +2267,7 @@ const TEMPLATE = `
   <div id="target-frame" class="frame panel">
     <div class="frame-name"><span id="target-name"></span><span id="target-level" class="frame-level"></span></div>
     <div id="target-hp" class="bar bar-hp"><div class="bar-fill"></div><div class="bar-label"></div></div>
+    <div id="target-threat"></div>
   </div>
 
   <div id="cast-bar" class="bar panel"><div class="bar-fill"></div><div class="bar-label"></div></div>
