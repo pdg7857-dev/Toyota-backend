@@ -290,7 +290,7 @@ export class World {
     this.resetDragons();
     this.spawnPlayer(opts.classId, opts.playerName ?? 'Wanderer');
     for (const sp of this.zone.spawns) {
-      this.spawnMob(this.garrisonFor(sp), sp.pos, undefined, sp.holding);
+      this.spawnMob(this.garrisonFor(sp), sp.pos, undefined, sp.holding, sp.plain);
     }
     for (const v of this.zone.vendors ?? []) this.spawnVendor(v.vendorId, v.pos);
     this.spawnAdventurers();
@@ -346,11 +346,12 @@ export class World {
    * replays exactly from (seed, commands) — a one-in-four-hundred event that
    * could not be reproduced would be untestable and unreportable.
    *
-   * Summoned adds never roll: they belong to a fight, not to a camp.
+   * Summoned adds never roll: they belong to a fight, not to a camp. Nor do
+   * the creatures a new character wakes up in front of — see `SpawnPoint.plain`.
    */
-  private spawnChoice(baseId: string, summoned: boolean): string {
+  private spawnChoice(baseId: string, asIs: boolean): string {
     const base = getMob(baseId);
-    if (summoned) return baseId;
+    if (asIs) return baseId;
     if (base.rareVariant && this.zone.rareSpawns !== false) {
       // A bounty turns up more often than a signature item: one is spent the
       // moment you collect it, the other is yours for the rest of the game.
@@ -1089,6 +1090,7 @@ export class World {
     pos: Vec2,
     summonedBy?: EntityId,
     holding?: string,
+    plain?: boolean,
   ): Entity {
     // A rare asked for BY NAME is spawned as itself. Only a camp spawn point
     // rolls — and unwrapping `rareOf` here as well silently turned every
@@ -1096,7 +1098,7 @@ export class World {
     // measuring the ordinary mob twice and reporting it as a match.
     const defId = getMob(requestedId).rareOf
       ? requestedId
-      : this.spawnChoice(requestedId, summonedBy !== undefined);
+      : this.spawnChoice(requestedId, summonedBy !== undefined || plain === true);
     const def = getMob(defId);
     const id = this.nextId++;
     const mob: Entity = {
@@ -1118,6 +1120,7 @@ export class World {
       defId,
       spawnPos: { ...pos },
       ...(holding !== undefined ? { holding } : {}),
+      ...(plain ? { plainSpawn: true } : {}),
       aiState: 'idle',
       threat: {},
       abilityCooldowns: {},
@@ -2177,7 +2180,7 @@ export class World {
       // variant, which is not a creature at all.
       const plain = baseMobId(getMob(e.defId!).rareOf ?? e.defId!);
       const base = e.holding ? this.garrisonFor({ mobId: plain, holding: e.holding }) : plain;
-      const defId = this.spawnChoice(base, false);
+      const defId = this.spawnChoice(base, e.plainSpawn === true);
       if (defId !== e.defId) {
         const def = getMob(defId);
         e.defId = defId;
@@ -3028,7 +3031,7 @@ export class World {
       // Nothing garrisons a holding a dragon is sitting on, so arriving in a
       // zone mid-visit shows you the empty ground rather than a full camp.
       if (sp.holding && this.isSuppressed(sp.holding)) continue;
-      this.spawnMob(this.garrisonFor(sp), sp.pos, undefined, sp.holding);
+      this.spawnMob(this.garrisonFor(sp), sp.pos, undefined, sp.holding, sp.plain);
     }
     for (const v of zone.vendors) this.spawnVendor(v.vendorId, v.pos);
     for (const dragon of DRAGONS) this.syncDragonEntity(dragon);

@@ -1,6 +1,7 @@
 import { BOSS_STARS, type Attributes, type ClassId, type Vec2 } from '../sim/types.js';
 import { MOBS } from './mobs.js';
 import { SHORE_CLEARANCE, getTheme, terrainHeight } from './terrain.js';
+import { ROAM_RADIUS } from '../sim/formulas.js';
 
 /**
  * Zone definition: static spawn points laid out by hand. When this grows past a
@@ -20,6 +21,17 @@ export interface SpawnPoint {
    * a levelling camp that drifted too close.
    */
   guardOf?: string;
+  /**
+   * This point never rolls a variant — it puts out exactly what it says.
+   *
+   * Used for the three creatures a new character wakes up in front of. Star
+   * variants and rare spawns are the right behaviour everywhere else in the
+   * game and the wrong behaviour there: a ★4 Scarred Moor Hare has four times
+   * the health of the ordinary one, and meeting it as the *first fight you
+   * ever have*, before the word "star" means anything, is a coin flip on
+   * whether the game's opening is winnable.
+   */
+  plain?: boolean;
   /**
    * Marks this as a guard post for a holding.
    *
@@ -495,6 +507,78 @@ function withStrays(zone: ZoneDef): ZoneDef {
   return { ...zone, spawns: [...zone.spawns, ...out] };
 }
 
+/**
+ * How far down the road the first creatures a player ever sees are standing.
+ *
+ * Outside their aggro (10) plus their roam (9) with room to spare, so waking
+ * up is never an ambush — and close enough to be on screen, which the whole
+ * opening depends on.
+ */
+const ARRIVAL_SIGHT = 30;
+
+/** How many. Three reads as "there are animals here"; one reads as a bug. */
+const ARRIVAL_MOBS = 3;
+
+/**
+ * Put something in front of a new character.
+ *
+ * The first thing this game says is "click a beast to attack", and measured
+ * from the arrival point the nearest creature was **179 units away** — thirty
+ * seconds of walking in which the only instruction on screen cannot be obeyed.
+ * `ARRIVAL_GAP` had already been cut once to fix this and did not, because the
+ * camps are 165 units *off* the road: shortening the road does not bring
+ * anything nearer to it.
+ *
+ * So the opening is placed rather than inherited. Three of the zone's gentlest
+ * creature, down the road, in plain sight. It is the one moment on a
+ * three-kilometre map that cannot be left to a generator, because it is the
+ * only moment every single player sees.
+ */
+function withArrival(zone: ZoneDef): ZoneDef {
+  // The gentlest ordinary creature the zone has: whatever the game means by
+  // "a beast" here, this is the one it wants you to learn on.
+  const candidates = zone.spawns.filter((sp) => {
+    if (sp.guardOf || sp.holding) return false;
+    const def = MOBS[sp.mobId];
+    return !!def && def.stars < BOSS_STARS && !def.horse && !def.dragon;
+  });
+  if (candidates.length === 0) return zone;
+  const gentlest = candidates.reduce((best, sp) => {
+    const a = MOBS[sp.mobId]!;
+    const b = MOBS[best.mobId]!;
+    return a.level * 10 + a.stars < b.level * 10 + b.stars ? sp : best;
+  });
+
+  // Far enough that waking up is never an ambush, whatever the creature is.
+  // Ardmoor's goats landed at 18 units on the first pass, inside their own
+  // aggro plus their roam, because `dryPlace` had walked them back uphill
+  // looking for dry ground.
+  const safe = (MOBS[gentlest.mobId]?.aggroRadius ?? 12) + ROAM_RADIUS + 6;
+
+  const out: SpawnPoint[] = [];
+  for (let i = 0; i < ARRIVAL_MOBS; i++) {
+    const off = i - (ARRIVAL_MOBS - 1) / 2;
+    // Beside the road rather than across it, and staggered, so they read as
+    // animals standing about rather than as a line of skittles.
+    let at = dryPlace(
+      zone.playerStart.x + off * 13,
+      zone.playerStart.z - ARRIVAL_SIGHT - Math.abs(off) * 7,
+      zone.theme,
+    );
+    const gap = Math.hypot(at.x - zone.playerStart.x, at.z - zone.playerStart.z);
+    if (gap < safe) {
+      const scale = safe / Math.max(0.001, gap);
+      at = dryPlace(
+        zone.playerStart.x + (at.x - zone.playerStart.x) * scale,
+        zone.playerStart.z + (at.z - zone.playerStart.z) * scale,
+        zone.theme,
+      );
+    }
+    out.push({ mobId: gentlest.mobId, pos: at, plain: true });
+  }
+  return { ...zone, spawns: [...zone.spawns, ...out] };
+}
+
 /** A boss and the guards that belong to it, on levelled ground off the road. */
 function arena(bossId: string, guardId: string, at: number, theme: string, guards = 4): SpawnPoint[] {
   const z = ROAD_START + (ROAD_END - ROAD_START) * at;
@@ -515,7 +599,7 @@ function arena(bossId: string, guardId: string, at: number, theme: string, guard
  * so wandering is a choice about scenery and rares rather than a difficulty
  * cliff.
  */
-export const FENMARCH: ZoneDef = withStrays({
+export const FENMARCH: ZoneDef = withArrival(withStrays({
   id: 'fenmarch',
   name: 'The Fenmarch',
   halfSize: ZONE_HALF,
@@ -556,13 +640,13 @@ export const FENMARCH: ZoneDef = withStrays({
   ],
   levelRange: [1, 25],
   theme: 'plains',
-});
+}));
 
 // --------------------------------------------------------------------------
 // Zones 2-4. Same shape as the Fenmarch, from the same generator.
 // --------------------------------------------------------------------------
 
-export const ARDMOOR: ZoneDef = withStrays({
+export const ARDMOOR: ZoneDef = withArrival(withStrays({
   id: 'ardmoor',
   name: 'Ardmoor',
   halfSize: ZONE_HALF,
@@ -591,9 +675,9 @@ export const ARDMOOR: ZoneDef = withStrays({
     { toZoneId: 'fenmarch', pos: { x: -640, z: ROAD_START + ARRIVAL_GAP + 60 }, label: 'The Hill Road to the Fenmarch', minLevel: 1 },
     { toZoneId: 'reach', pos: { x: 800, z: -700 }, label: 'The Drowned Causeway', minLevel: 38 },
   ],
-});
+}));
 
-export const SUNKEN_REACH: ZoneDef = withStrays({
+export const SUNKEN_REACH: ZoneDef = withArrival(withStrays({
   id: 'reach',
   name: 'The Sunken Wood',
   halfSize: ZONE_HALF,
@@ -622,9 +706,9 @@ export const SUNKEN_REACH: ZoneDef = withStrays({
     { toZoneId: 'ardmoor', pos: { x: -640, z: ROAD_START + ARRIVAL_GAP + 60 }, label: 'The Causeway to Ardmoor', minLevel: 1 },
     { toZoneId: 'caer_dubh', pos: { x: 800, z: -700 }, label: 'The Black Road to Caer Dubh', minLevel: 66 },
   ],
-});
+}));
 
-export const CAER_DUBH: ZoneDef = withStrays({
+export const CAER_DUBH: ZoneDef = withArrival(withStrays({
   id: 'caer_dubh',
   name: 'Caer Dubh',
   halfSize: ZONE_HALF,
@@ -652,7 +736,7 @@ export const CAER_DUBH: ZoneDef = withStrays({
   exits: [
     { toZoneId: 'reach', pos: { x: -640, z: ROAD_START + ARRIVAL_GAP + 60 }, label: 'The Black Road to the Sunken Wood', minLevel: 1 },
   ],
-});
+}));
 
 
 /** Every zone, keyed by id. Save files store a zone id, not a zone. */

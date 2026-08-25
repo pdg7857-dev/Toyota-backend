@@ -15,6 +15,7 @@ import { BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
 import { ZONES } from '../content/zone.js';
 import { DRAGONS } from '../content/dragons.js';
 import { getMount } from '../content/mounts.js';
+import { skillRankPower } from '../sim/formulas.js';
 import {
   FACTIONS,
   HOLDINGS,
@@ -26,6 +27,7 @@ import {
 import type {
   Attributes,
   AwayReport,
+  ItemDef,
   Command,
   Entity,
   EntityId,
@@ -110,6 +112,7 @@ export class Hud {
     xpDebt: HTMLElement;
     deathCost: HTMLElement;
     xpLevel: HTMLElement;
+    tip: HTMLElement;
     tracker: HTMLElement;
     trackerHead: HTMLElement;
     trackerBody: HTMLElement;
@@ -156,6 +159,8 @@ export class Hud {
   /** Hotkey order for this character's class, filled in at construction. */
   private skillOrder: string[] = [];
   private nameplates = new Map<EntityId, HTMLElement>();
+  /** Last-painted signature per panel, so an open panel is not rebuilt every frame. */
+  private readonly painted = new Map<string, string>();
   /** The bag item currently being dragged, so a slot can say whether it fits. */
   private dragItemId: string | null = null;
   /** The last thing each adventurer said, for the bubble over their head. */
@@ -220,6 +225,7 @@ export class Hud {
       xpFill: this.q('#xp-bar .bar-fill'),
       xpLabel: this.q('#xp-bar .bar-label'),
       xpLevel: this.q('#xp-level'),
+      tip: this.q('#tip'),
       tracker: this.q('#tracker'),
       trackerHead: this.q('#tracker-head'),
       trackerBody: this.q('#tracker-body'),
@@ -279,7 +285,7 @@ export class Hud {
       const skillId = skill.id;
       const el = document.createElement('div');
       el.className = 'slot clickable';
-      el.title = `${skill.name} — ${skill.description} (${skill.energyCost} energy)`;
+      this.tip(el, () => this.skillTip(skillId));
       el.innerHTML =
         `<span class="slot-key">${hotkeyLabel(i)}</span>` +
         `<span class="slot-name">${skill.name}</span>` +
@@ -674,10 +680,58 @@ export class Hud {
       if (!vendor || d > 7 || player.dead) this.closeVendor();
     }
     this.updateTravelPrompt(player);
-    if (this.els.questLog.style.display === 'block') this.renderQuestLog();
-    if (this.els.characterWindow.style.display === 'block') this.renderCharacter();
-    if (this.els.inventoryWindow.style.display === 'block') this.renderInventory();
-    if (this.els.realmWindow.style.display === 'block') this.renderRealm();
+    // Rebuild an open panel only when what it is showing has actually changed.
+    //
+    // These used to run every frame, which native `title=` survived because the
+    // browser re-reads the attribute — but a hover tooltip cannot: `mouseenter`
+    // fires, the node is destroyed sixteen milliseconds later, `mouseleave`
+    // never comes, and the tip is left hanging over nothing. Rebuilding a
+    // hundred DOM nodes sixty times a second to show a bag that has not
+    // changed was never a good idea either.
+    this.repaint('quest', this.els.questLog, () => this.questSignature(player), () => this.renderQuestLog());
+    this.repaint('character', this.els.characterWindow, () => this.characterSignature(player), () => this.renderCharacter());
+    this.repaint('inventory', this.els.inventoryWindow, () => this.bagSignature(player), () => this.renderInventory());
+    this.repaint('realm', this.els.realmWindow, () => this.realmSignature(), () => this.renderRealm());
+  }
+
+  /** Repaint a panel when its signature changes, and not otherwise. */
+  private repaint(key: string, el: HTMLElement, signature: () => string, draw: () => void): void {
+    if (el.style.display !== 'block') {
+      this.painted.delete(key);
+      return;
+    }
+    const now = signature();
+    if (this.painted.get(key) === now) return;
+    this.painted.set(key, now);
+    draw();
+  }
+
+  private bagSignature(player: Entity): string {
+    const bag = (player.inventory ?? []).map((s) => `${s.itemId}x${s.qty}`).join(',');
+    const worn = Object.entries(player.equipment ?? {}).map(([k, v]) => `${k}:${v}`).join(',');
+    return `${bag}|${worn}|${player.gold ?? 0}|${player.level}`;
+  }
+
+  private characterSignature(player: Entity): string {
+    const attrs = Object.entries(player.attributes ?? {}).map(([k, v]) => `${k}${v}`).join(',');
+    const ranks = Object.entries(player.skillRanks ?? {}).map(([k, v]) => `${k}${v}`).join(',');
+    return `${player.level}|${attrs}|${ranks}|${player.unspentPoints ?? 0}|${player.skillPoints ?? 0}` +
+      `|${(player.learnedSkills ?? []).length}`;
+  }
+
+  private questSignature(player: Entity): string {
+    return (player.quests ?? [])
+      .map((q) => `${q.questId}:${q.counts.join('.')}`)
+      .join(',') + `|${(player.questsDone ?? []).length}`;
+  }
+
+  private realmSignature(): string {
+    const control = Object.entries(this.world.control).map(([k, v]) => `${k}${v.toFixed(2)}`).join(',');
+    const player = this.world.player;
+    const standing = Object.values(FACTIONS)
+      .map((f) => `${f.id}${Math.round(this.world.standingWith(player, f.id))}`)
+      .join(',');
+    return `${control}|${standing}`;
   }
 
   /**
@@ -764,6 +818,20 @@ export class Hud {
       }
     }
 
+    // The first two things anybody has to be shown.
+    //
+    // Measured from a fresh character, the arrow's only advice was "go and see
+    // the trader" — pointing back up the road, in the exact opposite direction
+    // from the line in the log telling them to go and fight something. Two
+    // instructions that disagree are worse than one instruction.
+    //
+    // Both steps are read off state the game already keeps and that survives a
+    // save, so nothing new is stored and reloading never replays the tutorial:
+    // experience only ever comes from a kill or a quest, and coin and bags
+    // only ever fill from looting one.
+    const first = this.firstSteps(player);
+    if (first) return first;
+
     // Nothing in hand: the next step is whoever hands work out.
     const trader = this.world.zone.vendors.find((v) => v.vendorId !== 'ceallach');
     if (!trader) return null;
@@ -772,6 +840,57 @@ export class Hud {
       line: 'Traders keep a chain of work that runs to the bosses.',
       where: this.vendorSpot(trader.vendorId),
     };
+  }
+
+  /**
+   * Kill one thing, then take what it left. Level 1 only.
+   *
+   * Gated on the level as well as the state so that a veteran who has just
+   * sold their last merchant good and spent their last coin is never told how
+   * to loot a corpse.
+   */
+  private firstSteps(
+    player: Entity,
+  ): { title: string; line: string; where: { x: number; z: number; label: string } | null } | null {
+    if ((player.level ?? 1) > 1) return null;
+
+    if ((player.xp ?? 0) === 0) {
+      const prey = this.nearestMob((e) => !e.dead);
+      if (!prey) return null;
+      return {
+        title: 'Find something to fight',
+        line: 'Click it to target, then press <b>T</b> to start swinging.',
+        where: { x: prey.pos.x, z: prey.pos.z, label: prey.name },
+      };
+    }
+
+    const empty = (player.gold ?? 0) === 0 && (player.inventory ?? []).length === 0;
+    if (!empty) return null;
+    const corpse = this.nearestMob(
+      (e) => e.dead && ((e.corpseLoot?.length ?? 0) > 0 || (e.corpseGold ?? 0) > 0),
+    );
+    if (!corpse) return null;
+    return {
+      title: 'Take what it left',
+      line: 'Stand over it and press <b>F</b>.',
+      where: { x: corpse.pos.x, z: corpse.pos.z, label: corpse.name },
+    };
+  }
+
+  /** The nearest mob matching a test, for the opening steps. */
+  private nearestMob(ok: (e: Entity) => boolean): Entity | null {
+    const player = this.world.player;
+    let best: Entity | null = null;
+    let bestGap = Infinity;
+    for (const e of this.world.entities.values()) {
+      if (e.kind !== 'mob' || !ok(e)) continue;
+      const gap = Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z);
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = e;
+      }
+    }
+    return best;
   }
 
   private vendorSpot(vendorId: string): { x: number; z: number; label: string } | null {
@@ -878,6 +997,87 @@ export class Hud {
             points + skillPoints === 1 ? 'point' : 'points'
           } to spend (C)</span>`
         : '');
+  }
+
+  /**
+   * Hang a tooltip off an element.
+   *
+   * The thunk is called on every hover rather than once at build time, which
+   * is the whole reason this exists: a skill's cost, its cooldown, its rank
+   * and whether you can even use it all change while the slot on screen does
+   * not, and an attribute set when the bar was built can never say so.
+   */
+  private tip(el: HTMLElement, content: () => TipContent | null): void {
+    const show = (ev: MouseEvent) => {
+      const c = content();
+      if (!c) {
+        this.els.tip.style.display = 'none';
+        return;
+      }
+      this.els.tip.innerHTML = renderTip(c);
+      this.els.tip.style.display = 'block';
+      this.moveTip(ev);
+    };
+    el.addEventListener('mouseenter', show);
+    el.addEventListener('mousemove', (ev) => {
+      if (this.els.tip.style.display === 'block') this.moveTip(ev);
+    });
+    el.addEventListener('mouseleave', () => {
+      this.els.tip.style.display = 'none';
+    });
+  }
+
+  /** Beside the cursor, and never off the edge of the window. */
+  private moveTip(ev: MouseEvent): void {
+    const tip = this.els.tip;
+    const w = tip.offsetWidth;
+    const h = tip.offsetHeight;
+    const pad = 14;
+    let x = ev.clientX + pad;
+    let y = ev.clientY + pad;
+    if (x + w > window.innerWidth - 8) x = ev.clientX - w - pad;
+    if (y + h > window.innerHeight - 8) y = ev.clientY - h - pad;
+    tip.style.left = `${Math.max(6, x)}px`;
+    tip.style.top = `${Math.max(6, y)}px`;
+  }
+
+  /** Everything worth knowing about a skill, including why you cannot use it. */
+  private skillTip(skillId: string): TipContent {
+    const player = this.world.player;
+    const skill = getSkill(skillId);
+    const rank = player.skillRanks?.[skillId] ?? 0;
+    const lines: string[] = [];
+
+    const cost = `${skill.energyCost} energy`;
+    const cd = skill.cooldownMs > 0 ? `${(skill.cooldownMs / 1000).toFixed(0)}s cooldown` : 'no cooldown';
+    const cast = skill.castMs > 0 ? `${(skill.castMs / 1000).toFixed(1)}s cast` : 'instant';
+    lines.push(`${cost} · ${cast} · ${cd}`);
+    if (skill.range > 4) lines.push(`${Math.round(skill.range)}m range`);
+    if (skill.durationMs) lines.push(`Lasts ${Math.round(skill.durationMs / 1000)}s`);
+    if (rank > 0) lines.push(`Rank ${rank} — ${Math.round((skillRankPower(rank) - 1) * 100)}% stronger`);
+
+    // Why it is grey, and what to do about it. "Lv 44" on a slot tells a
+    // player when, and nothing at all about what or how.
+    let note: string | undefined;
+    let warn: string | undefined;
+    if (player.level < skill.reqLevel) {
+      warn = `Learned at level ${skill.reqLevel}.`;
+    } else if (skill.taughtBy && !(player.learnedSkills ?? []).includes(skill.id)) {
+      const tome = getItem(skill.taughtBy);
+      const where = skill.zoneId ? ZONES[skill.zoneId]?.name : null;
+      warn = `Not taught yet. Read ${tome.name}${where ? `, found in ${where}` : ''}.`;
+    } else if (player.energy < skill.energyCost) {
+      note = 'Not enough energy right now.';
+    }
+
+    return {
+      title: skill.name,
+      sub: skill.zoneId ? `Taught in ${ZONES[skill.zoneId]?.name ?? skill.zoneId}` : `Level ${skill.reqLevel}`,
+      lines,
+      desc: skill.description,
+      note,
+      warn,
+    };
   }
 
   private updateSkillBar(player: Entity): void {
@@ -1200,9 +1400,22 @@ export class Hud {
       row.innerHTML =
         `<span style="color:${QUALITY_COLORS[item.quality]}">${item.name}</span>` +
         `<span class="${afford ? 'price' : 'price too-dear'}">${price}g</span>`;
-      row.title = usable
-        ? `${describeItem(itemId)} — costs ${price} gold`
-        : `${item.classes?.join('/')} only`;
+      this.tip(row, () =>
+        usable
+          ? itemTip(itemId, {
+              equipped:
+                item.slot && item.slot !== 'none'
+                  ? (player.equipment?.[item.slot as EquipSlot] ?? null)
+                  : null,
+              foot: `${price}g — you have ${gold.toLocaleString()}g`,
+            })
+          : {
+              title: item.name,
+              titleClass: `q-${item.quality}`,
+              lines: [`${price}g`],
+              warn: `${item.classes?.join(' / ')} only — not for a ${player.classId}.`,
+            },
+      );
       if (afford && usable) {
         row.addEventListener('click', () =>
           this.emit({ t: 'buy', vendorId: this.openVendorId!, itemId }),
@@ -1698,7 +1911,7 @@ export class Hud {
         cell.innerHTML =
           `<div class="doll-label">${label}</div>` +
           `<div class="doll-name" style="color:${QUALITY_COLORS[item.quality]}">${item.name}</div>`;
-        cell.title = describeItem(itemId);
+        this.tip(cell, () => itemTip(itemId, { foot: `Click or drag off to take it off` }));
         cell.draggable = true;
         cell.addEventListener('dragstart', (e) => {
           e.dataTransfer?.setData('text/plain', `unequip:${slot}`);
@@ -1711,7 +1924,10 @@ export class Hud {
         });
       } else {
         cell.innerHTML = `<div class="doll-label">${label}</div><div class="doll-empty">empty</div>`;
-        cell.title = `Nothing on your ${label.toLowerCase()}`;
+        this.tip(cell, () => ({
+          title: `Nothing on your ${label.toLowerCase()}`,
+          lines: ['Drag something here from the bag to wear it.'],
+        }));
       }
 
       // Every slot accepts a drop, filled or not — swapping a worn piece for a
@@ -1778,7 +1994,15 @@ export class Hud {
       `<div class="bag-name" style="color:${QUALITY_COLORS[item.quality]}">${item.name}</div>` +
       `<div class="bag-foot"><span class="muted">${tag}</span>` +
       `${stack.qty > 1 ? `<span class="bag-qty">${stack.qty}</span>` : ''}</div>`;
-    cell.title = describeItem(stack.itemId);
+    // Compared against whatever is already in that slot — the one question a
+    // player actually asks of a thing they just picked up.
+    this.tip(cell, () =>
+      itemTip(stack.itemId, {
+        equipped: item.slot && item.slot !== 'none'
+          ? (this.world.player.equipment?.[item.slot as EquipSlot] ?? null)
+          : null,
+      }),
+    );
 
     if (wearable) {
       cell.draggable = true;
@@ -1849,16 +2073,69 @@ function bandClass(band: StandingBand): string {
  * its six properties is worse than no tooltip: it teaches the player that the
  * numbers here are not the numbers, and then they stop reading it.
  */
-function describeItem(itemId: string): string {
+/**
+ * A tooltip's content, kept as data rather than as a string of HTML.
+ *
+ * Every one of these used to be a `\n`-joined blob dropped into `title=`,
+ * which meant no emphasis, no colour, and no way for a comparison line to read
+ * differently from a stat line — the two things a tooltip most has to separate.
+ */
+interface TipContent {
+  title: string;
+  /** Quality, slot, level — the small grey line under the name. */
+  sub?: string;
+  /** CSS class for the title: item quality, mostly. */
+  titleClass?: string;
+  lines: string[];
+  /** What it does, in words. Rendered in italics. */
+  desc?: string;
+  /** Comparison against what you already have. Rendered under a rule. */
+  compare?: string[];
+  /** Something useful. Gold. */
+  note?: string;
+  /** Something in the way. Red. */
+  warn?: string;
+  /** Worth, flavour — the bottom line. */
+  foot?: string;
+}
+
+function renderTip(c: TipContent): string {
+  const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const parts = [`<div class="tip-title ${c.titleClass ?? ''}">${esc(c.title)}</div>`];
+  if (c.sub) parts.push(`<div class="tip-sub">${esc(c.sub)}</div>`);
+  for (const line of c.lines) parts.push(`<div class="tip-line">${esc(line)}</div>`);
+  if (c.desc) parts.push(`<div class="tip-desc">${esc(c.desc)}</div>`);
+  if (c.compare?.length) {
+    parts.push('<div class="tip-rule"></div>');
+    // Already marked up by the caller: the whole point of a comparison line is
+    // that better and worse look different.
+    for (const line of c.compare) parts.push(`<div class="tip-line">${line}</div>`);
+  }
+  if (c.note) parts.push(`<div class="tip-note">${esc(c.note)}</div>`);
+  if (c.warn) parts.push(`<div class="tip-warn">${esc(c.warn)}</div>`);
+  if (c.foot) parts.push(`<div class="tip-sub" style="margin:5px 0 0">${esc(c.foot)}</div>`);
+  return parts.join('');
+}
+
+/**
+ * An item, and how it compares to the one already in that slot.
+ *
+ * The comparison is the half that was missing entirely. Every RPG tooltip's
+ * real job is answering "is this better than what I have on", and a player who
+ * has to open the character sheet, read six numbers, close it and come back is
+ * a player who will just equip whatever has the bigger name.
+ */
+function itemTip(itemId: string, opts: { equipped?: string | null; foot?: string } = {}): TipContent {
   const item = getItem(itemId);
-  const lines: string[] = [`${item.name} — ${item.quality}${item.slot && item.slot !== 'none' ? `, ${item.slot}` : ''}`];
+  const lines: string[] = [];
   if (item.reqLevel) lines.push(`Requires level ${item.reqLevel}`);
   if (item.classes) lines.push(`${item.classes.join(' / ')} only`);
 
   if (item.damageMin !== undefined) {
     const swing = (item.swingMs ?? 2000) / 1000;
-    const dps = ((item.damageMin + (item.damageMax ?? item.damageMin)) / 2 / swing).toFixed(1);
-    lines.push(`${item.damageMin}–${item.damageMax} damage, ${swing.toFixed(2)}s swing (${dps}/s)`);
+    lines.push(
+      `${item.damageMin}–${item.damageMax} damage, ${swing.toFixed(2)}s swing (${itemDps(item).toFixed(1)}/s)`,
+    );
     if (item.attackRange) lines.push(`${item.attackRange}m reach`);
   }
   if (item.armor) lines.push(`+${item.armor} armour`);
@@ -1870,9 +2147,7 @@ function describeItem(itemId: string): string {
   if (item.critBonus) lines.push(`+${(item.critBonus * 100).toFixed(1)}% critical chance`);
   if (item.moveSpeedBonus) lines.push(`+${item.moveSpeedBonus} movement speed`);
   if (item.regenBonus) lines.push(`+${item.regenBonus} health per second`);
-  if (item.skillPower) {
-    lines.push(`Skills hit ${Math.round((item.skillPower - 1) * 100)}% harder`);
-  }
+  if (item.skillPower) lines.push(`Skills hit ${Math.round((item.skillPower - 1) * 100)}% harder`);
 
   const c = item.consumable;
   if (c) {
@@ -1883,14 +2158,65 @@ function describeItem(itemId: string): string {
     lines.push(c.family === 'potion' ? 'Potion — 18s between draughts' : 'Elixir — 2 minutes between');
   }
 
+  let note: string | undefined;
   if (item.teaches) {
     const skill = getSkill(item.teaches);
-    lines.push(`Teaches ${skill.name} at level ${skill.reqLevel}`);
-    lines.push(skill.description);
+    note = `Teaches ${skill.name} at level ${skill.reqLevel}: ${skill.description}`;
   }
-  if (item.flavor) lines.push(item.flavor);
-  lines.push(`Worth ${item.value.toLocaleString()}g`);
-  return lines.join('\n');
+
+  const worn = opts.equipped && opts.equipped !== itemId ? getItem(opts.equipped) : null;
+  return {
+    title: item.name,
+    titleClass: `q-${item.quality}`,
+    sub: [item.quality, item.slot && item.slot !== 'none' ? item.slot : null]
+      .filter(Boolean)
+      .join(', '),
+    lines,
+    desc: item.flavor,
+    compare: worn ? compareItems(item, worn) : undefined,
+    note,
+    foot: opts.foot ?? `Worth ${item.value.toLocaleString()}g`,
+  };
+}
+
+function itemDps(item: ItemDef): number {
+  if (item.damageMin === undefined) return 0;
+  const swing = (item.swingMs ?? 2000) / 1000;
+  return (item.damageMin + (item.damageMax ?? item.damageMin)) / 2 / swing;
+}
+
+/** Every number that differs between two items in the same slot. */
+function compareItems(next: ItemDef, worn: ItemDef): string[] {
+  const rows: [string, number, number, number][] = [
+    ['damage a second', itemDps(next), itemDps(worn), 1],
+    ['armour', next.armor ?? 0, worn.armor ?? 0, 0],
+    ['health', next.healthBonus ?? 0, worn.healthBonus ?? 0, 0],
+    ['damage a swing', next.damageBonus ?? 0, worn.damageBonus ?? 0, 0],
+    ['health a second', next.regenBonus ?? 0, worn.regenBonus ?? 0, 0],
+    ['movement', next.moveSpeedBonus ?? 0, worn.moveSpeedBonus ?? 0, 1],
+  ];
+  for (const key of ['strength', 'focus', 'dexterity', 'vitality'] as const) {
+    rows.push([key, next.attributes?.[key] ?? 0, worn.attributes?.[key] ?? 0, 0]);
+  }
+  rows.push([
+    'critical chance',
+    (next.critBonus ?? 0) * 100,
+    (worn.critBonus ?? 0) * 100,
+    1,
+  ]);
+
+  const out: string[] = [];
+  for (const [label, a, b, dp] of rows) {
+    const delta = a - b;
+    if (Math.abs(delta) < (dp === 0 ? 0.5 : 0.05)) continue;
+    const sign = delta > 0 ? '+' : '−';
+    const cls = delta > 0 ? 'tip-up' : 'tip-down';
+    out.push(`<span class="${cls}">${sign}${Math.abs(delta).toFixed(dp)} ${label}</span>`);
+  }
+  // Silence reads as "the tooltip is broken". Say it instead.
+  if (out.length === 0) out.push(`<span class="tip-same">The same as your ${worn.name}.</span>`);
+  else out.push(`<span class="tip-same">against your ${worn.name}</span>`);
+  return out;
 }
 
 function setBar(fill: HTMLElement, value: number, max: number): void {
@@ -1899,6 +2225,7 @@ function setBar(fill: HTMLElement, value: number, max: number): void {
 
 const TEMPLATE = `
   <div id="overlays"></div>
+  <div id="tip"></div>
 
   <div id="player-frame" class="frame panel">
     <div class="frame-name"><span id="player-name"></span><span id="player-level" class="frame-level"></span></div>

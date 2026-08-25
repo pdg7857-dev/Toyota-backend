@@ -1304,3 +1304,39 @@ canvas { display: block; }
 }
 
 #volume-bar i.on { background: var(--gold); }
+
+/* ---------------------------------------------------------------- tooltip
+ *
+ * Everything used to hang off the browser's own `title=`: a second's delay, no
+ * styling, no structure, and — because an attribute is set once — no way to
+ * say what a skill costs *now* or how a weapon compares to the one in your
+ * hand. This is one element, moved and refilled on hover.
+ */
+#tip {
+  position: fixed;
+  display: none;
+  max-width: 320px;
+  padding: 9px 11px 8px;
+  background: rgba(10, 13, 11, 0.96);
+  border: 1px solid var(--panel-edge);
+  border-radius: 4px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.7);
+  font-size: 12px;
+  line-height: 1.42;
+  pointer-events: none;
+  z-index: 60;
+}
+#tip .tip-title { font-weight: bold; font-size: 13px; margin-bottom: 1px; }
+#tip .tip-sub { color: #9c937c; font-size: 11px; margin-bottom: 5px; }
+#tip .tip-line { color: #cfc7b4; }
+#tip .tip-desc { color: #b7ae98; font-style: italic; margin-top: 5px; }
+#tip .tip-note { color: var(--gold); margin-top: 5px; }
+#tip .tip-warn { color: #d08a72; margin-top: 5px; }
+#tip .tip-rule { height: 1px; background: var(--panel-edge); margin: 6px 0 5px; }
+#tip .tip-up { color: #7cc142; }
+#tip .tip-down { color: #c2554a; }
+#tip .tip-same { color: #8d8674; }
+#tip .q-common { color: #cfc7b4; }
+#tip .q-uncommon { color: #83b866; }
+#tip .q-rare { color: #6f9fd8; }
+#tip .q-epic { color: #c07fd0; }

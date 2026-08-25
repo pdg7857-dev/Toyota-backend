@@ -1,0 +1,156 @@
+/**
+ * The first five minutes, as a new player sees them.
+ *
+ * Everything else in this repository proves the game *works*. This one asks
+ * the other question: standing at the standing stones with no idea what any of
+ * this is, what can you actually tell? It walks the opening beats and
+ * photographs each one, and prints what was on screen and how far away the
+ * nearest thing to do was.
+ *
+ *   npm run build && npm run preview &
+ *   node tools/firstrun.mjs
+ */
+import { chromium } from 'playwright';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+const URL = process.env.LOOK_URL ?? 'http://127.0.0.1:4173/?fresh';
+const OUT = join(process.cwd(), 'screenshots', 'firstrun');
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function findChromium() {
+  if (process.env.CHROMIUM_PATH) return process.env.CHROMIUM_PATH;
+  const root = process.env.PLAYWRIGHT_BROWSERS_PATH ?? '/opt/pw-browsers';
+  if (!existsSync(root)) return undefined;
+  for (const dir of readdirSync(root).filter((d) => d.startsWith('chromium-')).sort().reverse()) {
+    const candidate = join(root, dir, 'chrome-linux', 'chrome');
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+mkdirSync(OUT, { recursive: true });
+const browser = await chromium.launch({
+  executablePath: findChromium(),
+  args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'],
+});
+const page = await browser.newPage({ viewport: { width: 1440, height: 810 } });
+await page.goto(URL, { waitUntil: 'networkidle' });
+await wait(900);
+await page.screenshot({ path: join(OUT, '0-class-select.png') });
+
+await page.evaluate(() => document.querySelector('.cs-card').click());
+await wait(1800);
+await page.screenshot({ path: join(OUT, '1-spawn.png') });
+
+const opening = await page.evaluate(() => {
+  const g = window.__game;
+  const me = g.world.player;
+  const d = (e) => Math.hypot(e.pos.x - me.pos.x, e.pos.z - me.pos.z);
+  const mobs = [...g.world.entities.values()].filter((e) => e.kind === 'mob' && !e.dead);
+  mobs.sort((a, b) => d(a) - d(b));
+  const onScreen = [...g.views.all].filter((v) => v.group.visible).length;
+  return {
+    nearest: mobs[0] ? { name: mobs[0].name, away: Math.round(d(mobs[0])) } : null,
+    within60: mobs.filter((m) => d(m) < 60).length,
+    within120: mobs.filter((m) => d(m) < 120).length,
+    onScreen,
+    tracker: document.querySelector('#tracker')?.textContent?.replace(/\s+/g, ' ').trim().slice(0, 200) ?? '(none)',
+    help: document.querySelector('#help')?.textContent?.replace(/\s+/g, ' ').trim().slice(0, 250) ?? '(none)',
+    log: document.querySelector('#log')?.textContent?.replace(/\s+/g, ' ').trim().slice(0, 250) ?? '(none)',
+    skills: [...document.querySelectorAll('#skill-bar .slot, #skill-bar div')].map((s) => s.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 20),
+  };
+});
+console.log('spawn:', JSON.stringify(opening, null, 1));
+
+
+// Walk down the road and take the first fight, which is the whole of what a
+// new player is told to do.
+const opening2 = await page.evaluate(async () => {
+  const g = window.__game;
+  const me = g.world.player;
+  const nearest = () => {
+    let best = null, gap = Infinity;
+    for (const e of g.world.entities.values()) {
+      if (e.kind !== 'mob' || e.dead) continue;
+      const d = Math.hypot(e.pos.x - me.pos.x, e.pos.z - me.pos.z);
+      if (d < gap) { gap = d; best = e; }
+    }
+    return best;
+  };
+  const prey = nearest();
+  me.pos = { x: prey.pos.x, z: prey.pos.z - 3 };
+  g.world.submit(me.id, { t: 'target', id: prey.id });
+  g.world.submit(me.id, { t: 'autoAttack', on: true });
+  const until = Date.now() + 25000;
+  while (!prey.dead && Date.now() < until) await new Promise((r) => setTimeout(r, 120));
+  await new Promise((r) => setTimeout(r, 600));
+  return {
+    killed: prey.dead,
+    xp: me.xp,
+    gold: me.gold ?? 0,
+    corpseGold: prey.corpseGold ?? 0,
+    corpseLoot: (prey.corpseLoot ?? []).length,
+  };
+});
+await wait(500);
+await page.screenshot({ path: join(OUT, '2-first-kill.png') });
+console.log('first kill:', JSON.stringify(opening2));
+console.log('tracker now:', await page.evaluate(
+  () => document.querySelector('#tracker')?.textContent?.replace(/\s+/g, ' ').trim() ?? '(none)',
+));
+
+await page.keyboard.press('f');
+await wait(600);
+await page.screenshot({ path: join(OUT, '3-looted.png') });
+console.log('after loot:', await page.evaluate(() => ({
+  gold: window.__game.world.player.gold ?? 0,
+  bags: (window.__game.world.player.inventory ?? []).length,
+  tracker: document.querySelector('#tracker')?.textContent?.replace(/\s+/g, ' ').trim() ?? '(none)',
+})));
+
+
+// Tooltips. Sixteen skill slots and a bagful of gear, and until now not one of
+// them said what it was.
+await page.evaluate(async () => {
+  const g = window.__game;
+  const me = g.world.player;
+  me.level = 46;
+  me.xp = 10;
+  me.gold = 90000;
+  // Something in the bag worth comparing against something worn.
+  const weapons = Object.values(g.allItems()).filter((i) => i.slot === 'weapon' && g.canUse(i.id));
+  me.inventory = weapons.slice(0, 3).map((i) => ({ itemId: i.id, qty: 1 }));
+  me.equipment = { ...me.equipment, weapon: weapons[6]?.id ?? weapons[0].id };
+});
+await page.keyboard.press('i');
+await wait(500);
+const bagCell = await page.$('#inventory-body .bag-slot');
+if (bagCell) {
+  await bagCell.hover();
+  await wait(400);
+  await page.screenshot({ path: join(OUT, '4-item-tooltip.png') });
+  console.log('item tip:', await page.evaluate(
+    () => document.querySelector('#tip')?.textContent?.trim().slice(0, 200) ?? '(none)'));
+} else {
+  console.log('item tip: no bag cell found');
+}
+await page.keyboard.press('i');
+await wait(300);
+
+await page.hover('#skill-bar .skill-row:first-child .slot:nth-child(3)');
+await wait(400);
+await page.screenshot({ path: join(OUT, '5-skill-tooltip.png') });
+console.log('skill tip:', await page.evaluate(
+  () => document.querySelector('#tip')?.textContent?.trim().slice(0, 250) ?? '(none)'));
+
+const locked = await page.$('#skill-bar .skill-row.secondary .slot:last-child');
+if (locked) {
+  await page.hover('#skill-bar .skill-row.secondary .slot:last-child');
+  await wait(400);
+  await page.screenshot({ path: join(OUT, '6-locked-tooltip.png') });
+  console.log('locked tip:', await page.evaluate(
+    () => document.querySelector('#tip')?.textContent?.trim().slice(0, 250) ?? '(none)'));
+}
+
+await browser.close();

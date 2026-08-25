@@ -705,6 +705,74 @@ replacement: Caer Dubh at noon is still violet twilight and the Fenmarch at
 midnight is still a moor. A cycle that overwrote the palette would turn four
 zones into one zone at four times of day.
 
+## The first sixty seconds
+
+Everything else in this game is tuned by measurement. The opening was not
+measured at all, and it was the worst thing in it: from a fresh character the
+nearest creature was **179 units away** — thirty seconds of walking — while the
+only line on screen said *click a beast to attack*, and the quest arrow pointed
+back up the road at a trader. Two instructions that disagree are worse than
+one.
+
+`ARRIVAL_GAP` had already been shortened once to fix exactly this and did not,
+because the camps sit 165 units *off* the road: moving where the road starts
+does not bring anything nearer to it. So the opening is **placed rather than
+inherited** — `withArrival` puts three of the zone's gentlest creature down the
+road in plain sight. It is the one moment on a three-kilometre map that cannot
+be left to a generator, because it is the only moment every single player sees.
+
+Three rules, each a test:
+
+- **Never an ambush.** They stand outside their own `aggroRadius` plus
+  `ROAM_RADIUS`, so waking up is never already-in-combat. Ardmoor's goats
+  landed at 18 units on the first pass because `dryPlace` walked them back
+  uphill looking for dry ground; the placement pushes out and re-checks.
+- **`SpawnPoint.plain` — no variant roll.** A ★4 Scarred Moor Hare has four
+  times the health of an ordinary one. Meeting it as the *first fight you ever
+  have*, before the word "star" means anything, makes the opening a coin flip.
+  The flag rides on the entity as `plainSpawn`, because the respawn timer
+  re-rolls from the entity and has no way back to the point that made it.
+- **The gentlest thing in the zone**, by level then stars.
+
+And the arrow answers the same question the log does. `firstSteps` reads two
+pieces of state the game already keeps and that survive a save — experience
+only ever comes from a kill, coin and bags only ever fill from looting one — so
+nothing new is stored and reloading never replays the tutorial:
+
+| xp | coin and bags | the arrow points at |
+|---|---|---|
+| 0 | — | the nearest creature: *click it, then press T* |
+| some | empty | the nearest lootable corpse: *stand over it and press F* |
+| some | something | the trader, as before |
+
+Gated on level 1, so a veteran who has just spent their last coin is never told
+how to loot a corpse.
+
+## Nothing told you what anything did
+
+Sixteen skill slots, ten of them reading `Lv 44` and nothing else. A bagful of
+gear whose whole stat block existed — and went into the browser's own `title=`,
+which is a second's delay, no structure, no colour, and, because an attribute
+is written once when the bar is built, **no way to say what a skill costs now**.
+
+`Hud.tip(el, thunk)` is one element, moved and refilled on hover, and the thunk
+is called every time. What that buys:
+
+- **A locked skill says how to get it.** "Learned at level 44", or "Not taught
+  yet — read the Cairnwatch Codex, found in Caer Dubh". A number on a grey box
+  says when and nothing about what.
+- **An item says how it compares to the one you are wearing.** This is the half
+  that was missing outright, and it is the question a player actually asks of
+  something they just picked up. Every differing number, green or red, under a
+  rule, against the name of the piece it would replace. When nothing differs it
+  says so — silence reads as a broken tooltip.
+
+It also caught a real bug by existing: **the open panels rebuilt their entire
+DOM every frame.** `title=` survived that because the browser re-reads the
+attribute; a hover tooltip cannot — `mouseenter` fires, the node is destroyed
+sixteen milliseconds later, `mouseleave` never comes, and the tip is left
+hanging over nothing. Panels now repaint on a signature of what they show.
+
 ## The map
 
 Three kilometres of ground, and until now the only navigation in the game was

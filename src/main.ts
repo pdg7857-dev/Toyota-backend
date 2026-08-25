@@ -102,8 +102,17 @@ async function boot(): Promise<void> {
   views.sync();
   views.pushTick();
 
-  hud.log('You wake at the standing stones on the edge of the Fenmarch.', 'log-good');
-  hud.log('Click a beast to attack. Press T to toggle auto-attack.', 'log-loot');
+  // The opening, and only for somebody who has not had one.
+  //
+  // It used to greet a returning level-90 in Caer Dubh with "you wake at the
+  // standing stones on the edge of the Fenmarch", which is both wrong and the
+  // most patronising line in the game to read after eight hours of play.
+  if (!restored) {
+    hud.log(`You wake at the standing stones on the edge of ${world.zone.name}.`, 'log-good');
+    hud.log('There is something grazing down the road. Click it, then press T.', 'log-loot');
+  } else {
+    hud.log(`Back in ${world.zone.name}.`, 'log-good');
+  }
 
   // Run the hours since the save was written. Reading the clock is the *host's*
   // job — `sim/` never looks at one — so the elapsed span goes in as a plain

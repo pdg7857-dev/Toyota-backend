@@ -43,6 +43,7 @@ import {
 } from '../src/content/adventurers.js';
 import { SKILLS, skillBarFor, getSkill, skillsTaughtBy } from '../src/content/skills.js';
 import { grindMobFor, killsForLevel } from './pace.js';
+import { ROAM_RADIUS } from '../src/sim/formulas.js';
 import { MODELS, clipFor } from '../src/content/models.js';
 import {
   BODY_PLANS,
@@ -3869,5 +3870,94 @@ describe('every creature has a shape', () => {
     // Not one shape for all five: what somebody is carrying is the only thing
     // that says which class an adventurer across the camp is playing.
     expect(new Set(seen.values()).size).toBeGreaterThan(2);
+  });
+});
+
+describe('the first sixty seconds', () => {
+  /**
+   * The one moment on a three-kilometre map that every single player sees.
+   *
+   * Measured from a fresh character, the nearest creature was **179 units
+   * away** while the only line on screen said "click a beast to attack".
+   * `ARRIVAL_GAP` had already been shortened once to fix exactly this and did
+   * not, because the camps sit 165 units *off* the road: moving the road's
+   * start does not bring anything nearer to it.
+   */
+  const arrivals = (zone: (typeof ZONES)[string]) =>
+    zone.spawns.filter((sp) => sp.plain);
+
+  it('puts something to fight in front of a new character', () => {
+    console.log('\n  the walk to the first fight');
+    for (const zone of Object.values(ZONES)) {
+      const gaps = zone.spawns
+        .filter((sp) => !sp.guardOf && !sp.holding)
+        .map((sp) => Math.hypot(sp.pos.x - zone.playerStart.x, sp.pos.z - zone.playerStart.z))
+        .sort((a, b) => a - b);
+      const nearest = gaps[0] ?? Infinity;
+      const first = arrivals(zone)[0]!;
+      console.log(
+        `    ${zone.id.padEnd(10)} nearest ${Math.round(nearest)}m  ` +
+          `${getMob(first.mobId).name} ★${getMob(first.mobId).stars}`,
+      );
+      // Within sight, so the opening line can actually be obeyed.
+      expect(nearest, `${zone.name} makes you walk ${Math.round(nearest)}m to find anything`)
+        .toBeLessThan(45);
+      expect(arrivals(zone).length, `${zone.name} has no arrival creatures`).toBeGreaterThan(1);
+    }
+  });
+
+  it('never lets the opening walk up and start the fight for you', () => {
+    // Waking up already in combat, before the controls have been read, is the
+    // worst possible first thirty seconds. Every arrival creature stands
+    // outside its own aggro plus its own roam.
+    for (const zone of Object.values(ZONES)) {
+      for (const sp of arrivals(zone)) {
+        const def = getMob(sp.mobId);
+        const gap = Math.hypot(sp.pos.x - zone.playerStart.x, sp.pos.z - zone.playerStart.z);
+        expect(gap, `${def.name} can reach the arrival point in ${zone.name}`)
+          .toBeGreaterThan(def.aggroRadius + ROAM_RADIUS);
+      }
+    }
+  });
+
+  it('makes the first fight the gentlest thing in the zone', () => {
+    for (const zone of Object.values(ZONES)) {
+      const ordinary = zone.spawns
+        .filter((sp) => !sp.guardOf && !sp.holding && !sp.plain)
+        .map((sp) => getMob(sp.mobId))
+        .filter((m) => m.stars < BOSS_STARS && !m.horse && !m.dragon);
+      const easiest = Math.min(...ordinary.map((m) => m.level * 10 + m.stars));
+      for (const sp of arrivals(zone)) {
+        const def = getMob(sp.mobId);
+        expect(def.level * 10 + def.stars, `${zone.name} opens on a ${def.name}`).toBe(easiest);
+      }
+    }
+  });
+
+  it('does not roll a star variant on the creature you meet first', () => {
+    // A ★4 Scarred Moor Hare has four times an ordinary one's health. Meeting
+    // it as the first fight you ever have, before the word "star" means
+    // anything, makes the game's opening a coin flip.
+    const world = new World({ seed: 4, zone: getZone('fenmarch'), classId: 'warrior' });
+    const start = world.zone.playerStart;
+    const opening = [...world.entities.values()].filter(
+      (e) => e.kind === 'mob' && Math.hypot(e.pos.x - start.x, e.pos.z - start.z) < 45,
+    );
+    expect(opening.length).toBeGreaterThan(1);
+    for (const e of opening) {
+      const def = getMob(e.defId!);
+      expect(def.rareOf, `${def.name} is a variant standing in the opening`).toBeUndefined();
+      expect(e.plainSpawn).toBe(true);
+    }
+
+    // And it survives the respawn timer, which re-rolls from the entity and
+    // has no way back to the spawn point that made it.
+    const one = opening[0]!;
+    one.dead = true;
+    one.respawnInMs = 1;
+    for (let i = 0; i < 4; i++) world.tick();
+    expect(getMob(one.defId!).rareOf).toBeUndefined();
+    expect(getMob(one.defId!).stars).toBe(getMob(one.defId!).stars);
+    expect(one.name).toBe(getMob(one.defId!).name);
   });
 });

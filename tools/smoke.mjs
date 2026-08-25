@@ -1292,6 +1292,59 @@ async function main() {
   await page.bringToFront();
   await wait(600);
 
+  // Tooltips.
+  //
+  // Sixteen skill slots and a bagful of gear, and until now not one of them
+  // said what it was: everything hung off the browser's own `title=`, which is
+  // a second's delay, no structure, and — because an attribute is written once
+  // — no way to say what a skill costs *now* or how a weapon compares to the
+  // one in your hand.
+  const tips = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const read = () => document.querySelector('#tip');
+    const hover = async (el) => {
+      const r = el.getBoundingClientRect();
+      const at = { clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, bubbles: true };
+      el.dispatchEvent(new MouseEvent('mouseenter', at));
+      el.dispatchEvent(new MouseEvent('mousemove', at));
+      await new Promise((r2) => setTimeout(r2, 60));
+      const tip = read();
+      const text = tip.style.display === 'block' ? tip.textContent : '';
+      el.dispatchEvent(new MouseEvent('mouseleave', at));
+      return text;
+    };
+
+    // A weapon in the bag and a different one worn, so there is something to
+    // compare against — the half of a tooltip's job that was missing outright.
+    const weapons = Object.values(g.allItems()).filter((i) => i.slot === 'weapon' && g.canUse(i.id));
+    me.inventory = [{ itemId: weapons[0].id, qty: 1 }];
+    me.equipment = { ...me.equipment, weapon: weapons[weapons.length - 1].id };
+    document.querySelector('#inventory-window').style.display = 'block';
+    await new Promise((r) => setTimeout(r, 250));
+    const bagText = await hover(document.querySelector('#inventory-body .bag-slot'));
+    document.querySelector('#inventory-window').style.display = 'none';
+
+    const slots = [...document.querySelectorAll('#skill-bar .slot')];
+    const known = await hover(slots[0]);
+    const lockedSlot = slots[slots.length - 1];
+    const locked = await hover(lockedSlot);
+
+    return {
+      bag: bagText.slice(0, 120),
+      // The comparison line, which is the whole reason this exists.
+      compares: /damage a second|strength|The same as/.test(bagText),
+      known: known.slice(0, 90),
+      knownHasCost: /energy/.test(known),
+      // A locked slot says only "Lv 44" on the bar. The tip has to say what it
+      // is and how to get it, or the slot is a number and nothing else.
+      lockedSaysHow: /level|Read /i.test(locked),
+      lockedNamed: locked.length > 20 && !/^Lv /.test(locked),
+      // And it has to go away again.
+      hidden: read().style.display === 'none',
+    };
+  });
+
   // Bodies.
   //
   // Structural, like the impact burst: whether a wolf reads as a wolf is a
@@ -1539,6 +1592,11 @@ async function main() {
     ['every zone resolved a theme', themesMatched],
     ['entities stand on the terrain', standingOnGround],
     ['a creature in a lake wades rather than walking the bottom', wading],
+    ['a bag item says what it is', tips.bag.length > 20],
+    ['and how it compares to what you are wearing', tips.compares],
+    ['a skill says what it costs', tips.knownHasCost],
+    ['a locked skill says how to get it', tips.lockedSaysHow && tips.lockedNamed],
+    ['and the tooltip goes away again', tips.hidden],
     ['a creature is shaped like the creature it is', bodies.plan !== 'blob'],
     // The whole point of merging. Six hundred creatures a zone can afford one
     // draw call each and not six, and a plan that quietly stops merging is
@@ -1637,6 +1695,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('wade:', JSON.stringify(wade));
+  console.log('tips:', JSON.stringify(tips));
   console.log('bodies:', JSON.stringify(bodies), '| gear:', JSON.stringify(gear));
   console.log('map:', JSON.stringify(mapState), 'closed:', mapClosed);
   console.log('impact:', JSON.stringify(impact));

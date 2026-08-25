@@ -656,6 +656,13 @@ export interface Entity {
   spawnPos?: Vec2;
   /** Guard post this mob stands at, if any — see `SpawnPoint.holding`. */
   holding?: string;
+  /**
+   * This creature's spawn point never rolls a variant. See `SpawnPoint.plain`.
+   *
+   * Carried on the entity rather than looked up, because the respawn timer
+   * re-rolls from the entity and has no way back to the point that made it.
+   */
+  plainSpawn?: boolean;
   /** Set on the entity a dragon is currently being represented by. */
   dragonId?: string;
   aiState?: 'idle' | 'chasing' | 'attacking' | 'returning' | 'dead';

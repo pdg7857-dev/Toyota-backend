@@ -350,6 +350,18 @@ eighteen seconds. They drop from ordinary creatures and every trader stocks
 them, and they are the difference between a ★4 killing you a third of the time
 and one in fifty.
 
+## Finding your feet
+
+You wake at the standing stones with something grazing thirty metres down the
+road, and the arrow in the corner points at it. Kill it and the arrow points at
+what it dropped. Loot that and the arrow points at the trader, who keeps a
+chain of work that runs all the way to the bosses.
+
+Hover anything. A skill says what it costs, how long it takes and what it does;
+a locked one says how to get it — a level, or a tome and the zone it comes
+from. An item says how every one of its numbers compares to the piece you are
+wearing in that slot.
+
 ## Mechanics worth knowing
 
 **Bosses telegraph, and no two ask the same thing.** A shape appears on the
