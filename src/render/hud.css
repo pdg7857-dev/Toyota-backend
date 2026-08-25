@@ -1465,3 +1465,7 @@ canvas { display: block; }
   box-shadow: 0 0 10px rgba(255, 210, 94, 0.45);
 }
 .slot.live .slot-name { color: #ffe9a8; }
+
+/* A lootable corpse that is not the one F would take. The gold mark over it
+ * already says there is something there; the plate is only in the way. */
+.nameplate.muted { opacity: 0.4; }

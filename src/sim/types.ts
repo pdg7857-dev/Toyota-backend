@@ -749,6 +749,14 @@ export interface Entity {
    * million distance checks a tick with six hundred creatures in a zone.
    */
   packAllies?: number;
+  /**
+   * This creature stepped up when its ground was farmed. See
+   * `content/muster.ts` — it is a rating higher for as long as it lasts, and
+   * it can never rouse a second time.
+   */
+  roused?: boolean;
+  /** Milliseconds left of being roused, if you walk away rather than fight. */
+  rousedMs?: number;
   /** Set on the entity a dragon is currently being represented by. */
   dragonId?: string;
   aiState?: 'idle' | 'chasing' | 'attacking' | 'returning' | 'dead';
@@ -843,6 +851,8 @@ export type SimEvent =
   | { t: 'swing'; sourceId: EntityId; targetId: EntityId }
   /** A skittish creature broke and ran. See `content/traits.ts`. */
   | { t: 'flees'; mobId: EntityId; name: string }
+  /** A camp noticed it was being farmed. See `content/muster.ts`. */
+  | { t: 'muster'; name: string; count: number; at: Vec2 }
   /** A skill went off with its condition live. See `SkillCondition`. */
   | { t: 'wellTimed'; sourceId: EntityId; skillId: string }
   /** A landmark opened. Once per site, ever. See `content/discoveries.ts`. */

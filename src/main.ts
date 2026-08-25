@@ -7,7 +7,7 @@ import { bodyPlanFor, weaponLookFor } from './content/bodies.js';
 import { traitFor } from './content/traits.js';
 import { SKILLS } from './content/skills.js';
 import { DAY_LENGTH_MS } from './content/daylight.js';
-import { getQuest } from './content/quests.js';
+import { getQuest, QUESTS } from './content/quests.js';
 import { getHolding } from './content/factions.js';
 import { DRAGONS } from './content/dragons.js';
 import { getVendor } from './content/vendors.js';
@@ -279,6 +279,7 @@ async function boot(): Promise<void> {
       return [...seen].map(([look, itemId]) => ({ look, itemId }));
     },
     questOf: (questId: string) => getQuest(questId),
+    allQuests: () => QUESTS,
     holdingOf: (holdingId: string) => getHolding(holdingId),
     dragons: () => DRAGONS,
     /**

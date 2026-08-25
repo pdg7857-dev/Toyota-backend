@@ -338,6 +338,36 @@ async function main() {
     () => getComputedStyle(document.querySelector('#vendor-window')).display !== 'none',
   );
 
+  // What the work actually asks, before you take it on.
+  //
+  // The offer row is the one row in the shop a player has to make a decision
+  // about, and it showed a name and a number. The job was in a native `title=`
+  // — a second's delay, no structure, and nothing to say what it pays.
+  const questOffer = await page.evaluate(async () => {
+    const row = document.querySelector('#vendor-quests .quest-row');
+    if (!row) return { ok: false, why: 'nothing on offer' };
+    row.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX: 400, clientY: 400 }));
+    await new Promise((r) => setTimeout(r, 60));
+    const tip = document.querySelector('#tip');
+    const text = getComputedStyle(tip).display === 'none' ? '' : (tip.textContent ?? '');
+    row.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+    // Structural rather than keyword-matched: the objective lines and the
+    // summary come out of the quest itself, so this cannot pass by accident on
+    // whichever chain the trader happens to be offering.
+    const name = row.querySelector('span')?.textContent ?? '';
+    const quest = Object.values(window.__game.allQuests()).find((q) =>
+      name.includes(q.name),
+    );
+    return {
+      ok: text.length > 0,
+      quest: quest?.id ?? null,
+      saysTheJob: !!quest && quest.objectives.every((o) => text.includes(o.text)),
+      saysWhy: !!quest && text.includes(quest.summary),
+      saysThePay: /xp/.test(text),
+      text: text.slice(0, 120),
+    };
+  });
+
   // Accept the first quest on offer from the trader.
   const questAccepted = await page.evaluate(() => {
     const row = document.querySelector('#vendor-quests .quest-row');
@@ -1308,6 +1338,113 @@ async function main() {
   await page.bringToFront();
   await wait(600);
 
+  // A camp that notices it is being farmed.
+  //
+  // The one thing in this game that happens *because of what you just did* and
+  // happens fast enough to react to. The unit tests cover the pace; what only
+  // a browser can say is whether the player is actually told.
+  const muster = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const aggro = new Map();
+    for (const def of g.allMobs()) {
+      aggro.set(def.id, def.aggroRadius);
+      def.aggroRadius = 0;
+    }
+
+    // Stand in the biggest camp within reach and empty it.
+    const cells = new Map();
+    for (const e of g.world.entities.values()) {
+      if (e.kind !== 'mob' || e.dead) continue;
+      const def = g.mobOf(e.defId);
+      if (def.stars >= 5 || def.horse) continue;
+      const key = `${Math.round(e.pos.x / 150)}:${Math.round(e.pos.z / 150)}`;
+      cells.set(key, [...(cells.get(key) ?? []), e]);
+    }
+    const packs = [...cells.values()].sort((a, b) => b.length - a.length);
+    if (packs.length === 0) return { ok: false, why: 'no camp in this zone' };
+    const pack = packs[0];
+    const home = { x: me.pos.x, z: me.pos.z };
+    me.pos = {
+      x: pack.reduce((n, e) => n + e.pos.x, 0) / pack.length,
+      z: pack.reduce((n, e) => n + e.pos.z, 0) / pack.length,
+    };
+    await new Promise((r) => setTimeout(r, 400));
+
+    let killed = 0;
+    let champion = null;
+    const until = Date.now() + 40000;
+    while (!champion && Date.now() < until) {
+      const victim = [...g.world.entities.values()].find(
+        (e) =>
+          e.kind === 'mob' &&
+          !e.dead &&
+          !e.roused &&
+          Math.hypot(e.pos.x - me.pos.x, e.pos.z - me.pos.z) < 90,
+      );
+      if (!victim) {
+        await new Promise((r) => setTimeout(r, 600));
+        continue;
+      }
+      victim.pos = { x: me.pos.x + 2, z: me.pos.z };
+      g.world.submit(me.id, { t: 'target', id: victim.id });
+      g.world.submit(me.id, { t: 'autoAttack', on: true });
+      const stop = Date.now() + 5000;
+      while (!victim.dead && Date.now() < stop) {
+        victim.pos = { x: me.pos.x + 2, z: me.pos.z };
+        victim.health = 1;
+        me.health = g.world.statsOf(me).maxHealth;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      killed++;
+      champion = [...g.world.entities.values()].find((e) => e.roused) ?? null;
+    }
+    g.world.submit(me.id, { t: 'autoAttack', on: false });
+    if (champion) g.world.submit(me.id, { t: 'target', id: champion.id });
+    await new Promise((r) => setTimeout(r, 350));
+
+    const coming = [...g.world.entities.values()].filter(
+      (e) => e.kind === 'mob' && !e.dead && e.aiState === 'chasing',
+    ).length;
+    // The stacked-corpse case: only the corpse F would actually take gets the
+    // prompt, or four of them land on top of each other unreadably.
+    const prompts = [...document.querySelectorAll('.nameplate.lootable')]
+      .filter((p) => p.style.display !== 'none')
+      .filter((p) => /press F/.test(p.querySelector('.np-name')?.textContent ?? '')).length;
+    const banner = document.querySelector('#zone-banner')?.textContent ?? '';
+    const frame = document.querySelector('#target-name')?.textContent ?? '';
+
+    // Put the run back where it found it — and that means out of combat, not
+    // just out of the camp. `autoSelect` turns auto-attack back on the instant
+    // the player is fighting, which is exactly right in the game and means a
+    // probe that walks away from a roused camp leaves the character quietly
+    // farming hares behind the next three checks.
+    for (const def of g.allMobs()) def.aggroRadius = aggro.get(def.id);
+    for (const e of g.world.entities.values()) {
+      if (e.kind !== 'mob' || e.dead) continue;
+      e.targetId = null;
+      e.threat = {};
+      e.aiState = 'idle';
+      if (e.spawnPos) e.pos = { ...e.spawnPos };
+    }
+    me.threat = {};
+    g.world.lastCombatTick.clear();
+    me.pos = home;
+    me.dead = false;
+    me.health = g.world.statsOf(me).maxHealth;
+
+    return {
+      ok: !!champion,
+      killed,
+      champion: champion?.name ?? null,
+      coming,
+      prompts,
+      banner,
+      frame,
+      raised: champion ? g.mobOf(champion.defId).stars : 0,
+    };
+  });
+
   // A skill worth waiting for, and the light that says when.
   //
   // Without the light the whole idea is invisible: a skill worth seventy-five
@@ -1384,6 +1521,11 @@ async function main() {
     g.world.submit(me.id, { t: 'autoAttack', on: true });
     const until = Date.now() + 20000;
     while (!victim.dead && Date.now() < until) {
+      // Pinned every pass, not once: a skittish creature on one health point
+      // breaks and runs, and the first version of this stood there swinging at
+      // a hare disappearing over a hill and reported "a kill is not written
+      // down" — which is a true sentence about the wrong thing.
+      victim.pos = { x: me.pos.x + 2, z: me.pos.z };
       victim.health = 1;
       await new Promise((r) => setTimeout(r, 80));
     }
@@ -1988,6 +2130,9 @@ async function main() {
     ['combat happened', state.log.some((l) => /hit|slain|died/i.test(l ?? ''))],
     ['vendor shop opened', vendorOpened],
     ['quest accepted from trader', questAccepted],
+    ['an offer says what the work is', questOffer.ok && questOffer.saysTheJob],
+    ['and why anybody wants it done', questOffer.saysWhy],
+    ['and what it pays', questOffer.saysThePay],
     ['travelled to a second zone', travelled === 'ardmoor'],
     ['selling paid gold', soldSomething],
     ['boss telegraph rendered', sawTelegraph],
@@ -1995,6 +2140,11 @@ async function main() {
     ['every zone resolved a theme', themesMatched],
     ['entities stand on the terrain', standingOnGround],
     ['a creature in a lake wades rather than walking the bottom', wading],
+    ['a camp notices when you empty it', muster.ok],
+    ['and sends some of them, not all of them', muster.coming > 1 && muster.coming <= 5],
+    ['the one who steps up is named for it', /Roused/.test(muster.champion ?? '')],
+    ['and the player is actually told', /Roused/.test(muster.banner)],
+    ['only one corpse offers the loot key', muster.prompts <= 1],
     ['a skill lights up when its moment arrives', timing.ok && timing.nearlyDead > 0],
     ['and is dark the rest of the time', timing.healthy === 0],
     ['a kill is written down', reckoning.counted && reckoning.byBase],
@@ -2123,6 +2273,7 @@ async function main() {
   console.log('dragon:', JSON.stringify(wyrm), JSON.stringify(wyrmDead));
   console.log('realm:', JSON.stringify(realm), '|', JSON.stringify(realmPanel));
   console.log('wade:', JSON.stringify(wade));
+  console.log('muster:', JSON.stringify(muster), '| offer:', JSON.stringify(questOffer));
   console.log('timing:', JSON.stringify(timing));
   console.log('reckoning:', JSON.stringify(reckoning));
   console.log('belt:', JSON.stringify(belt));

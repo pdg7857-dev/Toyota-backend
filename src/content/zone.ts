@@ -110,6 +110,14 @@ export interface ZoneDef {
    * the seed, and the roll itself comes out of the same `Rng` as the fight.
    */
   starVariants?: boolean;
+  /**
+   * Whether a camp here notices it is being farmed.
+   *
+   * Off in test arenas along with everything else that reacts: a duel whose
+   * opponent is suddenly joined by three friends is measuring the wrong thing,
+   * and the muster promotes a creature mid-fight.
+   */
+  musters?: boolean;
 }
 
 /**

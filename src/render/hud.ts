@@ -48,6 +48,15 @@ import type {
 import type { World } from '../sim/world.js';
 
 const MAX_LOG_LINES = 9;
+
+/**
+ * How close you have to be to take what a corpse is carrying.
+ *
+ * Exported because the input handler and the nameplate have to agree: the
+ * plate that offers "press F to loot" must be the corpse the key actually
+ * takes, and two copies of a constant drift.
+ */
+export const LOOT_RANGE = 4.5;
 /** Slots on the first hotkey row, bound to 1-9 then 0. */
 const PRIMARY_ROW_SLOTS = 10;
 
@@ -507,6 +516,14 @@ export class Hud {
           this.log(`${getSkill(ev.skillId).name} — well timed.`, 'log-good');
           break;
         }
+        case 'muster': {
+          // Loud, because it is the one thing in this game that happens
+          // *because of what you just did* and happens fast enough to react
+          // to. A log line alone would be missed inside a camp fight.
+          this.log(`The camp has had enough. ${ev.name} steps up.`, 'log-bad');
+          this.showZoneBanner(ev.name, 'rare');
+          break;
+        }
         case 'flees': {
           this.log(`${ev.name} breaks and runs.`, 'log-loot');
           break;
@@ -934,6 +951,27 @@ export class Hud {
       line: 'Stand over it and press <b>F</b>.',
       where: { x: corpse.pos.x, z: corpse.pos.z, label: corpse.name },
     };
+  }
+
+  /**
+   * The corpse `F` would take, which is the nearest one with anything on it.
+   *
+   * The same rule the input handler uses, so the plate that offers the prompt
+   * is always the plate the key answers.
+   */
+  private nearestLootable(player: Entity): EntityId | null {
+    let best: EntityId | null = null;
+    let bestGap = LOOT_RANGE;
+    for (const e of this.world.entities.values()) {
+      if (e.kind !== 'mob' || !e.dead) continue;
+      if ((e.corpseLoot?.length ?? 0) === 0 && (e.corpseGold ?? 0) === 0) continue;
+      const gap = Math.hypot(e.pos.x - player.pos.x, e.pos.z - player.pos.z);
+      if (gap <= bestGap) {
+        bestGap = gap;
+        best = e.id;
+      }
+    }
+    return best;
   }
 
   /** The nearest mob matching a test, for the opening steps. */
@@ -1403,6 +1441,12 @@ export class Hud {
 
   private updateNameplates(camera: THREE.Camera): void {
     const player = this.world.player;
+    // Which corpse the loot key would actually take. Only that one gets the
+    // prompt: kill four things standing together and four "press F to loot"
+    // plates land on top of each other and none of them can be read. The gold
+    // mark over the others already says there is loot there, which is the
+    // whole reason it exists.
+    const nearestCorpse = this.nearestLootable(player);
     for (const entity of this.world.entities.values()) {
       if (entity.id === player.id) continue;
       if (entity.kind === 'vendor') {
@@ -1457,7 +1501,7 @@ export class Hud {
       plate.style.opacity = `${Math.max(0.35, Math.min(1, 1.4 - distance / range))}`;
 
       plate.style.display = 'block';
-      plate.classList.toggle('rare', rare);
+      plate.classList.toggle('rare', rare || entity.roused === true);
       plate.style.left = `${screen.x}px`;
       plate.style.top = `${screen.y}px`;
       plate.classList.toggle('dead', entity.dead);
@@ -1471,7 +1515,9 @@ export class Hud {
       if (spent && !(player.stable ?? []).includes(horse!)) {
         name.textContent = `${entity.name} — press H to take it`;
       } else if (lootable) {
-        name.textContent = `${entity.name} — press F to loot`;
+        name.textContent =
+          entity.id === nearestCorpse ? `${entity.name} — press F to loot` : entity.name;
+        plate.classList.toggle('muted', entity.id !== nearestCorpse);
       } else {
         const trait = def ? traitFor(def) : null;
         name.innerHTML =
@@ -2098,7 +2144,14 @@ export class Hud {
       row.innerHTML =
         `<span>✔ ${quest.name}</span>` +
         `<span class="price">+${quest.rewards.xp.toLocaleString()} xp</span>`;
-      row.title = 'Click to hand in';
+      this.tip(row, () => ({
+        title: quest.name,
+        sub: 'finished',
+        lines: quest.objectives.map((o) => o.text),
+        note: 'Click to hand it in.',
+        foot: `+${quest.rewards.xp.toLocaleString()} xp` +
+          (quest.rewards.gold ? ` · ${quest.rewards.gold.toLocaleString()}g` : ''),
+      }));
       row.addEventListener('click', () =>
         this.emit({ t: 'turnInQuest', vendorId: this.openVendorId!, questId: quest.id }),
       );
@@ -2111,7 +2164,17 @@ export class Hud {
       row.innerHTML =
         `<span>! ${quest.name} <span class="muted">lv${quest.minLevel}</span></span>` +
         `<span class="price">+${quest.rewards.xp.toLocaleString()} xp</span>`;
-      row.title = quest.summary;
+      // What the work actually asks. This was the last native `title=` left in
+      // the HUD, which meant the one row a player has to make a decision about
+      // showed a name and a number and hid the job behind a second's delay.
+      this.tip(row, () => ({
+        title: quest.name,
+        sub: `level ${quest.minLevel}+`,
+        lines: quest.objectives.map((o) => o.text),
+        desc: quest.summary,
+        foot: `+${quest.rewards.xp.toLocaleString()} xp` +
+          (quest.rewards.gold ? ` · ${quest.rewards.gold.toLocaleString()}g` : ''),
+      }));
       row.addEventListener('click', () =>
         this.emit({ t: 'acceptQuest', vendorId: this.openVendorId!, questId: quest.id }),
       );

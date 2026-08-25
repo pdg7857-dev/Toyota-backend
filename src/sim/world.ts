@@ -146,6 +146,19 @@ import {
 } from '../content/discoveries.js';
 import { zoneStructures as structuresOf } from '../content/structures.js';
 import {
+  MUSTER_AT,
+  MUSTER_CELL,
+  MUSTER_COOLDOWN_MS,
+  MUSTER_DECAY_MS,
+  MUSTER_MAX,
+  MUSTER_MIN,
+  MUSTER_RANGE,
+  ROUSED_DAMAGE,
+  ROUSED_MS,
+  rousedName,
+  rousedStars,
+} from '../content/muster.js';
+import {
   PACK_MAX_ALLIES,
   PACK_PER_ALLY,
   PACK_RANGE,
@@ -270,6 +283,19 @@ export class World {
    */
   sites: DiscoverySite[] = [];
   found: Record<string, true> = {};
+
+  /**
+   * How hard the player has been working each patch of ground.
+   *
+   * Keyed on a coarse grid cell so it needs no camp identity, and decayed
+   * rather than reset so a steady grind never builds it and a hard push does —
+   * see `content/muster.ts`. `quietUntil` is the tick a cell may rouse again.
+   *
+   * Deliberately not saved. It is a two-minute clock in a game whose other
+   * clocks run for half an hour, and a camp that remembers a grudge from last
+   * Tuesday is not a camp reacting to what you are doing now.
+   */
+  pressure: Record<string, { count: number; lastTick: number; quietUntil: number }> = {};
   entities = new Map<EntityId, Entity>();
   playerId: EntityId = 0;
 
@@ -1319,6 +1345,9 @@ export class World {
     // stat block cannot. See `content/traits.ts`.
     if (e.kind === 'mob' && !e.dead) {
       damageMultiplier *= this.traitDamage(e);
+      // And whether it stepped up when its ground was farmed. Small, because
+      // the extra rating is already most of it.
+      if (e.roused) damageMultiplier *= ROUSED_DAMAGE;
     }
     if (damageMultiplier !== 1) {
       stats.damageMin *= damageMultiplier;
@@ -1466,6 +1495,7 @@ export class World {
     this.tickCasts();
     this.tickAi();
     this.tickPacks();
+    this.tickRoused();
     this.tickMobAbilities();
     this.tickMovement();
     this.tickSwings();
@@ -1740,6 +1770,32 @@ export class World {
    * a damage multiplier, and that is the difference between five creatures
    * being counted and six hundred.
    */
+  /**
+   * Being roused wears off.
+   *
+   * Only while it is *not* fighting: a champion that calms down mid-fight
+   * because a minute passed turns a decision into a waiting game, and running
+   * away for sixty seconds should be the way out rather than standing still
+   * for it.
+   */
+  private tickRoused(): void {
+    for (const e of this.entities.values()) {
+      if (e.kind !== 'mob' || !e.roused || e.dead) continue;
+      if (e.aiState === 'chasing' || e.aiState === 'attacking') continue;
+      e.rousedMs = (e.rousedMs ?? 0) - TICK_MS;
+      if ((e.rousedMs ?? 0) > 0) continue;
+      // Back to what it was. Through both wrappers, the same way the respawn
+      // does — a roused ★3 of a ★2 creature is a rating of a rating otherwise.
+      const base = baseMobId(getMob(e.defId!).rareOf ?? e.defId!);
+      e.roused = false;
+      e.rousedMs = 0;
+      e.defId = base;
+      e.name = getMob(base).name;
+      e.level = getMob(base).level;
+      e.health = Math.min(e.health, this.statsOf(e).maxHealth);
+    }
+  }
+
   private tickPacks(): void {
     for (const mob of this.entities.values()) {
       if (mob.kind !== 'mob' || mob.dead) continue;
@@ -2427,6 +2483,8 @@ export class World {
       e.roamWaitMs = 0;
       e.fled = false;
       e.fleeingMs = 0;
+      e.roused = false;
+      e.rousedMs = 0;
       e.targetId = null;
       e.threat = {};
       e.effects = [];
@@ -2554,6 +2612,101 @@ export class World {
     if (target.health <= 0) this.kill(target, sourceId);
   }
 
+  /** Which cell a point falls in. Coarse on purpose: a camp is one cell. */
+  private cellOf(pos: Vec2): string {
+    return `${Math.round(pos.x / MUSTER_CELL)}:${Math.round(pos.z / MUSTER_CELL)}`;
+  }
+
+  /**
+   * Note that the player has taken something out of this patch of ground, and
+   * rouse it if they have taken enough, fast enough.
+   *
+   * The decay is what makes this a decision rather than a tax: at an ordinary
+   * levelling pace the tally never reaches the threshold, so a player who
+   * moves between camps is never troubled by it and one who stands in a camp
+   * and empties it is.
+   */
+  private pressCamp(victim: Entity): void {
+    if (this.zone.musters === false) return;
+    const def = getMob(victim.defId!);
+    // A boss's guard, a garrison and a horse belong to something else. So does
+    // anything already roused: a muster that musters is a spiral.
+    if (def.stars >= BOSS_STARS || def.horse || def.dragon || victim.roused) return;
+
+    const key = this.cellOf(victim.pos);
+    const cell = (this.pressure[key] ??= { count: 0, lastTick: this.tickCount, quietUntil: 0 });
+    const sinceMs = (this.tickCount - cell.lastTick) * TICK_MS;
+    cell.count = Math.max(0, cell.count - sinceMs / MUSTER_DECAY_MS) + 1;
+    cell.lastTick = this.tickCount;
+    if (cell.count < MUSTER_AT || this.tickCount < cell.quietUntil) return;
+
+    // Only if there is still a camp to do the mustering. An emptied one keeps
+    // its temper rather than spending it — the tally is left standing, so the
+    // ground stays angry and calls the moment enough of them are back up.
+    if (!this.muster(victim.pos)) return;
+    cell.count = 0;
+    cell.quietUntil = this.tickCount + MUSTER_COOLDOWN_MS / TICK_MS;
+  }
+
+  /**
+   * The survivors come, and one of them is roused.
+   *
+   * Nearest first rather than everything in range: a wipe is not an event, it
+   * is the end of a session, and the point of this is a fight you can decide
+   * to take.
+   */
+  private muster(at: Vec2): boolean {
+    const player = this.player;
+    if (player.dead) return false;
+
+    const near = [...this.entities.values()]
+      .filter((e) => {
+        if (e.kind !== 'mob' || e.dead || e.roused) return false;
+        const def = getMob(e.defId!);
+        if (def.stars >= BOSS_STARS || def.horse || def.dragon) return false;
+        return dist(e.pos.x, e.pos.z, at.x, at.z) <= MUSTER_RANGE;
+      })
+      .sort(
+        (a, b) => dist(a.pos.x, a.pos.z, at.x, at.z) - dist(b.pos.x, b.pos.z, at.x, at.z),
+      )
+      .slice(0, MUSTER_MAX);
+    if (near.length < MUSTER_MIN) return false;
+
+    // The nearest is the one that steps up. Named for it, a rating higher, and
+    // carrying what a creature of that rating carries — an event that is only
+    // harder is a punishment for playing well.
+    const champion = near[0]!;
+    const base = baseMobId(getMob(champion.defId!).rareOf ?? champion.defId!);
+    const raised = rousedStars(getMob(base).stars);
+    const variantId = raised === getMob(base).stars ? base : starVariantId(base, raised);
+    if (getMob(variantId)) {
+      champion.defId = variantId;
+      champion.level = getMob(variantId).level;
+    }
+    champion.name = rousedName(getMob(base).name);
+    champion.roused = true;
+    champion.rousedMs = ROUSED_MS;
+    champion.health = this.statsOf(champion).maxHealth;
+
+    for (const mob of near) {
+      mob.aiState = 'chasing';
+      mob.targetId = player.id;
+      mob.threat = mob.threat ?? {};
+      mob.threat[player.id] = (mob.threat[player.id] ?? 0) + 1;
+      mob.roamGoal = null;
+      // A skittish creature that bolted is not coming back for this.
+      mob.fleeingMs = 0;
+    }
+
+    this.events.push({
+      t: 'muster',
+      name: champion.name,
+      count: near.length,
+      at: { ...at },
+    });
+    return true;
+  }
+
   /**
    * Write down what was killed.
    *
@@ -2620,6 +2773,7 @@ export class World {
         this.advanceQuests(killer, (o) => (o.kind === 'kill' && o.mobId === killed ? 1 : 0));
         this.applyKillPolitics(killer, victim);
         this.recordKill(killer, def);
+        this.pressCamp(victim);
       }
     } else {
       // Player death: everything currently hunting them goes home.

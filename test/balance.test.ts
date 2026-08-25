@@ -22,7 +22,7 @@ import {
   xpToNext,
 } from '../src/sim/formulas.js';
 import { BOSS_STARS, type ClassId, type Entity, type MobDef } from '../src/sim/types.js';
-import { BOUNTY_MOBS, LOOT_TABLES, MOBS, getMob } from '../src/content/mobs.js';
+import { BOUNTY_MOBS, LOOT_TABLES, MOBS, baseMobId, getMob } from '../src/content/mobs.js';
 import {
   BOUNTY_SPAWN_CHANCE,
   RARES,
@@ -45,6 +45,7 @@ import {
 import { curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
 import { SKILLS, getSkill } from '../src/content/skills.js';
 import { TICK_MS } from '../src/sim/formulas.js';
+import { MUSTER_MAX, ROUSED_MS } from '../src/content/muster.js';
 import {
   STUBBORN_AT,
   TRAITS,
@@ -2715,5 +2716,175 @@ describe('your own rotation is worth timing', () => {
     world.submit(world.playerId, { t: 'useSkill', skillId: 'ember' });
     for (let i = 0; i < 6; i++) world.tick();
     expect(world.conditionMet(world.player, meteor, mob.id), 'the burn did not count').toBe(true);
+  });
+});
+
+describe('a camp that notices you are farming it', () => {
+  /**
+   * The loop has a ten-second unit — a kill — and a forty-minute unit — a
+   * level — and nothing at all in between. Everything the world layer does
+   * runs on a much longer clock than that: a front slides over twenty minutes,
+   * a dragon wakes every half hour. The two-minute scale, which is the one a
+   * player actually sits inside, was empty.
+   *
+   * The whole design rests on the *pace* being the lever, so the numbers that
+   * matter are how much farming it takes — and how much ordinary levelling it
+   * does not.
+   */
+  function campWorld(mobId: string, count = 10): World {
+    return new World({
+      seed: 21,
+      zone: {
+        ...pullZone(mobId, count),
+        id: 'test-camp',
+        // The whole point of this suite.
+        musters: true,
+      },
+      classId: 'warrior',
+    });
+  }
+
+  /** Kill everything the camp puts up, at a given seconds-per-kill pace. */
+  function farm(world: World, kills: number, secondsPerKill: number) {
+    const player = world.player;
+    const events: string[] = [];
+    let musters = 0;
+    let champion = '';
+    /** How many converged at the moment it fired, not at the end of the farm. */
+    let came = 0;
+    for (let n = 0; n < kills; n++) {
+      const victim = [...world.entities.values()].find(
+        (e) => e.kind === 'mob' && !e.dead && !e.roused,
+      );
+      if (!victim) break;
+      victim.health = 1;
+      world.submit(player.id, { t: 'target', id: victim.id });
+      world.submit(player.id, { t: 'autoAttack', on: true });
+      for (let i = 0; i < 200 && !victim.dead; i++) {
+        victim.health = 1;
+        player.health = world.statsOf(player).maxHealth;
+        for (const ev of world.tick()) {
+          if (ev.t === 'muster') {
+            musters++;
+            champion = ev.name;
+            came = ev.count;
+            events.push(`kill ${n + 1}`);
+          }
+        }
+      }
+      // The gap between kills, which is the whole lever.
+      const idle = Math.round((secondsPerKill * 1000) / TICK_MS);
+      for (let i = 0; i < idle; i++) {
+        player.health = world.statsOf(player).maxHealth;
+        for (const ev of world.tick()) {
+          if (ev.t === 'muster') {
+            musters++;
+            champion = ev.name;
+            came = ev.count;
+            events.push(`waiting after ${n + 1}`);
+          }
+        }
+      }
+    }
+    world.submit(player.id, { t: 'autoAttack', on: false });
+    return { musters, champion, came, events };
+  }
+
+  it('rouses a camp you are emptying, and never one you are passing through', () => {
+    console.log('\n  how hard you have to push');
+    const rows: Array<[string, number, number]> = [];
+    for (const pace of [3, 8, 15, 25]) {
+      const world = campWorld('bog_wolf', 12);
+      levelPlayer(world, { level: 30 });
+      const out = farm(world, 12, pace);
+      rows.push([`${pace}s a kill`, out.musters, 12]);
+      console.log(
+        `    ${String(pace).padStart(2)}s between kills  ${out.musters} muster(s) in 12 kills` +
+          (out.champion ? `  — ${out.champion}` : ''),
+      );
+    }
+    // Hard farming rouses the ground. A player who is levelling — walking to
+    // the next camp, resting, picking their pulls — never sees it, and that is
+    // what makes it a decision rather than a tax on playing.
+    const fast = rows.find((r) => r[0] === '3s a kill')!;
+    const slow = rows.find((r) => r[0] === '25s a kill')!;
+    expect(fast[1], 'emptying a camp went unnoticed').toBeGreaterThan(0);
+    expect(slow[1], 'an ordinary levelling pace rouses the ground').toBe(0);
+  });
+
+  it('sends a few, not everything in the zone', () => {
+    // A wipe is not an event, it is the end of a session.
+    const world = campWorld('bog_wolf', 14);
+    levelPlayer(world, { level: 30 });
+    // Counted when it fired, not at the end: the farm goes on killing, so by
+    // the end of it the ones that came are corpses.
+    const out = farm(world, 10, 2);
+    expect(out.musters, 'nothing mustered').toBeGreaterThan(0);
+    expect(out.came).toBeGreaterThan(0);
+    expect(out.came, 'the whole camp came').toBeLessThanOrEqual(MUSTER_MAX);
+  });
+
+  it('raises one of them a rating, and never past ★4', () => {
+    const world = campWorld('bog_wolf', 12);
+    levelPlayer(world, { level: 30 });
+    farm(world, 10, 2);
+    const champion = [...world.entities.values()].find((e) => e.roused);
+    expect(champion, 'nobody stepped up').toBeDefined();
+    const def = getMob(champion!.defId!);
+    const base = getMob(baseMobId(def.starOf ?? def.id));
+    expect(def.stars).toBeGreaterThan(base.stars - 1);
+    // ★5 and ★6 mean boss and elite boss everywhere else in the codebase.
+    expect(def.stars).toBeLessThan(BOSS_STARS);
+    expect(champion!.name).toContain('Roused');
+  });
+
+  it('is worth taking, not only surviving', () => {
+    // An event that is only harder is a punishment for playing well. A roused
+    // champion carries what a creature of its new rating carries.
+    const world = campWorld('bog_wolf', 12);
+    levelPlayer(world, { level: 30 });
+    farm(world, 10, 2);
+    const champion = [...world.entities.values()].find((e) => e.roused)!;
+    const base = getMob(baseMobId(getMob(champion.defId!).starOf ?? champion.defId!));
+    const raised = getMob(champion.defId!);
+    expect(raised.xp).toBeGreaterThan(base.xp);
+    const purse = goldForKill(raised.level, raised.stars);
+    const plain = goldForKill(base.level, base.stars);
+    console.log(
+      `\n  a roused ${base.name}: ${base.xp} → ${raised.xp} xp, ` +
+        `${plain.max}g → ${purse.max}g`,
+    );
+    expect(purse.max).toBeGreaterThan(plain.max);
+  });
+
+  it('calms down if you walk away, and never while you are fighting it', () => {
+    const world = campWorld('bog_wolf', 12);
+    levelPlayer(world, { level: 30 });
+    farm(world, 10, 2);
+    const champion = [...world.entities.values()].find((e) => e.roused)!;
+
+    // Still coming: it must not calm down mid-fight, or the decision becomes a
+    // waiting game.
+    champion.aiState = 'chasing';
+    for (let i = 0; i < (ROUSED_MS / TICK_MS) * 2; i++) world.tick();
+    expect(champion.roused, 'it gave up while chasing you').toBe(true);
+
+    // Walked away from — actually away. Left standing next to it, the ordinary
+    // aggro check puts it straight back to chasing every tick, which is the
+    // right behaviour and the wrong test.
+    world.player.pos = { x: 4000, z: 4000 };
+    champion.aiState = 'idle';
+    champion.targetId = null;
+    for (let i = 0; i < ROUSED_MS / TICK_MS + 10; i++) world.tick();
+    expect(champion.roused, 'it stayed roused for ever').toBe(false);
+    expect(champion.name).not.toContain('Roused');
+  });
+
+  it('is off wherever a fight is being measured', () => {
+    // The same switch `rareSpawns` and `adventurers` have, for the same
+    // reason: a duel whose opponent is joined by three friends is measuring
+    // something else entirely.
+    expect(duelZone('bog_wolf').musters).toBe(false);
+    expect(pullZone('bog_wolf', 3).musters).toBe(false);
   });
 });

@@ -30,6 +30,9 @@ export function duelZone(mobId: string, distance = 2.5): ZoneDef {
     rareSpawns: false,
     adventurers: false,
     starVariants: false,
+    // A duel whose opponent is suddenly joined by three friends is measuring
+    // the wrong thing, and a muster promotes a creature mid-fight.
+    musters: false,
   };
 }
 
@@ -59,6 +62,9 @@ export function pullZone(mobId: string, count: number): ZoneDef {
     rareSpawns: false,
     adventurers: false,
     starVariants: false,
+    // A duel whose opponent is suddenly joined by three friends is measuring
+    // the wrong thing, and a muster promotes a creature mid-fight.
+    musters: false,
   };
 }
 
@@ -80,6 +86,9 @@ export function emptyZone(): ZoneDef {
     rareSpawns: false,
     adventurers: false,
     starVariants: false,
+    // A duel whose opponent is suddenly joined by three friends is measuring
+    // the wrong thing, and a muster promotes a creature mid-fight.
+    musters: false,
   };
 }
 
@@ -101,6 +110,9 @@ export function vendorZone(vendorId: string, distance = 2): ZoneDef {
     rareSpawns: false,
     adventurers: false,
     starVariants: false,
+    // A duel whose opponent is suddenly joined by three friends is measuring
+    // the wrong thing, and a muster promotes a creature mid-fight.
+    musters: false,
   };
 }
 

@@ -433,6 +433,21 @@ and then it is worth knowing for a hundred levels.
 
 The target frame names it and says what to do about it.
 
+## A camp that notices you are farming it
+
+Stand in one camp and empty it quickly and the place answers. The survivors
+nearby come at you at once, and one of them steps up — a rating higher, named
+for it, and carrying what a creature of that rating carries.
+
+It is caused by you and nothing else: no timer fires it, and you could always
+have chosen not to cause it. The tally fades, so an ordinary levelling pace
+never builds it and a hard push does — pace is the lever. And a roused
+creature is worth more than the one it was, because an event that is only
+harder is a punishment for playing well.
+
+Walk away and they lose interest in about a minute. Hold the ground and the
+camp is worth more than it was before you annoyed it.
+
 ## Mechanics worth knowing
 
 **Bosses telegraph, and no two ask the same thing.** A shape appears on the

@@ -57,6 +57,7 @@ input / HUD click ──> Command ──> World.submit()
 | `src/content/luxury.ts` | The one shop that is not a safety net. |
 | `src/content/discoveries.ts` | What the landmarks are hiding, and what it is worth. |
 | `src/content/traits.ts` | The one thing each creature does that a stat block cannot. |
+| `src/content/muster.ts` | What a camp does when it notices you are farming it. |
 | `src/content/adventurers.ts` | Who else is out there, and what they say. |
 | `src/content/structures.ts` | The things somebody built, and where they stand. |
 | `src/render/` | three.js, DOM, input. Nothing gameplay-authoritative. |
@@ -74,6 +75,8 @@ input / HUD click ──> Command ──> World.submit()
 | `tools/firstrun.mjs` | The opening, as a new player sees it. |
 | `tools/discover.mjs` | Walks to a landmark that holds something. |
 | `tools/wildlife.mjs` | Stands still and watches the sky. |
+| `tools/muster.mjs` | Empties a camp and photographs it answering back. |
+| `tools/questrun.mjs` | Takes the first quest on offer and reads it back. |
 
 Adding a mob, item or skill should mean editing `src/content/` only.
 
@@ -977,6 +980,14 @@ is called every time. What that buys:
   rule, against the name of the piece it would replace. When nothing differs it
   says so — silence reads as a broken tooltip.
 
+The last native `title=` left in the HUD was the one that mattered most: a
+quest **offer**. That row is the only place in the shop a player makes a
+decision, and it showed a name and a number with the job itself hidden behind a
+second's delay. It now says what the work is, why anybody wants it done and
+what it pays, and `smoke` checks the objective lines against the quest
+definition rather than against a keyword — so it cannot pass by accident on
+whichever chain the trader happens to be offering.
+
 It also caught a real bug by existing: **the open panels rebuilt their entire
 DOM every frame.** `title=` survived that because the browser re-reads the
 attribute; a hover tooltip cannot — `mouseenter` fires, the node is destroyed
@@ -1176,6 +1187,77 @@ Every one of these was measured, and every first guess was wrong:
 Both halves are shown: the target frame names the trait beside the danger word
 and its tooltip carries **the answer**, because a player told "Venomous" and
 nothing else has been given a word rather than a decision.
+
+## The two-minute scale was empty
+
+The loop has a ten-second unit — a kill — and a forty-minute unit — a level —
+and until now nothing at all in between. Every world layer runs on a much
+longer clock than that: a front slides over twenty minutes, a dragon wakes
+every half hour, the sun takes twenty-four. The scale a player actually *sits
+inside* had nothing on it, which is why a camp read the same on the first kill
+as on the fortieth.
+
+A **muster** (`content/muster.ts`) is what fills it. Empty one place quickly
+enough and the survivors nearby come at you at once, and the nearest of them is
+**roused** — a rating higher, renamed for it, healed up, and dropping what a
+creature of that rating drops. `npm test` prints how hard you have to push:
+currently a kill every three to eight seconds calls one inside twelve kills,
+and a kill every fifteen never does.
+
+Four rules, each a test:
+
+- **It is caused by the player and by nothing else.** No timer fires it. That
+  is the whole difference between an event and a spawn: you can always see why
+  it happened, and you could always have chosen not to cause it.
+- **It is local, and it is about ground rather than about a camp.** The tally
+  is per grid cell (`MUSTER_CELL`, a little wider than a camp), so the sim
+  needs no camp identity to run it and it can never rouse creatures over a hill
+  who were nowhere near. It is also why a stray in open country contributes to
+  the ground it dies on rather than to nothing at all.
+- **It cools off, and that makes pace the lever.** The tally decays rather than
+  resetting, so ordinary levelling — a kill every twenty-five seconds once
+  walking and resting are counted — never reaches the threshold, and standing
+  in one camp does. A player who moves between camps is never troubled by it,
+  which is the point: it is a decision, not a tax.
+- **It is worth taking, not only surviving.** A roused Bog Wolf pays 71 xp and
+  60 gold against the 48 and 37 it was worth a minute earlier. An event that is
+  only harder is a punishment for playing well, and players stop causing those
+  on purpose within an hour.
+
+What the numbers had to learn, again:
+
+- **A camp is eight strong, so a threshold of seven fires into an empty field.**
+  `MUSTER_AT` is 5, with `MUSTER_MIN` survivors required to answer — and an
+  emptied camp **keeps its temper** rather than spending it: the tally is not
+  reset when nobody can come, so the ground stays angry and calls the moment
+  enough of them are back on their feet.
+- **The extra rating is most of the difficulty already.** `STAR_MODIFIERS`
+  turns a ★2 into a ★3 on its own; the first pass stacked a big damage
+  multiplier on top of that and a Fenmarch muster killed a level-appropriate
+  Warrior nine times in ten. `ROUSED_DAMAGE` is 1.12.
+- **Roused wears off only while it is not fighting.** A champion that calms
+  down mid-fight because sixty seconds passed turns a decision into a waiting
+  game. Walking away is the way out; standing still is not.
+- **A muster never musters.** Already-roused creatures are excluded from both
+  the tally and the answering party, or a hard camp spirals.
+
+`ZoneDef.musters: false` switches it off, and every test arena sets it — for
+the same reason as `rareSpawns` and `adventurers`: a duel whose opponent is
+suddenly joined by three friends, and promoted a rating mid-fight, is measuring
+the wrong thing.
+
+Rares stop at ★4 and so does this: `rousedStars` clamps there, because ★5 and
+★6 mean boss and elite boss everywhere else in the codebase.
+
+### And only one corpse offers the loot key
+
+Kill four things standing together and four "press F to loot" plates land on
+top of one another, none of which can be read — which a muster produces every
+single time. The plate now offers the key only on the corpse `F` would actually
+take, and mutes the others; the gold loot mark over them already says there is
+something there, which is the whole reason it exists. `LOOT_RANGE` moved into
+one place for it, because the plate that offers a key and the key itself
+drifting apart is the worst version of this.
 
 ## Bosses must be decided by play, not stats
 

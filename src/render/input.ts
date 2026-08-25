@@ -8,7 +8,7 @@ import type { MapView } from './map.js';
 import type { GameAudio } from './audio.js';
 import type { SceneRig } from './scene.js';
 
-const LOOT_RANGE = 4.5;
+import { LOOT_RANGE } from './hud.js';
 
 /**
  * How close a creature has to be before the game selects it for you.
