@@ -2632,6 +2632,69 @@ async function main() {
     };
   });
 
+  // What a point in an attribute buys.
+  //
+  // Two of the four used to be dead weight for most of the roster, and the
+  // fix is only worth anything if a player can *see* which half of their bar
+  // answers to the points they have spent.
+  await page.keyboard.press('c');
+  await wait(400);
+  const build = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const hover = async (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return '';
+      el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX: 400, clientY: 400 }));
+      await new Promise((r) => setTimeout(r, 60));
+      const tip = document.querySelector('#tip');
+      const text = getComputedStyle(tip).display === 'none' ? '' : (tip.textContent ?? '');
+      el.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+      return text;
+    };
+
+    const rows = [...document.querySelectorAll('#character-body .stat-row')];
+    const find = (word) =>
+      rows.findIndex((r) => (r.textContent ?? '').toLowerCase().startsWith(word));
+    const at = find('strength');
+    const attr = at >= 0 ? await hover(`#character-body .stat-row:nth-of-type(${at + 1})`) : '';
+
+    // And a skill that names one, so the two halves agree.
+    const scaled = Object.values(g.allSkills()).find(
+      (sk) => sk.classId === me.classId && sk.scalesWith && !sk.taughtBy,
+    );
+    const slot = g.hud.skillForSlot(0) ? '#skill-bar .slot' : null;
+    let skill = '';
+    if (slot) {
+      const slots = [...document.querySelectorAll('#skill-bar .slot')];
+      const which = slots.find((el) => (el.textContent ?? '').includes(scaled?.name ?? '\u0000'));
+      if (which) {
+        which.dispatchEvent(
+          new MouseEvent('mouseenter', { bubbles: true, clientX: 400, clientY: 400 }),
+        );
+        await new Promise((r) => setTimeout(r, 60));
+        const tip = document.querySelector('#tip');
+        skill = getComputedStyle(tip).display === 'none' ? '' : (tip.textContent ?? '');
+        which.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+      }
+    }
+    return {
+      ok: attr.length > 0,
+      // The attribute says what it buys and which skills it is worth to.
+      saysWhatItBuys: /Damage on every swing|health a point|energy a point|crit a point/.test(attr),
+      namesTheSkills: /% power on \d+ of your skills/.test(attr),
+      // And the skill says which attribute it answers to.
+      skillNamesIt: /(Strength|Dexterity|Focus|Vitality) skill — /.test(skill),
+      skillSaysPower: /% power at your/.test(skill),
+      scaled: scaled?.name ?? null,
+      attr: attr.slice(0, 130),
+      skill: skill.slice(0, 130),
+    };
+  });
+
+  await page.keyboard.press('c');
+  await wait(250);
+
   // Tooltips.
   //
   // Sixteen skill slots and a bagful of gear, and until now not one of them
@@ -2962,6 +3025,9 @@ async function main() {
     ['only one corpse offers the loot key', muster.prompts <= 1],
     ['a skill lights up when its moment arrives', timing.ok && timing.nearlyDead > 0],
     ['and is dark the rest of the time', timing.healthy === 0],
+    ['an attribute says what it buys', build.ok && build.saysWhatItBuys],
+    ['and which of your skills it is worth to', build.namesTheSkills],
+    ['a skill says which attribute it answers to', build.skillNamesIt && build.skillSaysPower],
     ['a boss frame gives nothing away at first', kit.ok && kit.quietFirst],
     ['and names what it has actually shown you', kit.names],
     ['and what to do about it', kit.saysTheAnswer],
@@ -3117,6 +3183,7 @@ async function main() {
   console.log('reckoning:', JSON.stringify(reckoning));
   console.log('levelling:', JSON.stringify(levelling));
   console.log('kit:', JSON.stringify(kit));
+  console.log('build:', JSON.stringify(build));
   console.log('drop:', JSON.stringify(drop), '| sell-all:', JSON.stringify(sellAll));
   console.log('pulling:', JSON.stringify(pulling), '| tidy:', JSON.stringify(tidy));
   console.log('belt:', JSON.stringify(belt));

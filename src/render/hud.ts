@@ -9,6 +9,7 @@ import {
   MAX_SKILL_RANK,
   POINTS_PER_LEVEL,
   SKILL_POINTS_PER_LEVEL,
+  skillAttributePower,
   SKILL_RANK_CRIT,
   SKILL_RANK_POWER,
   xpToNext,
@@ -69,6 +70,14 @@ export const LOOT_RANGE = 4.5;
  * a minute is a recap of the whole afternoon.
  */
 const RECAP_WINDOW_MS = 8000;
+
+/** How an attribute is written when a skill names it. */
+const ATTRIBUTE_WORDS: Record<keyof Attributes, string> = {
+  strength: 'Strength',
+  dexterity: 'Dexterity',
+  focus: 'Focus',
+  vitality: 'Vitality',
+};
 /**
  * The furniture a nameplate, a floating number or a speech bubble must not be
  * drawn on top of.
@@ -1338,38 +1347,63 @@ export class Hud {
   }
 
   /** What an attribute buys, for the class actually being played. */
+  /**
+   * What a point buys, and — the half that makes it a build — which of your
+   * skills it is worth to.
+   *
+   * Two of these used to say "this buys nothing else you use", which was true
+   * and is the reason any of this changed: five points a level for a hundred
+   * levels is a lot of non-decisions.
+   */
   private attributeTip(label: string, key: keyof Attributes): TipContent {
     const player = this.world.player;
     const classId = player.classId ?? 'warrior';
     const primary = PRIMARY_ATTRIBUTE[classId];
     const lines: string[] = [];
-    let note: string | undefined;
 
     switch (key) {
       case 'vitality':
         lines.push('+8 health a point, and a little defence');
-        note = 'Nobody is ever wrong to want more of this.';
         break;
       case 'focus':
-        lines.push('+5 energy a point');
-        if (primary === 'focus') lines.push('And attack rating: this is what you hit with.');
+        lines.push('+5 energy a point, and the regen that follows it');
         break;
-      default:
-        lines.push(
-          key === 'strength'
-            ? 'Attack rating, for whoever swings with it'
-            : 'Attack rating, and critical chance',
-        );
-        if (key === 'dexterity') lines.push('+0.25% crit a point, up to half your swings');
+      case 'strength':
+        lines.push('Damage on every swing');
+        break;
+      case 'dexterity':
+        lines.push('+0.25% crit a point, up to half your swings, and a faster swing');
         break;
     }
+    if (key === primary) lines.push('Attack rating: this is what you hit with.');
 
-    if (key === primary) {
-      note = `The ${classId}'s own attribute — it is what your attack rating is made of.`;
-    } else if (key !== 'vitality' && key !== 'dexterity') {
-      note = `A ${classId} attacks with ${primary}. This buys nothing else you use.`;
-    }
-    return { title: label, sub: `${attrsOf(player, key)} now`, lines, note };
+    // The skills that draw on it, and what they are worth at what you have
+    // now. A number without the skills beside it is a stat sheet; the skills
+    // are what the player is actually choosing between.
+    const mine = skillBarFor(classId).filter((sk) => sk.scalesWith === key);
+    const power = skillAttributePower(attrsOf(player, key), player.level);
+    const rich =
+      mine.length > 0
+        ? [
+            `<b>${Math.round(power * 100)}%</b> power on ${mine.length} of your skills: ` +
+              mine.map((sk) => sk.name).join(', '),
+          ]
+        : [];
+
+    return {
+      title: label,
+      sub: `${attrsOf(player, key)} now`,
+      lines,
+      rich,
+      note:
+        mine.length > 0
+          ? power >= 1.2
+            ? 'These are the skills you have built for.'
+            : power <= 0.6
+              ? 'These are the skills you have given up.'
+              : undefined
+          : undefined,
+    };
   }
 
   /**
@@ -1516,15 +1550,16 @@ export class Hud {
     const kit = def.abilities ?? [];
     const seen = this.world.player.seenAbilities ?? [];
     const known = kit.filter((a) => seen.includes(a.id));
-    for (const ability of known) {
-      lines.push(`<b>${ability.name}</b> — ${ABILITY_ANSWERS[ability.kind]}`);
-    }
+    const rich = known.map(
+      (ability) => `<b>${ability.name}</b> — ${ABILITY_ANSWERS[ability.kind]}`,
+    );
     const unseen = kit.length - known.length;
 
     return {
       title: target.name,
       sub: def.stars >= BOSS_STARS ? 'boss' : 'creature',
       lines,
+      rich,
       // The answer is the half that makes a trait a mechanic rather than a
       // modifier: a player who is told "Venomous" and nothing else has been
       // given a word, not a decision.
@@ -1701,6 +1736,18 @@ export class Hud {
     if (skill.range > 4) lines.push(`${Math.round(skill.range)}m range`);
     if (skill.durationMs) lines.push(`Lasts ${Math.round(skill.durationMs / 1000)}s`);
     if (rank > 0) lines.push(`Rank ${rank} — ${Math.round((skillRankPower(rank) - 1) * 100)}% stronger`);
+    // Which attribute this one draws on, and what it is worth at what you have
+    // spent. Without this the build is invisible: a player has no way to know
+    // that half their bar answers to the points they never bought.
+    const rich: string[] = [];
+    if (skill.scalesWith) {
+      const power = skillAttributePower(attrsOf(player, skill.scalesWith), player.level);
+      const cls = power >= 1.05 ? 'tip-up' : power <= 0.95 ? 'tip-down' : '';
+      rich.push(
+        `${ATTRIBUTE_WORDS[skill.scalesWith]} skill — ` +
+          `<span class="${cls}">${Math.round(power * 100)}% power</span> at your ${skill.scalesWith}`,
+      );
+    }
     if (skill.when) {
       const live = this.world.conditionMet(player, skill, player.targetId ?? null);
       lines.push(
@@ -1727,6 +1774,7 @@ export class Hud {
       title: skill.name,
       sub: skill.zoneId ? `Taught in ${ZONES[skill.zoneId]?.name ?? skill.zoneId}` : `Level ${skill.reqLevel}`,
       lines,
+      rich,
       desc: skill.description,
       note,
       warn,
@@ -3021,6 +3069,17 @@ interface TipContent {
   desc?: string;
   /** Comparison against what you already have. Rendered under a rule. */
   compare?: string[];
+  /**
+   * Lines that are already marked up, rendered after `lines` and *not*
+   * escaped.
+   *
+   * `lines` are escaped on the way out, which is right — most of them are
+   * names of things — and it means a caller that wants a word in green has to
+   * say so somewhere the escape does not reach. The first attempt at this put
+   * the markup in `lines` and shipped a tooltip reading
+   * `<b>Hammering Blow</b> — get out of the circle`.
+   */
+  rich?: string[];
   /** Something useful. Gold. */
   note?: string;
   /** Something in the way. Red. */
@@ -3048,6 +3107,7 @@ function renderTip(c: TipContent): string {
   const parts = [`<div class="tip-title ${c.titleClass ?? ''}">${esc(c.title)}</div>`];
   if (c.sub) parts.push(`<div class="tip-sub">${esc(c.sub)}</div>`);
   for (const line of c.lines) parts.push(`<div class="tip-line">${esc(line)}</div>`);
+  for (const line of c.rich ?? []) parts.push(`<div class="tip-line">${line}</div>`);
   if (c.desc) parts.push(`<div class="tip-desc">${esc(c.desc)}</div>`);
   if (c.compare?.length) {
     parts.push('<div class="tip-rule"></div>');

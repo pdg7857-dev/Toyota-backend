@@ -274,6 +274,20 @@ export interface SkillDef {
   /** Zone that teaches it. Undefined for the level-granted starting kit. */
   zoneId?: string;
   /**
+   * The attribute this skill draws on.
+   *
+   * What turns "which attribute" into a build rather than a formality: a Rogue
+   * has skills on Dexterity *and* on Strength, so the points they spend decide
+   * which half of their bar is worth pressing. Casters name Focus throughout —
+   * a Druid is a Druid — and their choice is how much of it they trade for
+   * Vitality.
+   *
+   * Undefined means the skill does not scale at all. An interrupt is an
+   * interrupt at any Strength, and pretending otherwise would make one
+   * attribute quietly better at everything.
+   */
+  scalesWith?: keyof Attributes;
+  /**
    * What makes this one worth timing. See `SkillCondition`.
    *
    * One per class, on the skill whose *name* already promises it — a skill

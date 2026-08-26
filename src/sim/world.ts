@@ -31,6 +31,7 @@ import {
   SKILL_CRIT_MULTIPLIER,
   SKILL_POINTS_PER_LEVEL,
   skillCritChance,
+  skillAttributePower,
   skillRankPower,
   MAX_LEVEL,
   PRIMARY_ATTRIBUTE,
@@ -3285,7 +3286,15 @@ export class World {
     // on resolution would reward pressing it early and hoping, which is the
     // opposite of the decision it exists to create.
     const timed = this.conditionMet(source, skill, targetId) ? conditionPower(skill) : 1;
-    const power = stats.skillPower * skillRankPower(rank) * timed;
+    // And what the caster has *built*. A skill draws on the attribute it names
+    // — see `SkillDef.scalesWith` — so a Rogue who bought Strength gets more
+    // out of Rupture and less out of Backstab, and both are real ways to play
+    // one. A skill that names nothing is unchanged at any attribute.
+    const built = skillAttributePower(
+      skill.scalesWith ? (source.attributes?.[skill.scalesWith] ?? 0) : undefined,
+      source.level,
+    );
+    const power = stats.skillPower * skillRankPower(rank) * timed * built;
     if (timed !== 1) {
       this.events.push({ t: 'wellTimed', sourceId: source.id, skillId: skill.id });
     }

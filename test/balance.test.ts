@@ -17,7 +17,11 @@ import {
   baseMobXp,
   deriveMobStats,
   goldForKill,
+  POINTS_PER_LEVEL,
+  expectedPrimary,
   roamRadiusFor,
+  skillAttributePower,
+  strengthDamage,
   xpForKill,
   xpToNext,
 } from '../src/sim/formulas.js';
@@ -49,7 +53,7 @@ import {
   dragonWeaponId,
 } from '../src/content/dragons.js';
 import { curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
-import { SKILLS, getSkill } from '../src/content/skills.js';
+import { CLASS_ATTRIBUTES, SKILLS, getSkill } from '../src/content/skills.js';
 import { TICK_MS } from '../src/sim/formulas.js';
 import { MUSTER_MAX, ROUSED_MS } from '../src/content/muster.js';
 import {
@@ -59,7 +63,14 @@ import {
   traitFor,
 } from '../src/content/traits.js';
 import { consumableDropFor } from '../src/content/consumables.js';
-import { FENMARCH, PLAYABLE_CLASSES, ZONES, roadDistance, roadPoints } from '../src/content/zone.js';
+import {
+  CLASSES,
+  FENMARCH,
+  PLAYABLE_CLASSES,
+  ZONES,
+  roadDistance,
+  roadPoints,
+} from '../src/content/zone.js';
 import { getTheme, terrainHeight } from '../src/content/terrain.js';
 import { MOUNTS } from '../src/content/mounts.js';
 import { crossingSeconds, hoursToCap, type PaceInput } from './pace.js';
@@ -2544,6 +2555,92 @@ describe('every creature does something, not just bosses', () => {
       expect(t.answer.length, `${t.id} says what it does but not what to do`).toBeGreaterThan(12);
       expect(t.line.length).toBeGreaterThan(12);
     }
+  });
+});
+
+describe('every attribute is worth spending on', () => {
+  /**
+   * Two of the four used to be dead weight for most of the roster. Strength
+   * did nothing at all unless you were a Warrior, and then only through attack
+   * rating; Focus bought energy nobody was short of. Five points a level for a
+   * hundred levels is a lot of non-decisions.
+   *
+   * The printed table is the point, as it is for the boss kits: "this class
+   * has one build" is invisible to any assertion made one attribute at a time.
+   */
+  it('gives every class two builds worth having, and neither one for free', () => {
+    const rows: string[] = [];
+    const level = 60;
+    const points = (level - 1) * POINTS_PER_LEVEL;
+
+    for (const cls of PLAYABLE_CLASSES) {
+      const pair = CLASS_ATTRIBUTES[cls.id];
+      const bar = skillBarFor(cls.id);
+      const onPower = bar.filter((sk) => sk.scalesWith === pair.power);
+      const onGuard = bar.filter((sk) => sk.scalesWith === pair.guard);
+
+      // What each build is worth to each half of the bar, at the same total
+      // spend. The pair of numbers *crossing over* is the whole feature.
+      const committed = CLASSES[cls.id].baseAttributes[pair.power] + points * 0.6;
+      const split = CLASSES[cls.id].baseAttributes[pair.guard] + points * 0.6;
+      const powerIfCommitted = skillAttributePower(committed, level);
+      const powerIfSplit = skillAttributePower(
+        CLASSES[cls.id].baseAttributes[pair.power] + points * 0.15,
+        level,
+      );
+      const guardIfCommitted = skillAttributePower(
+        CLASSES[cls.id].baseAttributes[pair.guard] + points * 0.15,
+        level,
+      );
+      const guardIfSplit = skillAttributePower(split, level);
+
+      rows.push(
+        `  ${cls.name.padEnd(8)} ${pair.power.padEnd(9)}(${String(onPower.length).padStart(2)} skills) ` +
+          `${Math.round(powerIfCommitted * 100)}% → ${Math.round(powerIfSplit * 100)}%   ` +
+          `${pair.guard.padEnd(9)}(${String(onGuard.length).padStart(2)} skills) ` +
+          `${Math.round(guardIfCommitted * 100)}% → ${Math.round(guardIfSplit * 100)}%`,
+      );
+
+      // Every skill that does something names an attribute. A bar where half
+      // the entries ignore the build is a build that only half exists.
+      for (const sk of bar) {
+        if (sk.kind === 'interrupt') continue;
+        expect(sk.scalesWith, `${cls.id}'s ${sk.name} answers to nothing`).toBeDefined();
+      }
+
+      // Committing has to be worth more than not committing, or there is no
+      // decision — and the other half has to still be worth pressing, or the
+      // decision is a trap.
+      expect(powerIfCommitted, `${cls.id} gains nothing by committing`).toBeGreaterThan(
+        powerIfSplit + 0.1,
+      );
+      expect(guardIfCommitted, `${cls.id}'s off-build skills are dead`).toBeGreaterThan(0.4);
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(
+      '\nWHAT A BUILD IS WORTH (level 60, same points either way)\n' + rows.join('\n'),
+    );
+  });
+
+  it('leaves a committed build exactly where it was before any of this', () => {
+    // The reference the whole thing is measured against. Attributes were meant
+    // to give a player a decision, not a power budget: the first pass simply
+    // added to everything, and every boss in the game became winnable by
+    // standing still in the telegraph.
+    for (const level of [10, 40, 80]) {
+      expect(skillAttributePower(expectedPrimary(level), level)).toBeCloseTo(1, 2);
+    }
+  });
+
+  it('makes Strength worth something to a class that never attacks with it', () => {
+    // The complaint this started from. A Mage's Strength bought precisely
+    // nothing; it buys a bigger swing now, which is small on purpose — big
+    // enough to be a reason, small enough not to be a rebalance.
+    const none = strengthDamage(0);
+    const some = strengthDamage(200);
+    expect(some).toBeGreaterThan(none * 1.05);
+    expect(some).toBeLessThan(none * 1.15);
   });
 });
 

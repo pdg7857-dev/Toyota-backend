@@ -239,6 +239,19 @@ two and you will almost certainly die.
 level keeps climbing: about 6 kills for your first level, 147 by the twenties.
 Grey mobs give almost nothing, so pushing south is the only way forward.
 
+## Attributes are a build
+
+Every attribute buys something for everybody: Strength puts damage on every
+swing, Dexterity buys crits and a faster one, Focus buys energy and the regen
+that follows it, Vitality buys health and defence.
+
+And each skill draws on the attribute it names. A Rogue's Backstab answers to
+Dexterity and their Rupture to Strength, so what you spend decides which half
+of your bar is worth pressing. Committing to one is not stronger than
+committing to the other — it is a different Rogue. The character sheet tells
+you which skills an attribute is worth to, and each skill says what it is worth
+at what you have spent.
+
 ## Classes
 
 Pick one on first launch. Add `?fresh` to the URL to re-choose, or

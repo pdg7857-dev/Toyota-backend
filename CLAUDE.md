@@ -409,6 +409,61 @@ reach 25, rising from ~6 kills for the first level to ~150+ near the cap. If
 someone asks to "make levelling faster", change `XP_CURVE_BASE` — do not
 quietly flatten the exponent, the ramp is the design.
 
+## What a point in an attribute buys
+
+Two of the four used to be dead weight for most of the roster. **Strength did
+nothing at all** unless you were a Warrior, and then only through attack
+rating; **Focus bought energy** nobody was short of. Five points a level for a
+hundred levels is a lot of non-decisions, and the character sheet said so out
+loud — the old tooltip for a Priest's Strength read "this buys nothing else
+you use".
+
+Each now answers a different question, which is the rule the boss kits, the
+creature traits and the timed skills all already run under:
+
+| | Everyone gets | The question it answers |
+|---|---|---|
+| **Strength** | damage on every swing | how hard does a hit land |
+| **Dexterity** | crit chance and a faster swing | how often, and how many are big |
+| **Focus** | energy, and the regen that follows it | how many skills can I press |
+| **Vitality** | health and defence | how long do I last |
+
+`strengthDamage` is deliberately small — a multiplier on the weapon rather than
+a flat addition, because a flat term is worth three times as much to whoever
+swings fastest and would make one attribute a class choice instead of a build
+one.
+
+### And which half of your bar it is worth to
+
+The part that makes it a build rather than a stat sheet. **A skill scales with
+the attribute it names** (`SkillDef.scalesWith`), and each martial class has
+skills on two: a Rogue's Backstab answers to Dexterity and their Rupture to
+Strength, so the points they spend decide which half of the bar is worth
+pressing. Neither is wrong, which is what makes it a decision. The casters name
+Focus throughout — a Druid is a Druid — and their choice is how much Focus they
+give up for Vitality.
+
+**It is normalised, not added.** `skillAttributePower` is a ratio against
+`expectedPrimary`, the value a character who committed to one attribute has at
+that level, so a committed build lands at exactly 1.0 and is *precisely as
+strong as it was before any of this existed*. That is not a detail: the first
+pass simply multiplied everything, gave a Warrior +45% damage, and closed the
+gap between playing Cadfael well and standing still in his telegraph from
+sixty points to four. Attributes were meant to give a player a decision, not a
+power budget.
+
+The floor is 0.45 and the ceiling 1.35. A skill you have given up is worth
+pressing in a pinch; a skill you have built for is not so far ahead that the
+other half of the bar is decoration. An interrupt names nothing at all — an
+interrupt is an interrupt at any Strength, and pretending otherwise would make
+one attribute quietly better at everything.
+
+`npm test` prints what each build is worth to each half of each class's bar,
+because "this class has one build" is invisible to any assertion made one
+attribute at a time. The character sheet names the skills an attribute is worth
+to, and each skill names the attribute it answers to and what it is worth at
+what you have spent — a build nobody can see is a build nobody makes.
+
 ## Five classes, one formula
 
 All five are playable: Warrior, Priest, Ranger, Rogue, Mage.

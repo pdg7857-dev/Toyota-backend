@@ -1,4 +1,4 @@
-import type { ClassId, SkillDef } from '../sim/types.js';
+import type { Attributes, ClassId, SkillDef } from '../sim/types.js';
 
 /**
  * Skill registry.
@@ -18,6 +18,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'strike',
     name: 'Strike',
     classId: 'warrior',
+    scalesWith: 'strength',
     reqLevel: 1,
     energyCost: 8,
     cooldownMs: 4000,
@@ -35,6 +36,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'rend',
     name: 'Rend',
     classId: 'warrior',
+    scalesWith: 'strength',
     reqLevel: 2,
     energyCost: 12,
     cooldownMs: 9000,
@@ -52,6 +54,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'rally',
     name: 'Rally',
     classId: 'warrior',
+    scalesWith: 'vitality',
     reqLevel: 4,
     energyCost: 20,
     cooldownMs: 22000,
@@ -66,6 +69,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'bulwark',
     name: 'Bulwark',
     classId: 'warrior',
+    scalesWith: 'vitality',
     reqLevel: 6,
     energyCost: 18,
     cooldownMs: 30000,
@@ -82,6 +86,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'sunder',
     name: 'Sunder',
     classId: 'warrior',
+    scalesWith: 'vitality',
     reqLevel: 9,
     energyCost: 25,
     cooldownMs: 14000,
@@ -114,6 +119,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'onslaught',
     name: 'Onslaught',
     classId: 'warrior',
+    scalesWith: 'strength',
     reqLevel: 15,
     energyCost: 34,
     cooldownMs: 26000,
@@ -136,6 +142,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'smite',
     name: 'Smite',
     classId: 'priest',
+    scalesWith: 'focus',
     reqLevel: 1,
     energyCost: 10,
     cooldownMs: 4000,
@@ -153,6 +160,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'mend_wounds',
     name: 'Mend Wounds',
     classId: 'priest',
+    scalesWith: 'focus',
     reqLevel: 3,
     energyCost: 22,
     cooldownMs: 13000,
@@ -171,6 +179,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'searing_word',
     name: 'Searing Word',
     classId: 'priest',
+    scalesWith: 'focus',
     reqLevel: 5,
     energyCost: 16,
     cooldownMs: 10000,
@@ -203,6 +212,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'spirit_shield',
     name: 'Spirit Shield',
     classId: 'priest',
+    scalesWith: 'focus',
     reqLevel: 10,
     energyCost: 24,
     cooldownMs: 28000,
@@ -219,6 +229,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'judgement',
     name: 'Judgement',
     classId: 'priest',
+    scalesWith: 'focus',
     reqLevel: 15,
     energyCost: 38,
     cooldownMs: 26000,
@@ -238,6 +249,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'quick_shot',
     name: 'Quick Shot',
     classId: 'ranger',
+    scalesWith: 'dexterity',
     reqLevel: 1,
     energyCost: 9,
     cooldownMs: 4000,
@@ -255,6 +267,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'hunters_mark',
     name: "Hunter's Mark",
     classId: 'ranger',
+    scalesWith: 'dexterity',
     reqLevel: 3,
     energyCost: 13,
     cooldownMs: 9000,
@@ -272,6 +285,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'steady_aim',
     name: 'Steady Aim',
     classId: 'ranger',
+    scalesWith: 'strength',
     reqLevel: 5,
     energyCost: 20,
     cooldownMs: 28000,
@@ -303,6 +317,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'field_dressing',
     name: 'Field Dressing',
     classId: 'ranger',
+    scalesWith: 'strength',
     reqLevel: 11,
     energyCost: 22,
     cooldownMs: 20000,
@@ -317,6 +332,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'volley',
     name: 'Volley',
     classId: 'ranger',
+    scalesWith: 'strength',
     reqLevel: 15,
     energyCost: 36,
     cooldownMs: 26000,
@@ -339,6 +355,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'backstab',
     name: 'Backstab',
     classId: 'rogue',
+    scalesWith: 'dexterity',
     reqLevel: 1,
     energyCost: 9,
     cooldownMs: 4000,
@@ -356,6 +373,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'rupture',
     name: 'Rupture',
     classId: 'rogue',
+    scalesWith: 'strength',
     reqLevel: 2,
     energyCost: 12,
     cooldownMs: 9000,
@@ -373,6 +391,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'evade',
     name: 'Evade',
     classId: 'rogue',
+    scalesWith: 'dexterity',
     reqLevel: 5,
     energyCost: 18,
     cooldownMs: 22000,
@@ -404,6 +423,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'adrenaline',
     name: 'Adrenaline',
     classId: 'rogue',
+    scalesWith: 'strength',
     reqLevel: 11,
     energyCost: 26,
     cooldownMs: 34000,
@@ -420,6 +440,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'assassinate',
     name: 'Assassinate',
     classId: 'rogue',
+    scalesWith: 'dexterity',
     reqLevel: 15,
     energyCost: 34,
     cooldownMs: 26000,
@@ -443,6 +464,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'frostbolt',
     name: 'Frostbolt',
     classId: 'mage',
+    scalesWith: 'focus',
     reqLevel: 1,
     energyCost: 11,
     cooldownMs: 4000,
@@ -460,6 +482,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'ember',
     name: 'Ember',
     classId: 'mage',
+    scalesWith: 'focus',
     reqLevel: 3,
     energyCost: 15,
     cooldownMs: 10000,
@@ -492,6 +515,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'mana_shield',
     name: 'Mana Shield',
     classId: 'mage',
+    scalesWith: 'focus',
     reqLevel: 9,
     energyCost: 26,
     cooldownMs: 26000,
@@ -508,6 +532,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'arcane_surge',
     name: 'Arcane Surge',
     classId: 'mage',
+    scalesWith: 'focus',
     reqLevel: 12,
     energyCost: 28,
     cooldownMs: 32000,
@@ -524,6 +549,7 @@ export const SKILLS: Record<string, SkillDef> = {
     id: 'meteor',
     name: 'Meteor',
     classId: 'mage',
+    scalesWith: 'focus',
     reqLevel: 15,
     energyCost: 42,
     cooldownMs: 28000,
@@ -589,6 +615,52 @@ const TAUGHT_TIERS: TaughtTier[] = [
   { zoneId: 'caer_dubh', level: 86, quality: 'rare', role: 'damage' },
   { zoneId: 'caer_dubh', level: 100, quality: 'epic', role: 'heavy' },
 ];
+
+/**
+ * The two attributes a class's bar is written across.
+ *
+ * `power` is what its offensive skills draw on and `guard` is what its
+ * defensive ones do — except where a skill deliberately crosses over, which is
+ * the whole point. A Rogue's Rupture is a Strength skill on a Dexterity class,
+ * so a Rogue who buys Strength has a bar worth pressing rather than a build
+ * that is simply worse.
+ *
+ * The casters name Focus for both. A Druid is a Druid, and their decision is
+ * how much Focus they give up for Vitality rather than which half of the bar
+ * they use.
+ */
+export const CLASS_ATTRIBUTES: Record<ClassId, { power: keyof Attributes; guard: keyof Attributes }> = {
+  warrior: { power: 'strength', guard: 'vitality' },
+  rogue: { power: 'dexterity', guard: 'strength' },
+  ranger: { power: 'dexterity', guard: 'strength' },
+  mage: { power: 'focus', guard: 'focus' },
+  priest: { power: 'focus', guard: 'focus' },
+};
+
+/**
+ * Which attribute a taught skill draws on.
+ *
+ * Damage and dots go on the class's power attribute, heals and buffs on its
+ * guard — and every third damage skill crosses over, so the guard build is not
+ * left with nothing to press. Interrupts name nothing: an interrupt is an
+ * interrupt at any Strength.
+ */
+function taughtScaling(
+  classId: ClassId,
+  role: TaughtTier['role'],
+  index: number,
+): keyof Attributes | undefined {
+  const pair = CLASS_ATTRIBUTES[classId];
+  if (role === 'interrupt') return undefined;
+  if (role === 'buff-defense' || role === 'heal') return pair.guard;
+  // Exactly one crossover, and it is the first dot: enough that the guard
+  // build has something to press in a fight, not so much that the power
+  // attribute stops being the one the class is built around. The first pass
+  // sent the capstone and the damage buff across too and left a Warrior with
+  // more Vitality skills than Strength ones.
+  if (index === 2) return pair.guard;
+  return pair.power;
+}
 
 /** How each class delivers a skill: reach, damage school, and its buff floor. */
 const CLASS_FEEL: Record<
@@ -676,6 +748,7 @@ function buildTaughtSkills(): Record<string, SkillDef> {
         reqLevel: level,
         zoneId: tier.zoneId,
         taughtBy: tomeIdFor(id),
+        scalesWith: taughtScaling(classId, tier.role, i),
       };
 
       switch (tier.role) {

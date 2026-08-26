@@ -8,6 +8,7 @@ import {
   SKILL_CRIT_MULTIPLIER,
   SKILL_POINTS_PER_LEVEL,
   STAR_LOOT_MULTIPLIER,
+  STRENGTH_DAMAGE_MAX,
   skillRankPower,
   xpForKill,
   TICK_MS,
@@ -648,6 +649,7 @@ describe('loot and inventory', () => {
     const world = new World({ seed: 2, zone: emptyZone(), classId: 'warrior' });
     const player = world.player;
     expect(player.equipment?.weapon).toBe('rusted_blade');
+    const before = world.statsOf(player).damageMin;
 
     world.addItem(player, { itemId: 'ironbark_cudgel', qty: 1 });
     world.submit(player.id, { t: 'equip', itemId: 'ironbark_cudgel' });
@@ -655,7 +657,15 @@ describe('loot and inventory', () => {
 
     expect(player.equipment?.weapon).toBe('ironbark_cudgel');
     expect(player.inventory?.some((s) => s.itemId === 'rusted_blade')).toBe(true);
-    expect(world.statsOf(player).damageMin).toBe(11);
+    // Against the weapon rather than against a number typed in once. Strength
+    // multiplies weapon damage now — and the cudgel carries Strength of its
+    // own — so a literal here is a test of a Warrior's starting attributes and
+    // not of equipping anything.
+    const after = world.statsOf(player).damageMin;
+    const base = getItem('ironbark_cudgel').damageMin!;
+    expect(after).toBeGreaterThan(before);
+    expect(after).toBeGreaterThanOrEqual(base);
+    expect(after).toBeLessThanOrEqual(base * (1 + STRENGTH_DAMAGE_MAX));
   });
 
   it('stacks stackable items and keeps gear unstacked', () => {

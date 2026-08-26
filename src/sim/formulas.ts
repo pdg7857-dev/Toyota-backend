@@ -441,6 +441,95 @@ export function addAttributes(a: Attributes, b: Partial<Attributes>): Attributes
  * stays identical for every class — only the input attribute changes — so a
  * Priest and a Warrior are balanced against the same formula.
  */
+/**
+ * What each attribute is worth to *anybody*, whatever they play.
+ *
+ * Before this, two of the four were dead weight for most of the roster:
+ * Strength did nothing at all unless you were a Warrior (and then only through
+ * attack rating), and Focus bought energy nobody was short of. A point you
+ * cannot feel is not a decision, and five points a level for a hundred levels
+ * is a lot of non-decisions.
+ *
+ * Each now answers a different question, which is the same rule the boss kits,
+ * the creature traits and the timed skills all run under:
+ *
+ * | | Everyone gets | The question it answers |
+ * |---|---|---|
+ * | **Strength** | damage on every swing | how hard does a hit land |
+ * | **Dexterity** | crit chance and swing speed | how often, and how many are big |
+ * | **Focus** | energy and the regen that follows it | how many skills can I press |
+ * | **Vitality** | health and defence | how long do I last |
+ *
+ * On top of that, a skill scales with the attribute it *names* — see
+ * `SkillDef.scalesWith`. That is what turns "which attribute" into a build
+ * rather than a formality: a Rogue who buys Strength gets more out of Rupture
+ * and less out of Backstab, and both are real ways to play one.
+ *
+ * Soft-capped rather than linear. A linear term either does nothing at level 5
+ * or runs away by level 90, and this game runs to 100.
+ */
+export const STRENGTH_DAMAGE_MAX = 0.15;
+export const STRENGTH_DAMAGE_SOFT = 380;
+
+/** A soft-capped share, 0 at nothing and approaching `max` for ever. */
+function softly(value: number, max: number, soft: number): number {
+  return max * (Math.max(0, value) / (Math.max(0, value) + soft));
+}
+
+/**
+ * Weapon damage multiplier from Strength. Everyone swings something.
+ *
+ * Deliberately small, and a multiplier rather than a flat addition. A flat
+ * term is worth three times as much to whoever swings fastest, which would
+ * make one attribute a class choice instead of a build one; and anything
+ * larger than this stops being a benefit and starts being a rebalance — the
+ * first attempt gave +30% and closed the gap between playing a boss well and
+ * playing it badly from sixty points to four.
+ */
+export function strengthDamage(strength: number): number {
+  return 1 + softly(strength, STRENGTH_DAMAGE_MAX, STRENGTH_DAMAGE_SOFT);
+}
+
+/**
+ * What a character who committed to one attribute has at this level.
+ *
+ * The reference the skill scaling is measured against, so that **a build that
+ * commits is exactly as strong as it was before any of this existed**. The
+ * attributes were meant to give a player a decision, not a power budget: the
+ * first pass simply added to everything and every boss in the game became
+ * winnable by standing still.
+ */
+export function expectedPrimary(level: number): number {
+  return 8 + POINTS_PER_LEVEL * 0.6 * (level - 1);
+}
+
+/** How far a skill's attribute can carry it, either way. */
+export const SKILL_ATTRIBUTE_FLOOR = 0.45;
+export const SKILL_ATTRIBUTE_CEILING = 1.35;
+
+/**
+ * What a skill gets from the attribute it names.
+ *
+ * A ratio against `expectedPrimary`, so a skill on the attribute a class is
+ * built around lands at exactly 1 for a player who built it that way, and the
+ * decision is which *other* skills they are willing to leave at the floor.
+ * A Rogue who never buys Strength keeps Backstab at full and carries Rupture
+ * at 45%; a Rogue who splits has both in the middle. Neither is wrong, which
+ * is what makes it a build.
+ *
+ * Returns 1 for a skill that names nothing — an interrupt is an interrupt at
+ * any Strength, and pretending otherwise would make one attribute quietly
+ * better at everything.
+ */
+export function skillAttributePower(value: number | undefined, level: number): number {
+  if (value === undefined) return 1;
+  const ratio = Math.max(0, value) / Math.max(1, expectedPrimary(level));
+  return Math.max(
+    SKILL_ATTRIBUTE_FLOOR,
+    Math.min(SKILL_ATTRIBUTE_CEILING, Math.pow(ratio, 0.4)),
+  );
+}
+
 export const PRIMARY_ATTRIBUTE: Record<ClassId, keyof Attributes> = {
   warrior: 'strength',
   priest: 'focus',
@@ -588,8 +677,12 @@ export function deriveStats(input: DeriveInput): DerivedStats {
     // balance suite caught within a run.
     critChance: Math.min(0.6, Math.min(0.5, 0.03 + a.dexterity * 0.0025) + affix.crit),
     swingMs: Math.max(600, Math.round(weapon.swingMs * Math.max(0.75, hasteFactor))),
-    damageMin: weapon.damageMin + affix.damage,
-    damageMax: weapon.damageMax + affix.damage,
+    // Strength is a multiplier on the weapon rather than a flat addition, so a
+    // greatsword gains what a dagger gains as a share — a flat term is worth
+    // three times as much to whoever swings fastest, which would make one
+    // attribute a class choice instead of a build one.
+    damageMin: (weapon.damageMin + affix.damage) * strengthDamage(a.strength),
+    damageMax: (weapon.damageMax + affix.damage) * strengthDamage(a.strength),
     damageType: weapon.damageType,
     attackRange: weapon.attackRange,
     moveSpeed: BASE_MOVE_SPEED + affix.moveSpeed,
