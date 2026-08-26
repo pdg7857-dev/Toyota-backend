@@ -295,6 +295,9 @@ const wording = await page.evaluate(() => {
         prompts: plates.filter((t) => /to loot/.test(t)),
         beltKeys: belt,
         tracker,
+        // The log carries the same opening instruction the tracker does, and
+        // it was still saying "press T" long after the tracker had stopped.
+        log: [...document.querySelectorAll('#log .log-line')].map((n) => n.textContent ?? ''),
         anyPressKey: plates.some((t) => /press [A-Z]\b/.test(t)),
         plates: plates.slice(0, 6),
         corpse: { name: corpse.name, dead: corpse.dead, loot: (corpse.corpseLoot ?? []).length },
@@ -305,6 +308,10 @@ const wording = await page.evaluate(() => {
 check('no nameplate names a key', !wording.anyPressKey);
 check('the loot prompt says tap', wording.prompts.some((t) => /tap to loot/.test(t)));
 check('the belt shows no hotkey letters', wording.beltKeys === 0);
+check(
+  'and nothing in the log names one either',
+  !wording.log.some((t) => /press [A-Z]\b|Click it/.test(t)),
+);
 
 
 // --- the pad reaches everything ------------------------------------------

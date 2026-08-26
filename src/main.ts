@@ -135,7 +135,12 @@ async function boot(): Promise<void> {
   // most patronising line in the game to read after eight hours of play.
   if (!restored) {
     hud.log(`You wake at the standing stones on the edge of ${world.zone.name}.`, 'log-good');
-    hud.log('There is something grazing down the road. Click it, then press T.', 'log-loot');
+    hud.log(
+      onTouch
+        ? 'There is something grazing down the road. Tap it, then Attack.'
+        : 'There is something grazing down the road. Click it, then press T.',
+      'log-loot',
+    );
   } else {
     hud.log(`Back in ${world.zone.name}.`, 'log-good');
   }
