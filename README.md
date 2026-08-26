@@ -50,6 +50,16 @@ Add `?fresh` to the URL to discard your save and start over.
 
 Progress autosaves to `localStorage` every 10 seconds.
 
+## Somebody is watching
+
+Four other adventurers work each zone, and they now have opinions about you: a
+boss you put down, a named creature you found, a front you turned, a dragon, and
+the piece you are wearing. A dragon and a banner are public — the whole zone
+hears. Everything else needs somebody near enough to have seen it, and all of it
+goes through a long floor, because the twentieth compliment is worse than none.
+
+You can put your own name to it on the first screen. It is optional.
+
 ## Nothing here is irreversible
 
 Five attribute points a level and one skill point, for a hundred levels — and
@@ -316,12 +326,12 @@ at what you have spent.
 ## Classes
 
 Pick one on first launch. Add `?fresh` to the URL to re-choose, or
-`?class=priest` to skip the screen.
+`?class=druid` to skip the screen.
 
 | Class | Scales off | Plays like |
 |---|---|---|
 | **Warrior** | Strength | Melee, durable, steady damage |
-| **Priest** | Focus | Ranged, sustains through damage, best interrupt |
+| **Druid** | Focus | Ranged, sustains through damage, best interrupt |
 | **Ranger** | Dexterity | Longest reach in the game, steady pressure |
 | **Rogue** | Dexterity | Fast blades, burst, strong evasion |
 | **Mage** | Focus | Heaviest damage, least health |
@@ -329,7 +339,7 @@ Pick one on first launch. Add `?fresh` to the URL to re-choose, or
 Every class gets an interrupt and a way to survive a spike. Weapon ladders are
 held in DPS parity tier for tier, so the differences are in *feel*, not power.
 
-Weapons are class-locked — a Priest cannot swing a greatsword — but armour and
+Weapons are class-locked — a Druid cannot swing a greatsword — but armour and
 rings are shared. **Each boss drops a guaranteed epic weapon matched to whoever
 kills it**, so the reward is never something you can only vendor.
 
@@ -512,7 +522,7 @@ the slot lights up when that moment arrives.
 | **Rogue** — Assassinate | On something that has not seen you. Open with it. |
 | **Mage** — Meteor | On something already burning. Ember first. |
 | **Ranger** — Volley | While you are barely scratched. Keep your distance. |
-| **Priest** — Mend Wounds | When you are nearly gone. Do not top yourself off. |
+| **Druid** — Mend Wounds | When you are nearly gone. Do not top yourself off. |
 
 ## Every creature fights like itself
 

@@ -477,7 +477,7 @@ Two of the four used to be dead weight for most of the roster. **Strength did
 nothing at all** unless you were a Warrior, and then only through attack
 rating; **Focus bought energy** nobody was short of. Five points a level for a
 hundred levels is a lot of non-decisions, and the character sheet said so out
-loud — the old tooltip for a Priest's Strength read "this buys nothing else
+loud — the old tooltip for a Druid's Strength read "this buys nothing else
 you use".
 
 Each now answers a different question, which is the rule the boss kits, the
@@ -563,7 +563,7 @@ runs the identical formula, so they are balanced against the same numbers rather
 than five hand-tuned systems drifting apart.
 
 Weapons are class-locked via `ItemDef.classes`; armour and rings are shared.
-Warrior and Priest ladders are hand-written and act as the **reference**; the
+Warrior and Druid ladders are hand-written and act as the **reference**; the
 other three are generated in `items.ts` from a shared per-tier DPS budget, so a
 new class cannot quietly end up ahead. Only the *feel* differs — a Rogue swings
 fast for little, a Ranger slowly from range. A test prints the parity table and
@@ -728,7 +728,7 @@ accident while levelling past — a test prints the expected wait per rare and
 fails if it leaves that band.
 
 **Every rare is named for what it carries.** One epithet names the creature and
-its drop: `Mirefang the Bog Wolf` carries the `Mirefang Blade`, and a Priest
+its drop: `Mirefang the Bog Wolf` carries the `Mirefang Blade`, and a Druid
 killing the same creature gets the `Mirefang Stave`. That is what makes the
 class-locked weapon problem disappear — one creature, one name, an item per
 class that shares it.
@@ -1554,11 +1554,51 @@ cheapest moment of company in the game.
 They are deterministic from `zoneSeed()` — the same names are in the same zone
 every time you walk in, because a world whose population is different strangers
 every login is a lobby — and one per class where the roster allows, because a
-camp where three of the four play Priest reads as a bug in the population.
+camp where three of the four play Druid reads as a bug in the population.
 
 `ZoneDef.adventurers: false` switches them off, and every test arena sets it,
 for the same reason as `rareSpawns`: they walk and talk on the sim's `Rng`, so a
 populated arena is one where every seeded fight rolls different numbers.
+
+### And they have an opinion about you
+
+They had exactly one thing to say about the player — a level — which made them a
+population living in the same world that had never noticed you were in it.
+Everything else they said was about the world (`FRONT_CHATTER`) or about
+themselves (`DEATH_CHATTER`), and both are anonymous: a line that could have been
+said by anybody about anybody is scenery.
+
+Five things they will now remark on, and each is about something that cost you
+something: a **boss** you put down, a **named creature** you found, a **dragon**,
+a **front you turned**, and the **piece you are wearing**. Nothing they say is
+about an ordinary kill, because four hundred of those an hour is exactly what
+makes a line worthless.
+
+The split that makes it work is **public against personal**:
+
+| | Gated on | Floor | Why |
+|---|---|---|---|
+| A dragon, a front | nothing — the whole zone | none | Everybody would know. Gating the biggest moments on who happened to be in the arena makes them the quietest, and one dragon a zone is rare enough on its own. |
+| A boss, a rare, your gear | `SAW_RANGE` | `PRAISE_MIN_GAP_MS` | Somebody had to be there. And a player farming a rare camp for an hour would otherwise be told how lucky they are twenty times. |
+
+A front you pushed over and a front that drifted over on its own are the **same
+event with two different lines**, and that is the whole point: the anonymous one
+says "did the Road Watch just flip?" and the other one names you. A test flips a
+front both ways and fails if the wrong one comes out.
+
+The gear line is the one that is not caused by an event, so it has a rate of its
+own — about once every twenty minutes of standing near somebody, and only on an
+epic or a set piece, because "nice iron longsword" is worse than silence. It is
+also the only place in this game an epic is visible to anybody but the person
+who farmed it.
+
+**And you can put your own name to it.** Four of those five lines say your name,
+and every one of them was landing on "Wanderer" — the name the game gives to
+somebody it never asked. The first-run screen has a box now. It is optional and
+looks it: press Begin and you are Wanderer, exactly as before, and anything
+typed that is not a name falls back rather than being refused. A
+character-creation screen that argues with you about punctuation before you have
+played a second is a worse first minute than a player called Wanderer.
 
 ## Your own rotation is worth timing
 
@@ -1577,7 +1617,7 @@ moment, and the rule is the one the boss kits and the traits already run under:
 | Rogue | Assassinate | nothing has seen you yet | open with it, or lose it |
 | Mage | Meteor | the target carries your Ember | land the burn first |
 | Ranger | Volley | *you* are barely scratched | keep your distance and it stays yours |
-| Priest | Mend Wounds | *you* are nearly gone | do not top yourself off |
+| Druid | Mend Wounds | *you* are nearly gone | do not top yourself off |
 
 It is read **once, when the cast begins** — a finisher checked on resolution
 would reward pressing it early and hoping the target dips under the line while
@@ -1595,7 +1635,7 @@ The suite is what separated them. `finisher`, `opener` and `onDot` are facts
 about the **target**, so a player chooses when to spend against them.
 `desperate` and `steady` are facts about **you** — and holding a heal until you
 are nearly dead is not good play, it is worse play: the harness measured a
-Priest finishing fights on *less* health for doing it. `HOLDABLE_CONDITIONS` is
+Druid finishing fights on *less* health for doing it. `HOLDABLE_CONDITIONS` is
 that distinction, `timeSkills` respects it, and the printed table measures the
 two sorts differently — a fight's length and lowest health for the ones you can
 wait for, and the damage on the spot for the ones you cannot.
@@ -1605,7 +1645,7 @@ Three things the numbers caught:
 - **`atRange` was a passive wearing a decision's clothes.** A Ranger sitting at
   their own weapon range is beyond twelve metres every second of every fight,
   so the bonus was permanent and free. `steady` replaced it — the mirror of the
-  Priest's, and the actual class fantasy.
+  Druid's, and the actual class fantasy.
 - **A held skill has to be given up on.** The harness waited indefinitely, so
   the Rogue simply never fired Assassinate once the fight had started —
   measured as watching for the moment costing a second and a half.
@@ -1861,7 +1901,7 @@ playing well and playing badly:
 | Cadfael ★5 (20) at lv22 | 36% win | 100% win, 36% hp left |
 | Old Scar ★6 (25) at lv25 | 47% win | 100% win, 48% hp left |
 
-And for the interrupt — Priest vs Cadfael at 22, both dodging:
+And for the interrupt — Druid vs Cadfael at 22, both dodging:
 
 | | Win rate | Health the boss healed |
 |---|---|---|
@@ -2165,10 +2205,11 @@ Eight shapes: blade, greatsword, axe, mace, spear, dagger, bow, staff. Which
 one an item is comes from **its own name**, for the same reason the creature
 shapes do — five of the eight weapon ladders are generated, so a per-item field
 would have to be generated from the name, which is the keyword table with an
-extra step. The class is the fallback and it does real work, because weapons
-are class-locked: a Mage's `Blackstone Focus` and a Priest's `Chieftain's
-Reliquary` name no object anybody would recognise, and knowing the class is
-enough to know one is a staff.
+extra step. The class is the fallback and it does real work, because creature
+parts are not weapon shapes: `fang`, `claw` and `talon` come out of the same
+word table for everybody, so `Saorla's Fang` is a Warrior's greatsword and
+`Twin Fangs` is a Rogue's pair of daggers. The class knows which; a word table
+cannot.
 
 The held weapon carries **its own material, tinted by the item's quality**.
 That is the one place gear becomes visible without a wardrobe system: a rusted
@@ -2456,7 +2497,8 @@ Dialogue, crafting, **gameplay-authoritative terrain**, pathfinding
 traders never run out and never restock, which wants an inventory model if the
 economy ever grows past four zones.
 
-The adventurers pull real camps now — see "And they pull real creatures now".
-What is still thin is what they have to say *about the player*: a level, and
-nothing else. They have no opinion about the dragon you killed or the front you
-turned, which is the next thing worth giving them.
+The adventurers pull real camps and have opinions about you now — see "And they
+pull real creatures now" and "And they have an opinion about you". What is still
+thin is that they never react to *each other*: two of them working the same camp
+do not acknowledge it, and a population that only ever talks past itself is
+still, at bottom, four monologues.

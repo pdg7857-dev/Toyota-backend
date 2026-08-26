@@ -19,7 +19,7 @@ import { Hud } from './render/hud.js';
 import { MapView } from './render/map.js';
 import { GameAudio } from './render/audio.js';
 import { InputController } from './render/input.js';
-import { chooseClass } from './render/classSelect.js';
+import { chooseClass, cleanName } from './render/classSelect.js';
 import type { ClassId, Command, SimEvent } from './sim/types.js';
 
 const SAVE_KEY = 'emerald-isle:save:v1';
@@ -49,9 +49,13 @@ async function boot(): Promise<void> {
   let loaded = restored?.world ?? null;
   if (!loaded) {
     const forced = params.get('class');
-    const classId =
-      forced && forced in CLASSES ? (forced as ClassId) : await chooseClass(container);
-    loaded = newWorld(classId);
+    // `?class=` skips the picker, which is what every tool in `tools/` uses to
+    // get straight into a game. `?name=` goes with it.
+    const chosen =
+      forced && forced in CLASSES
+        ? { classId: forced as ClassId, name: cleanName(params.get('name') ?? '') }
+        : await chooseClass(container);
+    loaded = newWorld(chosen.classId, chosen.name);
   }
   // Bind to a const so the closures below see a non-null World.
   const world = loaded;
@@ -360,8 +364,8 @@ function loadSavedWorld(): SavedGame | null {
   return null;
 }
 
-function newWorld(classId: ClassId): World {
-  return new World({ seed: 20260821, zone: FENMARCH, classId, playerName: 'Wanderer' });
+function newWorld(classId: ClassId, playerName: string): World {
+  return new World({ seed: 20260821, zone: FENMARCH, classId, playerName });
 }
 
 function save(world: World): void {

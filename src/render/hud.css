@@ -1629,3 +1629,32 @@ canvas { display: block; }
 /* Taking your points back. Not a purchase, so it does not read as one. */
 .respec-row span:first-child { color: #c9b8e8; font-weight: 600; }
 .respec-row { border-bottom: 1px solid rgba(190, 168, 110, 0.28); padding-bottom: 5px; }
+
+/* The name box on the first-run screen. Optional, and it looks it: nobody is
+   made to fill in a form before they have played a second of the game. */
+.cs-name {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 0 0 18px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.cs-name input {
+  background: rgba(12, 14, 12, 0.7);
+  border: 1px solid rgba(190, 168, 110, 0.4);
+  border-radius: 4px;
+  padding: 7px 11px;
+  color: #f0e6c8;
+  font: inherit;
+  font-size: 15px;
+  width: 220px;
+  text-align: center;
+}
+
+.cs-name input:focus {
+  outline: none;
+  border-color: rgba(230, 205, 130, 0.85);
+}

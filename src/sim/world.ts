@@ -109,7 +109,15 @@ import {
   FIGHT_MS,
   FRONT_CHATTER,
   GIVE_UP_AT,
+  BOSS_PRAISE,
+  DRAGON_PRAISE,
+  FRONT_PRAISE,
+  GEAR_PRAISE,
+  GEAR_PRAISE_PER_SEC,
   GRATS_CHATTER,
+  PRAISE_MIN_GAP_MS,
+  RARE_PRAISE,
+  SAW_RANGE,
   GRATS_RANGE,
   IDLE_CHATTER,
   REST_SHARE,
@@ -384,6 +392,16 @@ export class World {
   private lastCombatTick = new Map<EntityId, number>();
   /** World time of the last thing an adventurer said, for the chatter floor. */
   private lastChatMs = -Infinity;
+  /**
+   * When somebody last had an opinion about the player.
+   *
+   * Its own clock rather than the ambient one, because these bypass the
+   * ambient floor by design — see `PRAISE_MIN_GAP_MS`. Not saved: it is a
+   * three-minute timer in a game whose other clocks run for half an hour, and
+   * a world that remembers complimenting you last Tuesday is not a world
+   * reacting to what you are doing now.
+   */
+  private lastPraiseMs = -Infinity;
   /** True while `catchUp` is running the hours nobody was here for. */
   private catchingUp = false;
 
@@ -549,7 +567,18 @@ export class World {
         to: challenger,
         byPlayer,
       });
-      if (holding.zoneId === this.zone.id) this.reactTo(FRONT_CHATTER, holding.name);
+      if (holding.zoneId === this.zone.id) {
+        // Two different lines, and which one you get is the whole point. A
+        // front that drifted over on its own is news somebody remarks on;
+        // one *you* pushed over is somebody giving you the credit. The
+        // anonymous version would say the same thing either way, which is
+        // exactly what made the population feel like it had not noticed you.
+        const player = this.entities.get(this.playerId);
+        if (byPlayer && player) {
+          this.praise(player, FRONT_PRAISE, holding.name, { range: Infinity, floor: false });
+        }
+        else this.reactTo(FRONT_CHATTER, holding.name);
+      }
     }
   }
 
@@ -720,6 +749,7 @@ export class World {
     }
 
     this.tickChatter(npcs);
+    this.tickGearPraise(npcs);
   }
 
   /**
@@ -915,6 +945,73 @@ export class World {
    * been working the same camp as you for ten minutes is the whole feature in
    * one line. If nobody is close enough to have seen it, nobody says anything.
    */
+  /**
+   * Somebody who saw what you just did says so.
+   *
+   * The whole of what the adventurers had to say about the player was a level.
+   * This is the rest of it, and the four rules in `content/adventurers.ts` are
+   * what keep it from being a notification feed: somebody has to have been
+   * near enough to see it, it names you, it goes through a long floor of its
+   * own, and it is only ever about something that cost you something.
+   *
+   * There are two kinds, and the difference is the rule:
+   *
+   * - **Public.** A dragon coming down, a banner changing hands. Everybody in
+   *   the zone would know, so there is no proximity check — and both are rare
+   *   by nature (one dragon a zone, a hundred and fourteen kills to flip a
+   *   front), so they skip the floor as well. Gating the biggest moments in
+   *   the game on who happened to be standing in the arena would make them the
+   *   quietest.
+   * - **Personal.** A boss you pulled, a named creature you found, the piece
+   *   you are wearing. Somebody has to have been there, and it goes through
+   *   `PRAISE_MIN_GAP_MS` — a player farming a rare camp for an hour would
+   *   otherwise be told how lucky they are twenty times, and the twentieth is
+   *   worse than none.
+   */
+  private praise(
+    player: Entity,
+    template: readonly string[],
+    subject: string,
+    { range = SAW_RANGE, floor = true }: { range?: number; floor?: boolean } = {},
+  ): void {
+    if (this.catchingUp) return;
+    const now = this.tickCount * TICK_MS;
+    if (floor && now - this.lastPraiseMs < PRAISE_MIN_GAP_MS) return;
+    const near = [...this.entities.values()].filter(
+      (e) => e.kind === 'npc' && dist(e.pos.x, e.pos.z, player.pos.x, player.pos.z) <= range,
+    );
+    if (near.length === 0) return;
+    this.lastPraiseMs = now;
+    const who = near[this.rng.int(0, near.length - 1)]!;
+    this.say(
+      who,
+      this.pick(template).replace('%s', player.name).replace('%m', subject),
+      'event',
+    );
+  }
+
+  /**
+   * And somebody notices what you are carrying.
+   *
+   * The only one of these not caused by an event, and the one that makes an
+   * epic visible to somebody other than the person who farmed it. It only ever
+   * fires on something actually remarkable — an epic, or the last piece of a
+   * set — because "nice iron longsword" is worse than silence.
+   */
+  private tickGearPraise(npcs: Entity[]): void {
+    if (npcs.length === 0) return;
+    if (!this.rng.chance(GEAR_PRAISE_PER_SEC * (TICK_MS / 1000))) return;
+    const player = this.entities.get(this.playerId);
+    if (!player || player.dead) return;
+    const worn = Object.values(player.equipment ?? {}).filter(Boolean) as string[];
+    const notable = worn
+      .map((id) => getItem(id))
+      .filter((item) => item.quality === 'epic' || item.setId !== undefined);
+    if (notable.length === 0) return;
+    const piece = notable[this.rng.int(0, notable.length - 1)]!;
+    this.praise(player, GEAR_PRAISE, piece.name);
+  }
+
   private gratsFrom(player: Entity): void {
     const near = [...this.entities.values()].filter(
       (e) => e.kind === 'npc' && dist(e.pos.x, e.pos.z, player.pos.x, player.pos.z) <= GRATS_RANGE,
@@ -2991,6 +3088,7 @@ export class World {
         this.applyKillPolitics(killer, victim);
         this.recordKill(killer, def);
         this.pressCamp(victim);
+        this.remarkOnKill(killer, def);
       }
     } else {
       // Player death: everything currently hunting them goes home.
@@ -2998,6 +3096,29 @@ export class World {
         if (e.kind === 'mob' && e.targetId === victim.id) this.leashMob(e);
       }
     }
+  }
+
+  /**
+   * The three kills worth somebody saying something about.
+   *
+   * Ordinary creatures are deliberately not in here. Four hundred an hour is
+   * exactly what makes a line worthless, and the whole value of these is that
+   * they are rare enough to read as a person noticing rather than a system
+   * firing.
+   */
+  private remarkOnKill(killer: Entity, def: MobDef): void {
+    if (def.dragon) {
+      // Zone-wide. A dragon coming down is the one thing everybody would hear
+      // about, and gating it on who happened to be standing in the arena would
+      // make the biggest moment in the game the quietest.
+      this.praise(killer, DRAGON_PRAISE, def.name, { range: Infinity, floor: false });
+      return;
+    }
+    if (isBoss(def.stars)) {
+      this.praise(killer, BOSS_PRAISE, def.name);
+      return;
+    }
+    if (def.rareOf && !def.bounty) this.praise(killer, RARE_PRAISE, def.name);
   }
 
   /**

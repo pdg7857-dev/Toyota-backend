@@ -154,6 +154,100 @@ export const GRATS_CHATTER = [
 /** How close one of them has to be to congratulate you. */
 export const GRATS_RANGE = 34;
 
+// --------------------------------------------------------------------------
+// What they make of you.
+//
+// They had exactly one opinion about the player — a level — which made them a
+// population that lives in the same world and has never noticed you are in it.
+// Everything else they say is about the world (`FRONT_CHATTER`) or about
+// themselves (`DEATH_CHATTER`), and both are anonymous: a line that could have
+// been said by anybody about anybody is scenery.
+//
+// Four rules, and they are what stop this becoming a notification feed:
+//
+// - **Somebody has to have been there — unless everybody would know.** A boss
+//   you pulled, a creature you found and the piece you are wearing are things
+//   a person standing near you saw, so they are gated on proximity, the same
+//   rule `grats` runs under. A dragon coming down and a banner changing hands
+//   are public: the whole zone knows, and gating the biggest moments in the
+//   game on who happened to be in the arena would make them the quietest.
+// - **It names you.** Otherwise it is indistinguishable from the world chatter
+//   that was already there.
+// - **The personal ones are rare.** They go through one long floor of their
+//   own, so a
+//   player farming a rare camp gets a remark now and then rather than the same
+//   four lines on a loop. `grats` is the model: the value is in it being
+//   uncommon. The public ones need no floor — one dragon a zone, and a hundred
+//   and fourteen kills to turn a front, is rare enough on its own.
+// - **It is about something that cost you something.** A boss, a named
+//   creature, a dragon, a front you turned, or a piece nobody else is wearing.
+//   Nothing they say is about an ordinary kill, because four hundred of those
+//   an hour is exactly what makes a line worthless.
+// --------------------------------------------------------------------------
+
+/** A boss you put down, with somebody near enough to have watched. `%s` is you. */
+export const BOSS_PRAISE = [
+  'did %s just solo that',
+  'nice pull %s',
+  '%s took it down. respectable',
+  'well played %s',
+];
+
+/** A named creature. `%s` is you, `%m` is the creature. */
+export const RARE_PRAISE = [
+  '%s got the %m. been camping that for days',
+  'is that %m down? %s you lucky thing',
+  '%s found the %m before me. typical',
+  'grats on the %m %s',
+];
+
+/** A dragon. Zone-wide, because everybody would know. `%s` you, `%m` the wyrm. */
+export const DRAGON_PRAISE = [
+  '%m is DOWN. %s did it',
+  'someone tell me %s just killed %m',
+  '%m dead. %s. absolute unit',
+  'we are all going to hear about %s and %m for weeks',
+];
+
+/** A front you pushed over. `%s` is you, `%m` the holding. */
+export const FRONT_PRAISE = [
+  'that was %s at %m all afternoon',
+  '%m turned. %s has been down there for hours',
+  'thank %s for %m, apparently',
+];
+
+/** Something worth looking at, worn by you. `%s` is you, `%m` the piece. */
+export const GEAR_PRAISE = [
+  'nice %m %s',
+  'where did %s get that %m',
+  'that %m on %s. one day',
+  'ok %s, the %m is showing off now',
+];
+
+/**
+ * The shortest gap between two remarks *about the player*, from anybody.
+ *
+ * Six times the ambient floor. These bypass `CHATTER_MIN_GAP_MS` because they
+ * are reactions to something that actually happened — but a player who farms a
+ * rare camp for an hour would then be told how lucky they are twenty times,
+ * and the twentieth is worse than none. This is the floor that keeps a
+ * compliment a compliment.
+ */
+export const PRAISE_MIN_GAP_MS = 180_000;
+
+/** How near somebody has to be to have seen you do it. */
+export const SAW_RANGE = 70;
+
+/**
+ * How often somebody near you remarks on what you are wearing, per second.
+ *
+ * The only one of these that is not caused by an event, so it needs a rate of
+ * its own — and a very low one, because unlike the others it is *always*
+ * eligible once you are carrying something good. Roughly once every twenty
+ * minutes of standing near somebody, and then only if the piece is worth it.
+ */
+export const GEAR_PRAISE_PER_SEC = 1 / 1200;
+
 
 /**
  * What happens when one of them fights something.

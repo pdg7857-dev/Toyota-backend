@@ -103,6 +103,8 @@ import { BOSS_STARS, isBoss } from '../src/sim/types.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
 import type { ZoneDef } from '../src/content/zone.js';
 import { BASE_MOVE_SPEED, RESPEC_FREE_BELOW } from '../src/sim/formulas.js';
+import { PRAISE_MIN_GAP_MS } from '../src/content/adventurers.js';
+import { FLIP_THRESHOLD } from '../src/content/factions.js';
 import {
   HOARD_SETS,
   HOARD_TOKEN_CHANCE,
@@ -4927,5 +4929,238 @@ describe('thinking again', () => {
       expect(here.length, `${zone.id} has nowhere to think again`).toBeGreaterThan(0);
       expect(here.every((t) => t.role === 'hold')).toBe(true);
     }
+  });
+});
+
+
+// --------------------------------------------------------------------------
+// What they make of you.
+// --------------------------------------------------------------------------
+
+describe('the other adventurers have an opinion about you', () => {
+  const chatOf = (events: SimEvent[]): string[] =>
+    events.filter((e) => e.t === 'chat').map((e) => `[${e.name}] ${e.text}`);
+
+  /**
+   * Kill something, with the population parked at a given distance.
+   *
+   * Everything here turns on who was near enough to have seen it, so the
+   * distance is the parameter — the same shape the `grats` check uses, and for
+   * the same reason: a remark from somebody in another zone is a system
+   * message wearing a name.
+   */
+  function killWithWitnessAt(mobId: string, gap: number, seed = 71): string[] {
+    const world = new World({ seed, zone: getZone('fenmarch'), classId: 'warrior' });
+    const player = levelPlayer(world, { level: 40 });
+    // Somebody to do the killing to, put where the player is standing.
+    const victim = [...world.entities.values()].find((e) => e.kind === 'mob' && !e.dead)!;
+    victim.defId = mobId;
+    victim.name = getMob(mobId).name;
+    victim.pos = { x: player.pos.x + 1, z: player.pos.z };
+    victim.health = 1;
+    for (const person of [...world.entities.values()].filter((e) => e.kind === 'npc')) {
+      person.pos = { x: player.pos.x + gap, z: player.pos.z };
+      // Standing still and watching, not off pulling something of their own —
+      // an adventurer mid-fight is one whose position the AI will move.
+      person.npcFoe = undefined;
+    }
+    world.submit(player.id, { t: 'target', id: victim.id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+    return chatOf(world.advance(6000));
+  }
+
+  it('says something when you put down a boss, and only if somebody saw it', () => {
+    const seen = killWithWitnessAt('cadfael', 4);
+    expect(
+      seen.some((l) => /solo|nice pull|took it down|well played/.test(l)),
+      `nobody said anything: ${seen.join(' | ')}`,
+    ).toBe(true);
+    // And it names the player, which is what separates it from the anonymous
+    // world chatter that was already there.
+    expect(seen.some((l) => l.includes('Wanderer'))).toBe(true);
+
+    const alone = killWithWitnessAt('cadfael', 400);
+    expect(alone.some((l) => /solo|nice pull|took it down|well played/.test(l))).toBe(false);
+  });
+
+  it('says something about a named creature, and nothing about a boar', () => {
+    const rare = killWithWitnessAt('rare_mirefang', 4);
+    expect(
+      rare.some((l) => /camping|lucky|before me|grats on/.test(l)),
+      `nobody remarked on the rare: ${rare.join(' | ')}`,
+    ).toBe(true);
+
+    // Four hundred ordinary kills an hour is exactly what makes a line
+    // worthless, so an ordinary creature gets nothing.
+    const ordinary = killWithWitnessAt('mossback_boar', 4);
+    expect(ordinary.some((l) => /camping|lucky|before me|grats on/.test(l))).toBe(false);
+  });
+
+  it('tells the whole zone about a dragon, wherever anybody is standing', () => {
+    // The one exception to the proximity rule: a dragon coming down is the one
+    // thing everybody would hear about, and gating it on who happened to be in
+    // the arena would make the biggest moment in the game the quietest.
+    const far = killWithWitnessAt(dragonMobId(DRAGONS[0]!), 900);
+    expect(
+      far.some((l) => /is DOWN|just killed|absolute unit|hear about/.test(l)),
+      `the zone said nothing about a dragon: ${far.join(' | ')}`,
+    ).toBe(true);
+  });
+
+  it('gives you the credit for a front you turned, and not for one that drifted', () => {
+    // Flipped the real way — by killing the garrison — because the whole
+    // distinction under test is *who caused it*, and a front pushed over by a
+    // test seam has no cause at all.
+    const holding = getHolding('road_watch');
+    const incumbent = holding.initialController;
+    const zone = {
+      ...emptyZone(),
+      id: holding.zoneId,
+      adventurers: true,
+      spawns: [{ mobId: holding.garrison[incumbent]!, pos: { x: 2, z: 0 }, holding: holding.id }],
+    };
+    const world = new World({ seed: 79, zone, classId: 'warrior' });
+    const player = levelPlayer(world, { level: 30 });
+    const guard = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+
+    const said: string[] = [];
+    let flipped = false;
+    for (let i = 0; i < 400 && !flipped; i++) {
+      guard.dead = false;
+      guard.health = 1;
+      world.submit(player.id, { t: 'target', id: guard.id });
+      world.submit(player.id, { t: 'autoAttack', on: true });
+      for (const ev of world.advance(1000)) {
+        if (ev.t === 'holdingChanged') flipped = true;
+        if (ev.t === 'chat') said.push(ev.text);
+      }
+    }
+    expect(flipped, 'the front never moved').toBe(true);
+    // Named, which is the whole difference from the anonymous line a front
+    // that drifted over on its own gets.
+    expect(
+      said.some((l) => l.includes(player.name) && l.includes(holding.name)),
+      said.join(' | '),
+    ).toBe(true);
+  });
+
+  it('and stays anonymous about one that drifted over on its own', () => {
+    // The counterpart: the same event, with nobody to credit. `tickTerritory`
+    // is the only thing that moved it, so the line must not name anybody.
+    // A front that drifts *away* from whoever is holding it. Half of them
+    // quietly favour the incumbent and can never flip on their own, which is
+    // the design — the first version of this check picked one of those and sat
+    // through an hour of a front getting safer.
+    const holding = HOLDINGS.find(
+      (h) => h.drift !== 0 && (h.drift > 0 ? h.claimants[1] : h.claimants[0]) !== h.initialController,
+    )!;
+    const zone = { ...emptyZone(), id: holding.zoneId, adventurers: true, spawns: [] };
+    const world = new World({ seed: 81, zone, classId: 'warrior' });
+    const player = levelPlayer(world, { level: 30 });
+    // Parked just short of the line. A front is deliberately slow — twenty
+    // minutes from the middle — and what is under test is who gets named.
+    const toward = holding.drift > 0 ? 1 : -1;
+    world.control[holding.id] = toward * (FLIP_THRESHOLD - 1);
+
+    const said: string[] = [];
+    let flipped = false;
+    for (let i = 0; i < 600 && !flipped; i++) {
+      for (const ev of world.advance(1000)) {
+        if (ev.t === 'holdingChanged') flipped = true;
+        if (ev.t === 'chat') said.push(ev.text);
+      }
+    }
+    expect(flipped, 'no front ever drifted').toBe(true);
+    expect(said.some((l) => l.includes(player.name))).toBe(false);
+  });
+
+  it('notices what you are carrying, and only if it is worth noticing', () => {
+    /**
+     * Two hours standing next to somebody, wearing `worn`.
+     *
+     * In an empty zone with a population in it rather than in the Fenmarch:
+     * this needs a long sample (a remark every twenty minutes or so, and a
+     * one-hour sample misses one run in twenty), and six hundred creatures
+     * ticking for two simulated hours took five minutes of real time for a
+     * check about four strings.
+     */
+    function anHourWearing(worn: Record<string, string>): string[] {
+      // One creature, because they need a camp to walk between before they
+      // will do anything at all — an arena with a population and nothing in it
+      // is a population standing still and saying nothing.
+      const zone = {
+        ...emptyZone(),
+        id: 'fenmarch',
+        adventurers: true,
+        spawns: [{ mobId: 'moor_hare', pos: { x: 60, z: 0 } }],
+      };
+      const world = new World({ seed: 83, zone, classId: 'warrior' });
+      const player = levelPlayer(world, { level: 40 });
+      player.equipment = worn;
+      const said: string[] = [];
+      for (let t = 0; t < 120 * 60_000; t += TICK_MS) {
+        // Kept beside the player every tick: they walk between camps, and an
+        // hour of them wandering off measures the walking.
+        for (const person of [...world.entities.values()].filter((e) => e.kind === 'npc')) {
+          person.pos = { ...player.pos };
+        }
+        for (const ev of world.tick()) if (ev.t === 'chat') said.push(ev.text);
+      }
+      return said;
+    }
+
+    // An epic is worth a word. This is the one place in the game an epic is
+    // visible to somebody other than the person who farmed it.
+    const epic = Object.values(ITEMS).find((i) => i.quality === 'epic' && i.slot === 'chest')!;
+    const shown = anHourWearing({ chest: epic.id });
+    expect(
+      shown.some((l) => l.includes(epic.name)),
+      `nobody looked at it in an hour: ${shown.slice(0, 4).join(' | ')}`,
+    ).toBe(true);
+
+    // "Nice iron longsword" is worse than silence.
+    const plain = Object.values(ITEMS).find(
+      (i) => i.quality === 'common' && i.slot === 'chest' && !i.setId,
+    )!;
+    const quiet = anHourWearing({ chest: plain.id });
+    expect(quiet.some((l) => l.includes(plain.name))).toBe(false);
+  });
+
+  it('stays quiet about it, however good a run you are having', () => {
+    // The floor is the feature. A player farming a rare camp must get a remark
+    // now and then, not the same four lines on a loop — the twentieth is worse
+    // than none, which is the lesson the ambient chatter had to learn first.
+    const zone = {
+      ...emptyZone(),
+      id: 'fenmarch',
+      adventurers: true,
+      spawns: [{ mobId: 'moor_hare', pos: { x: 3, z: 0 } }],
+    };
+    const world = new World({ seed: 77, zone, classId: 'warrior' });
+    const player = levelPlayer(world, { level: 40 });
+    for (const person of [...world.entities.values()].filter((e) => e.kind === 'npc')) {
+      person.pos = { ...player.pos };
+    }
+    const victim = [...world.entities.values()].find((e) => e.kind === 'mob' && !e.dead)!;
+    victim.defId = 'rare_mirefang';
+    victim.name = getMob('rare_mirefang').name;
+    world.submit(player.id, { t: 'target', id: victim.id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+
+    let remarks = 0;
+    const minutes = 10;
+    for (let t = 0; t < minutes * 60_000; t += TICK_MS) {
+      // Held on one health point and pinned, so this is ten minutes of a
+      // player killing the same named creature over and over.
+      victim.dead = false;
+      victim.health = 1;
+      victim.aiState = 'chasing';
+      victim.pos = { x: player.pos.x + 1, z: player.pos.z };
+      remarks += chatOf(world.tick()).filter((l) => /camping|lucky|before me|grats on/.test(l))
+        .length;
+    }
+    const ceiling = Math.ceil((minutes * 60_000) / PRAISE_MIN_GAP_MS) + 1;
+    console.log(`  praise: ${remarks} remarks in ${minutes} min of farming one rare`);
+    expect(remarks, `${remarks} remarks in ten minutes`).toBeLessThanOrEqual(ceiling);
   });
 });

@@ -371,10 +371,11 @@ export type OffhandLook = 'blade' | 'bulwark' | 'grimoire' | 'none';
  * table with an extra step.
  *
  * The class is the fallback and it does real work, because weapons are
- * class-locked: a Mage's `Blackstone Focus` and a Druid's `Chieftain's
- * Reliquary` name no object anybody would recognise, and the class is enough
- * to know one is a staff and the other is not. The printed table in the test
- * is what caught them sitting in the `blade` bucket with seventy-six others.
+ * class-locked and creature parts are not weapon shapes: `fang`, `claw` and
+ * `talon` come out of the same word table for everybody, so `Saorla's Fang` is
+ * a Warrior's greatsword and `Twin Fangs` is a Rogue's pair of daggers. The
+ * class knows which; a word table cannot. The printed table in the test is
+ * what caught seventy-eight weapons sitting in the `blade` bucket together.
  */
 const WEAPON_WORDS: [string, WeaponLook][] = [
   ['greatsword', 'greatsword'],

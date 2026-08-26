@@ -134,16 +134,29 @@ async function main() {
   await wait(900);
   await page.screenshot({ path: join(OUT, '00-class-select.png') });
 
-  // Pick the class named by CLASS (default Warrior) from the start screen.
+  // Name the character, then pick the class named by CLASS (default Warrior).
+  //
+  // Typed rather than passed on the query string: the box is the control a
+  // player actually uses, and it is the reason four different lines of what
+  // the population says now land on somebody rather than on "Wanderer".
+  const SMOKE_NAME = 'Fionnbharr';
   const wanted = (process.env.CLASS ?? 'Warrior').toLowerCase();
-  const picked = await page.evaluate((name) => {
-    const cards = [...document.querySelectorAll('.cs-card')];
-    const card = cards.find((c) => c.querySelector('h2')?.textContent?.toLowerCase() === name);
-    if (!card) return false;
-    card.click();
-    return true;
-  }, wanted);
-  if (!picked) throw new Error('class select did not offer ' + wanted);
+  const picked = await page.evaluate(
+    ({ name, typed }) => {
+      const box = document.querySelector('#cs-name-input');
+      if (box) {
+        box.value = typed;
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      const cards = [...document.querySelectorAll('.cs-card')];
+      const card = cards.find((c) => c.querySelector('h2')?.textContent?.toLowerCase() === name);
+      if (!card) return { ok: false, box: !!box };
+      card.click();
+      return { ok: true, box: !!box };
+    },
+    { name: wanted, typed: SMOKE_NAME },
+  );
+  if (!picked.ok) throw new Error('class select did not offer ' + wanted);
 
   // Wait for the game to be *running*, not for a stopwatch.
   //
@@ -1933,6 +1946,12 @@ async function main() {
     };
   });
 
+  // The name you gave yourself, on your own frame.
+  const named = await page.evaluate(() => ({
+    name: window.__game.world.player.name,
+    onFrame: (document.querySelector('#player-name')?.textContent ?? '').trim(),
+  }));
+
   // Taking your points back.
   //
   // Five attribute points a level for a hundred levels, and until now not one
@@ -3407,6 +3426,8 @@ async function main() {
     ['a boss frame gives nothing away at first', kit.ok && kit.quietFirst],
     ['and names what it has actually shown you', kit.names],
     ['and what to do about it', kit.saysTheAnswer],
+    ['you can put your own name to it', picked.box && named.name === SMOKE_NAME],
+    ['and it is on your own frame', named.onFrame === SMOKE_NAME],
     ['the hold will take your points back', respec.ok && respec.gained >= 7],
     ['and says what it takes before you press it', respec.saysWhatItTakes],
     ['and charges for it', respec.paid > 0],
@@ -3582,7 +3603,7 @@ async function main() {
   console.log('reckoning:', JSON.stringify(reckoning));
   console.log('leystones:', JSON.stringify(leystones));
   console.log('sets:', JSON.stringify(sets));
-  console.log('respec:', JSON.stringify(respec));
+  console.log('respec:', JSON.stringify(respec), '| named:', JSON.stringify(named));
   console.log('levelling:', JSON.stringify(levelling));
   console.log('kit:', JSON.stringify(kit));
   console.log('build:', JSON.stringify(build));
