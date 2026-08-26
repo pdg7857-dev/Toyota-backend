@@ -71,6 +71,7 @@ export const VENDORS: Record<string, VendorDef> = {
       // everything can kill you is a trader nobody visits twice.
       ...consumablesFor(1),
     ],
+    respec: true,
     view: { color: 0xd8c79a, height: 1.8, radius: 0.44 },
   },
   bryn: {
@@ -89,6 +90,7 @@ export const VENDORS: Record<string, VendorDef> = {
       'reaver_legguards',
       ...consumablesFor(20),
     ],
+    respec: true,
     view: { color: 0xb8a37e, height: 1.85, radius: 0.46 },
   },
 };
@@ -117,7 +119,8 @@ function lateVendor(
   // are on its bosses, and no trader anywhere carries them.
   stock.push(...Object.values(zoneTomes(zoneId, 'uncommon')));
   stock.push(...consumablesFor(consumableTier));
-  return { id, name, greeting, stock, view: { color, height: 1.82, radius: 0.45 } };
+  // A zone's hold is where you go to be un-made and re-made. See `VendorDef`.
+  return { id, name, greeting, stock, respec: true, view: { color, height: 1.82, radius: 0.45 } };
 }
 
 Object.assign(VENDORS, {

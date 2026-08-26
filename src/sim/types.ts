@@ -575,6 +575,15 @@ export interface VendorDef {
   greeting: string;
   /** Item ids this vendor keeps in stock, in the order they are listed. */
   stock: string[];
+  /**
+   * Whether this trader will take your points back — see `World.tryRespec`.
+   *
+   * The zone holds and nobody else. A smith would have no idea how, and it
+   * gives the hold a reason to exist beyond being the first shop you saw: the
+   * leystone road makes going back there a keypress, so the walk costs nothing
+   * and the place still means something.
+   */
+  respec?: boolean;
   /** Renderer hint. */
   view: { color: number; height: number; radius: number };
 }
@@ -905,6 +914,15 @@ export type Command =
   | { t: 'abandonQuest'; questId: string }
   | { t: 'travel'; toZoneId: string }
   /**
+   * Take every attribute and skill point back and start spending again.
+   *
+   * Carries the trader you are asking, because it is a transaction: the
+   * validation is the same shape a purchase's is, and a server would check the
+   * same three things — that you are standing at them, that nothing is on you,
+   * and that you can pay.
+   */
+  | { t: 'respec'; vendorId: EntityId }
+  /**
    * Step onto the leystone road to a stone you have already attuned.
    *
    * A command rather than a renderer teleport for the reason every other way
@@ -1015,6 +1033,8 @@ export type SimEvent =
   | { t: 'debt'; entityId: EntityId; kind: 'incurred' | 'repaid' | 'reclaimed'; amount: number; remaining: number }
   /** A leystone woke to you. Once per stone, ever. */
   | { t: 'attuned'; entityId: EntityId; stoneId: string; name: string; role: string }
+  /** Points taken back, and what it cost. */
+  | { t: 'respec'; entityId: EntityId; gold: number; points: number; skillPoints: number }
   | { t: 'levelUp'; entityId: EntityId; level: number }
   /** A skill went up a rank. */
   | { t: 'skillRanked'; entityId: EntityId; skillId: string; rank: number }

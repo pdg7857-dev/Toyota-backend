@@ -495,6 +495,33 @@ a flat addition, because a flat term is worth three times as much to whoever
 swings fastest and would make one attribute a class choice instead of a build
 one.
 
+### And you can take them back
+
+Five attribute points a level for a hundred levels and one skill point, and
+until now **not one of them could be undone**. That makes "attributes are a
+build" a decision made once, at level six, before the game has said what Focus
+is for — and then lived with for ninety-four levels. Nothing else in this game
+is irreversible: a death is a debt you pay off, a front you lose is a front you
+can take back, and a bad drop is another kill.
+
+The **hold** in each zone will take the lot back, and nobody else will. A smith
+would have no idea how, and it gives the hold a reason to exist beyond being
+the first shop you ever saw — the leystone road makes going back there a
+keypress, so the walk costs nothing and the place still means something.
+
+Priced in kills of what you would be fighting anyway, the way a cache and a
+luxury piece are, so it means the same at 20 as at 90 — about forty of them,
+which `npm test` prints. And **free below level 10**, which is the same rule
+the death debt runs under and for the same reason: the first ten levels are
+where a player finds out what any of it does, and charging for that lesson
+teaches caution before the game has taught competence.
+
+**Your gear stays on.** A character who has just respecced is briefly wearing a
+weapon they could no longer equip, which reads as exactly what it is — a build
+half-finished — and fixes itself the moment they spend the points. Stripping
+them would turn one decision into a dressing-up session, and it is the only
+version of this that could lose somebody an item.
+
 ### And which half of your bar it is worth to
 
 The part that makes it a build rather than a stat sheet. **A skill scales with
@@ -2363,6 +2390,16 @@ harness before retuning content.
 
 The mirror is also true: a weak harness *hides* real problems. The rotation fix
 above is what finally exposed the late mob health curve.
+
+**Two copies of one function is the bug; the drift is only how it shows up.**
+`balance.test.ts` carried its own `grindMobFor` beside the one in `test/pace.ts`
+and the local copy had lost two clauses, so from level 25 up "the creature you
+would be grinding" was whichever **rare spawn or wild horse** happened to be a
+level above the camps — a named creature you see once an hour, with two and a
+half times the gold and several times the health, standing in for the camp you
+actually farm. It named the wrong creature at 30 of 99 levels and understated
+the whole game by 1,779 kills. Every assertion passed the entire time, because
+each was true of whatever creature it had picked.
 
 And a printed comparison beats a passing assertion: the rare-spawn table showed
 each named creature dying in *exactly* the same time as the camp mob it

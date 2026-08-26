@@ -1933,6 +1933,94 @@ async function main() {
     };
   });
 
+  // Taking your points back.
+  //
+  // Five attribute points a level for a hundred levels, and until now not one
+  // of them could be undone. The row is in the zone's hold and nowhere else,
+  // so this checks the whole path a player uses: open the shop, read the
+  // price, click it, and find the points back in the pool.
+  const respec = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    g.world.lastCombatTick.clear();
+    g.world.submit(me.id, { t: 'target', id: null });
+
+    // Everything this probe is about to change. A respec leaves the character
+    // at base attributes with a fistful of unspent points, which is a much
+    // weaker character than the one the checks after this one are measuring —
+    // the same trap the muster probe fell into twice.
+    const home = {
+      pos: { ...me.pos },
+      gold: me.gold,
+      level: me.level,
+      attributes: { ...me.attributes },
+      unspentPoints: me.unspentPoints,
+      skillRanks: { ...(me.skillRanks ?? {}) },
+      skillPoints: me.skillPoints,
+    };
+
+    const hold = [...g.world.entities.values()].find(
+      (e) => e.kind === 'vendor' && e.vendorId === 'maeve',
+    );
+    me.pos.x = hold.pos.x + 2;
+    me.pos.z = hold.pos.z;
+    me.gold = 500000;
+    me.level = Math.max(me.level, 20);
+    // Spend something, so there is something to take back.
+    me.attributes = { ...me.attributes, strength: (me.attributes.strength ?? 0) + 7 };
+    me.skillRanks = { ...(me.skillRanks ?? {}) };
+    g.hud.openVendor(hold.id);
+    await new Promise((r) => setTimeout(r, 400));
+    const row = document.querySelector('#vendor-stock .respec-row');
+    const price = row ? (row.textContent ?? '') : '';
+
+    // It has to say what it takes back before you press it.
+    row?.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX: 500, clientY: 400 }));
+    await new Promise((r) => setTimeout(r, 80));
+    const tip = document.querySelector('#tip');
+    const tipText = getComputedStyle(tip).display === 'none' ? '' : (tip.textContent ?? '');
+    row?.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+
+    const goldBefore = me.gold;
+    row?.click();
+    await new Promise((r) => setTimeout(r, 400));
+
+    // And no other trader offers it: the hold is a place, and a smith would
+    // have no idea how.
+    const smith = [...g.world.entities.values()].find(
+      (e) => e.kind === 'vendor' && /keeper_\w+_ardnahoe/.test(e.vendorId ?? ''),
+    );
+    let smithOffers = null;
+    if (smith) {
+      g.hud.openVendor(smith.id);
+      await new Promise((r) => setTimeout(r, 300));
+      smithOffers = !!document.querySelector('#vendor-stock .respec-row');
+    }
+    g.hud.closeVendor();
+
+    const gainedPoints = (me.unspentPoints ?? 0) - home.unspentPoints;
+    const paidGold = goldBefore - me.gold;
+    // Put the character back exactly as it was found.
+    me.pos = home.pos;
+    me.gold = home.gold;
+    me.level = home.level;
+    me.attributes = home.attributes;
+    me.unspentPoints = home.unspentPoints;
+    me.skillRanks = home.skillRanks;
+    me.skillPoints = home.skillPoints;
+    g.world.lastCombatTick.clear();
+    await new Promise((r) => setTimeout(r, 200));
+
+    return {
+      ok: !!row,
+      price,
+      saysWhatItTakes: /attribute point/.test(tipText),
+      gained: gainedPoints,
+      paid: paidGold,
+      smithOffers,
+    };
+  });
+
   // Armour you farm one camp for.
   //
   // The set bonus is the whole feature and it is invisible in a screenshot, so
@@ -2296,40 +2384,70 @@ async function main() {
     // there — which is the behaviour being tested a few lines down.
     me.pos = { x: g.world.zone.halfSize - 40, z: g.world.zone.halfSize - 40 };
 
-    let who = null;
-    const until = Date.now() + 30000;
-    while (!who && Date.now() < until) {
-      await new Promise((r) => setTimeout(r, 250));
-      who = people.find((p) => p.npcFoe !== undefined) ?? null;
-    }
-    if (!who) {
-      me.pos = home;
-      return { ok: false, why: 'nobody picked a fight in thirty seconds' };
-    }
-    const foe = g.world.entity(who.npcFoe);
-    const max = g.world.statsOf(foe).maxHealth;
+    // Watch a fight until somebody actually lands something — and if the one
+    // being watched ends first, watch the next one.
+    //
+    // The first version committed to the first pair it found and reported "not
+    // a real fight" whenever that particular fight happened to end in the
+    // first sample: an adventurer worn down to `GIVE_UP_AT` walks away, and
+    // one run in ten or so caught exactly that. The property under test is
+    // that adventurers hurt real creatures, not that one specific fight did.
+    const deadline = Date.now() + 45000;
+    const inAFight = async () => {
+      while (Date.now() < deadline) {
+        const p = people.find((n) => n.npcFoe !== undefined);
+        if (p) {
+          const f = g.world.entity(p.npcFoe);
+          if (f) return { who: p, foe: f };
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      return null;
+    };
 
-    // Watched rather than sampled at the end. A fight that reaches the floor
-    // *ends*, and the creature is handed back whole — so a single reading
-    // taken after the fact says "nothing happened" precisely when the most
-    // happened.
     let hurt = false;
-    for (let i = 0; i < 80 && !hurt; i++) {
-      await new Promise((r) => setTimeout(r, 100));
-      hurt = foe.health < max;
-      if (who.npcFoe !== foe.id) break;
+    let pair = null;
+    let came = false;
+    let anim = '';
+    while (!hurt && Date.now() < deadline) {
+      pair = await inAFight();
+      if (!pair) break;
+      const { who: fighter, foe: quarry } = pair;
+      const watching = quarry.id;
+      const max = g.world.statsOf(quarry).maxHealth;
+      for (let i = 0; i < 80 && !hurt && Date.now() < deadline; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        hurt = quarry.health < max;
+        if (fighter.npcFoe !== watching) break;
+      }
+      came = Math.hypot(quarry.pos.x - fighter.pos.x, quarry.pos.z - fighter.pos.z) < 12;
+      anim = g.views.get(fighter.id)?.anim?.current ?? anim;
     }
-    const came = Math.hypot(foe.pos.x - who.pos.x, foe.pos.z - who.pos.z) < 12;
-    const view = g.views.get(who.id);
-    const anim = view?.anim?.current ?? '';
+    if (!pair) {
+      me.pos = home;
+      return { ok: false, why: 'nobody picked a fight in forty-five seconds' };
+    }
 
     // And now the player is near enough to want it. Parked just inside the
     // yield and just outside the creature's own aggro: standing on top of it
     // measures the player killing it, which the first version of this did.
-    const reach = g.mobOf(foe.defId).aggroRadius;
-    me.pos = { x: foe.pos.x + reach + 18, z: foe.pos.z };
-    await new Promise((r) => setTimeout(r, 600));
-    const handedBack = who.npcFoe === undefined && foe.health >= max - 0.5;
+    //
+    // Re-acquired rather than reusing the pair above, because that fight may
+    // have ended on its own — and "the adventurer let go" is only worth
+    // asserting about a fight that was still going when the player walked up.
+    const live = await inAFight();
+    let handedBack = null;
+    let foe = pair.foe;
+    let who = pair.who;
+    if (live) {
+      who = live.who;
+      foe = live.foe;
+      const max = g.world.statsOf(foe).maxHealth;
+      const reach = g.mobOf(foe.defId).aggroRadius;
+      me.pos = { x: foe.pos.x + reach + 18, z: foe.pos.z };
+      await new Promise((r) => setTimeout(r, 600));
+      handedBack = who.npcFoe === undefined && foe.health >= max - 0.5;
+    }
 
     me.pos = home;
     return {
@@ -3289,6 +3407,10 @@ async function main() {
     ['a boss frame gives nothing away at first', kit.ok && kit.quietFirst],
     ['and names what it has actually shown you', kit.names],
     ['and what to do about it', kit.saysTheAnswer],
+    ['the hold will take your points back', respec.ok && respec.gained >= 7],
+    ['and says what it takes before you press it', respec.saysWhatItTakes],
+    ['and charges for it', respec.paid > 0],
+    ['a specialist will not', respec.smithOffers === false],
     ['a set can be farmed off one camp', sets.ok && sets.steps === 4],
     ['made up by the keeper in a town', !!sets.keeper],
     ['two pieces pay a bonus', sets.twoPays],
@@ -3311,7 +3433,7 @@ async function main() {
     ['and no plate runs off the side of the window', tidy.clipped === 0],
     ['somebody else pulls a real creature', pulling.ok && pulling.came],
     ['and it is a real fight', pulling.hurt && pulling.alive],
-    ['and you get it back whole when you want it', pulling.handedBack],
+    ['and you get it back whole when you want it', pulling.handedBack === true],
     ['a camp never carries a boss grade', grades.ok && grades.campStaysBelow && grades.camp.length > 2],
     ['and a boss never carries a camp one', grades.bossStaysAbove && grades.boss.length > 2],
     ['a grade reaches the player by name', grades.named && grades.stronger],
@@ -3460,6 +3582,7 @@ async function main() {
   console.log('reckoning:', JSON.stringify(reckoning));
   console.log('leystones:', JSON.stringify(leystones));
   console.log('sets:', JSON.stringify(sets));
+  console.log('respec:', JSON.stringify(respec));
   console.log('levelling:', JSON.stringify(levelling));
   console.log('kit:', JSON.stringify(kit));
   console.log('build:', JSON.stringify(build));

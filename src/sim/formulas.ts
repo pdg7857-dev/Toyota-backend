@@ -349,6 +349,34 @@ export function goldForKill(
 }
 
 /**
+ * What it costs to take your points back.
+ *
+ * Five attribute points a level for a hundred levels, and one skill point, and
+ * until now not one of them could be undone. That makes "attributes are a build
+ * decision" a decision you make once, at level 6, before the game has told you
+ * what any of it does — and then live with for ninety-four levels. Nothing else
+ * in this game is irreversible; a death is a debt you pay off, a front you lose
+ * is a front you can take back, and a bad drop is another kill.
+ *
+ * Priced in kills of an ordinary creature at your own level, the same way a
+ * cache and a luxury piece are, so it means the same thing at 20 and at 90.
+ * About forty of them: an hour is too much and a minute is not a decision.
+ *
+ * **Free below level 10**, which is the same rule the death debt runs under and
+ * for the same reason: the first ten levels are where a player finds out what
+ * Focus is for, and charging for that lesson teaches caution before the game
+ * has taught competence.
+ */
+export const RESPEC_FREE_BELOW = 10;
+export const RESPEC_KILLS = 40;
+
+export function respecCost(level: number): number {
+  if (level < RESPEC_FREE_BELOW) return 0;
+  const gold = goldForKill(level, 1);
+  return Math.round(((gold.min + gold.max) / 2) * RESPEC_KILLS);
+}
+
+/**
  * Ceiling on how often a mob may drop *any* equipment.
  *
  * The design rule is "harder mobs drop better things, not more things". Gear

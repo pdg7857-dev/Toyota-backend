@@ -55,6 +55,7 @@ import {
   dragonWeaponId,
 } from '../src/content/dragons.js';
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
+import { RESPEC_FREE_BELOW, respecCost } from '../src/sim/formulas.js';
 import { CLASS_ATTRIBUTES, SKILLS, getSkill } from '../src/content/skills.js';
 import { weaponLookFor, type WeaponLook } from '../src/content/bodies.js';
 import { TICK_MS } from '../src/sim/formulas.js';
@@ -76,7 +77,7 @@ import {
 } from '../src/content/zone.js';
 import { getTheme, terrainHeight } from '../src/content/terrain.js';
 import { MOUNTS } from '../src/content/mounts.js';
-import { crossingSeconds, hoursToCap, type PaceInput } from './pace.js';
+import { crossingSeconds, grindMobFor, hoursToCap, killsForLevel, type PaceInput } from './pace.js';
 
 /**
  * Levels to measure the game at, each paired with what a player would ACTUALLY
@@ -281,19 +282,17 @@ function report(name: string, s: Summary): void {
   );
 }
 
-/** The mob a player at `level` would sensibly be grinding. Never a boss. */
-function grindMobFor(level: number): MobDef {
-  const candidates = Object.values(MOBS)
-    .filter((m) => m.stars < BOSS_STARS && m.level <= level + 1)
-    .sort((a, b) => b.level - a.level);
-  return candidates[0] ?? MOBS.moor_hare!;
-}
-
-/** Kills of a level-appropriate mob needed to clear one level. */
-function killsForLevel(level: number): number {
-  const mob = grindMobFor(level);
-  return Math.ceil(xpToNext(level) / xpForKill(mob.xp, mob.level, level));
-}
+// `grindMobFor` and `killsForLevel` come from `test/pace.ts`. This file used to
+// carry its own copies and they had quietly drifted: the local one filtered out
+// bosses and nothing else, so from level 25 up "the creature you would be
+// grinding" was whichever RARE SPAWN or wild horse happened to be a level
+// higher than the camps — a named creature you see once an hour, with two and a
+// half times the gold and several times the health, standing in for the camp
+// you are actually farming.
+//
+// Every kills-per-level figure this file printed above level 25 was therefore a
+// measurement of a creature nobody grinds. Two copies of one function is the
+// bug; the drift is only how it showed up.
 
 // --------------------------------------------------------------------------
 
@@ -3567,5 +3566,52 @@ describe('the hoard sets', () => {
       expect(hoard, `${zone.id}'s hoard chain out-earns its kit chain`).toBeLessThan(kit);
     }
     console.log('\nWHAT EACH CHAIN PAYS\n' + rows.join('\n'));
+  });
+});
+
+
+describe('thinking again is affordable and never free late', () => {
+  it('prints what a respec costs in kills at each band', () => {
+    // The same measurement a cache and a luxury piece get, and for the same
+    // reason: a flat gold figure means a fortune at 20 and a rounding error at
+    // 90, so what has to hold steady is the number of kills. Measured against
+    // what a character of that level would actually be fighting — the first
+    // pass named a mob per band by hand and printed a column that swung from
+    // eight kills to thirty-six, which measured the mobs and not the price.
+    const rows: string[] = [];
+    for (const level of [6, 12, 22, 35, 55, 80, 100]) {
+      const price = respecCost(level);
+      const mob = grindMobFor(level);
+      const gold = goldForKill(mob.level, mob.stars);
+      const kills = price / ((gold.min + gold.max) / 2);
+      rows.push(
+        `  lv${String(level).padStart(3)}  ${price.toLocaleString().padStart(9)}g  ` +
+          `${price === 0 ? 'free' : `${kills.toFixed(0)} ${mob.name} kills`}`,
+      );
+      if (level < RESPEC_FREE_BELOW) {
+        expect(price, 'the first ten levels should be free to get wrong').toBe(0);
+        continue;
+      }
+      // Long enough to be a decision, never long enough to be a wall: a player
+      // who built wrong at 30 must not be looking at an evening to fix it.
+      expect(kills, `a respec at ${level} is ${kills.toFixed(0)} kills`).toBeGreaterThan(8);
+      expect(kills, `a respec at ${level} is ${kills.toFixed(0)} kills`).toBeLessThan(110);
+    }
+    console.log('\nWHAT THINKING AGAIN COSTS\n' + rows.join('\n'));
+  });
+
+  it('never costs more than a character of that level could be carrying', () => {
+    // A price nobody can pay is a feature nobody has. Measured against what
+    // one level's worth of grinding pays out, which is the smallest amount of
+    // coin a player at that level has plausibly seen.
+    for (const level of [10, 25, 50, 75, 100]) {
+      const mob = grindMobFor(level);
+      const gold = goldForKill(mob.level, mob.stars);
+      const perLevel = killsForLevel(level) * ((gold.min + gold.max) / 2);
+      expect(
+        respecCost(level) / perLevel,
+        `a respec at ${level} costs ${(respecCost(level) / perLevel).toFixed(1)} levels of gold`,
+      ).toBeLessThan(0.5);
+    }
   });
 });

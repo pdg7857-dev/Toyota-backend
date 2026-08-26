@@ -17,7 +17,7 @@ import {
   xpToNext,
 } from '../sim/formulas.js';
 import { ABILITY_ANSWERS, BOSS_STARS, ELITE_BOSS_STARS } from '../sim/types.js';
-import { ZONES } from '../content/zone.js';
+import { CLASSES, ZONES } from '../content/zone.js';
 import { DRAGONS } from '../content/dragons.js';
 import { getMount } from '../content/mounts.js';
 import { BOONS } from '../content/discoveries.js';
@@ -658,6 +658,20 @@ export class Hud {
           );
           break;
         }
+        case 'respec': {
+          this.log(
+            `You take back ${ev.points} attribute point${ev.points === 1 ? '' : 's'} and ` +
+              `${ev.skillPoints} skill point${ev.skillPoints === 1 ? '' : 's'}` +
+              `${ev.gold > 0 ? ` for ${ev.gold.toLocaleString()} gold` : ''}.`,
+            'log-good',
+          );
+          this.log('Press C to spend them again.', 'log-loot');
+          // The shop shows the price and what it would take back, and both
+          // just changed. So did the character sheet, which repaints off its
+          // own signature.
+          this.renderVendor();
+          break;
+        }
         case 'attuned': {
           // A banner rather than a card. Walking into a town and having the
           // stone wake up is a good moment and it is not a *rare* one — there
@@ -1088,6 +1102,15 @@ export class Hud {
    * set tooltip has to answer is "would putting this on turn the bonus on",
    * and an answer from before the last swap is the wrong one.
    */
+  /** Attribute points spent so far: everything above where the class started. */
+  private spentPoints(player: Entity): number {
+    const base = CLASSES[player.classId ?? 'warrior'].baseAttributes;
+    return (Object.keys(base) as Array<keyof Attributes>).reduce(
+      (n, key) => n + Math.max(0, (player.attributes?.[key] ?? 0) - base[key]),
+      0,
+    );
+  }
+
   private wornSets(player: Entity): string[] {
     const out: string[] = [];
     for (const itemId of Object.values(player.equipment ?? {})) {
@@ -2236,6 +2259,49 @@ export class Hud {
     // --- stock ---
     const stock = this.els.vendorStock;
     stock.innerHTML = '';
+
+    // Taking your points back, at the top of the shop, in every zone's hold.
+    //
+    // It goes above the stock rather than under it because it is the one row
+    // in here that is not a purchase — a player scanning prices should not
+    // find it by accident at the bottom of a list of swords.
+    if (getVendor(vendor.vendorId).respec) {
+      const price = this.world.respecPrice(player);
+      const spent = this.spentPoints(player);
+      const ranks = Object.values(player.skillRanks ?? {}).reduce((n, r) => n + r, 0);
+      const afford = gold >= price;
+      const anything = spent + ranks > 0;
+      const row = document.createElement('div');
+      row.className = `vendor-row respec-row${afford && anything ? ' clickable' : ' unusable'}`;
+      row.innerHTML =
+        `<span>Think again</span>` +
+        `<span class="${afford ? 'price' : 'price too-dear'}">` +
+        `${price === 0 ? 'free' : `${price.toLocaleString()}g`}</span>`;
+      this.tip(row, () => ({
+        title: 'Think again',
+        lines: [
+          `Takes back ${spent} attribute point${spent === 1 ? '' : 's'} and ` +
+            `${ranks} skill point${ranks === 1 ? '' : 's'}.`,
+          price === 0
+            ? 'Free until level 10 — the first ten levels are for finding out what any of it does.'
+            : `${price.toLocaleString()} gold, about forty kills at your level.`,
+        ],
+        note: anything
+          ? 'Your gear stays on. Spend the points again and it fits.'
+          : undefined,
+        warn: !anything
+          ? 'Nothing spent yet.'
+          : !afford
+            ? `You have ${gold.toLocaleString()}g.`
+            : undefined,
+      }));
+      if (afford && anything) {
+        row.addEventListener('click', () =>
+          this.emit({ t: 'respec', vendorId: this.openVendorId! }),
+        );
+      }
+      stock.appendChild(row);
+    }
     for (const itemId of getVendor(vendor.vendorId).stock) {
       const item = getItem(itemId);
       const price = buyPrice(item);

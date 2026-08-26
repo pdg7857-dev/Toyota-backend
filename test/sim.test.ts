@@ -24,7 +24,7 @@ import {
   deathDebt,
   xpToNext,
 } from '../src/sim/formulas.js';
-import { FENMARCH, PLAYABLE_CLASSES, ZONES, getZone } from '../src/content/zone.js';
+import { CLASSES, FENMARCH, PLAYABLE_CLASSES, ZONES, getZone } from '../src/content/zone.js';
 import { HeightField, getTheme, type Clearing } from '../src/content/terrain.js';
 import { countEvents, duelZone, emptyZone, levelPlayer, simulateFight, vendorZone } from './helpers.js';
 import { VENDORS, buyPrice, sellPrice } from '../src/content/vendors.js';
@@ -102,7 +102,7 @@ import {
 import { BOSS_STARS, isBoss } from '../src/sim/types.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
 import type { ZoneDef } from '../src/content/zone.js';
-import { BASE_MOVE_SPEED } from '../src/sim/formulas.js';
+import { BASE_MOVE_SPEED, RESPEC_FREE_BELOW } from '../src/sim/formulas.js';
 import {
   HOARD_SETS,
   HOARD_TOKEN_CHANCE,
@@ -4810,6 +4810,122 @@ describe('a set is worth more than its pieces', () => {
       const entry = table.entries.find((e) => e.itemId === hoardTokenId(set));
       expect(entry, `${set.token} is not on its camp's table`).toBeTruthy();
       expect(entry!.chance).toBe(HOARD_TOKEN_CHANCE);
+    }
+  });
+});
+
+// --------------------------------------------------------------------------
+// Taking your points back.
+// --------------------------------------------------------------------------
+
+describe('thinking again', () => {
+  function atTheHold(level: number): { world: World; player: Entity; vendorId: number } {
+    // A trader, and one creature well out of the way so the combat gate can be
+    // tested against a real fight rather than against a private field.
+    const zone: ZoneDef = {
+      ...vendorZone('maeve'),
+      spawns: [{ mobId: 'moor_hare', pos: { x: 60, z: 0 } }],
+    };
+    const world = new World({ seed: 9, zone, classId: 'warrior' });
+    const player = levelPlayer(world, { level });
+    const vendor = [...world.entities.values()].find((e) => e.kind === 'vendor')!;
+    player.pos = { x: vendor.pos.x - 1, z: vendor.pos.z };
+    return { world, player, vendorId: vendor.id };
+  }
+
+  it('gives back exactly what was spent, and nothing else', () => {
+    const { world, player, vendorId } = atTheHold(30);
+    const base = CLASSES.warrior.baseAttributes;
+    const spent = (Object.keys(base) as Array<keyof typeof base>).reduce(
+      (n, k) => n + Math.max(0, (player.attributes?.[k] ?? 0) - base[k]),
+      0,
+    );
+    player.skillRanks = { warrior_strike: 3, warrior_rend: 2 };
+    player.skillPoints = 1;
+    player.gold = 1_000_000;
+    const held = player.unspentPoints ?? 0;
+
+    world.submit(player.id, { t: 'respec', vendorId });
+    world.tick();
+
+    expect(player.attributes).toEqual(base);
+    expect(player.unspentPoints).toBe(held + spent);
+    expect(player.skillRanks).toEqual({});
+    expect(player.skillPoints).toBe(1 + 5);
+    // Points come back; a level does not go anywhere.
+    expect(player.level).toBe(30);
+  });
+
+  it('charges what it says, and refuses when you cannot pay', () => {
+    const { world, player, vendorId } = atTheHold(30);
+    const price = world.respecPrice(player);
+    expect(price).toBeGreaterThan(0);
+
+    player.gold = price - 1;
+    world.submit(player.id, { t: 'respec', vendorId });
+    const refused = world.tick();
+    expect(refused.some((e) => e.t === 'error' && /costs/.test(e.message))).toBe(true);
+    expect(player.gold).toBe(price - 1);
+
+    player.gold = price + 25;
+    world.submit(player.id, { t: 'respec', vendorId });
+    const done = world.tick();
+    expect(done.some((e) => e.t === 'respec')).toBe(true);
+    expect(player.gold).toBe(25);
+  });
+
+  it('is free while the game is still teaching you what any of it does', () => {
+    // The same rule the death debt runs under, for the same reason.
+    const { world, player, vendorId } = atTheHold(RESPEC_FREE_BELOW - 1);
+    expect(world.respecPrice(player)).toBe(0);
+    player.gold = 0;
+    world.submit(player.id, { t: 'respec', vendorId });
+    expect(world.tick().some((e) => e.t === 'respec')).toBe(true);
+  });
+
+  it('leaves your gear on', () => {
+    // Stripping a character would turn one decision into a dressing-up
+    // session, and it is the only version of this that could lose an item.
+    const { world, player, vendorId } = atTheHold(30);
+    player.gold = 1_000_000;
+    const worn = { ...(player.equipment ?? {}) };
+    expect(Object.keys(worn).length).toBeGreaterThan(0);
+    world.submit(player.id, { t: 'respec', vendorId });
+    world.tick();
+    expect(player.equipment).toEqual(worn);
+    expect((player.inventory ?? []).length).toBe(0);
+  });
+
+  it('will not do it across the room, or mid-fight', () => {
+    const { world, player, vendorId } = atTheHold(30);
+    player.gold = 1_000_000;
+    const home = { ...player.pos };
+    player.pos = { x: 90, z: 90 };
+    world.submit(player.id, { t: 'respec', vendorId });
+    expect(world.tick().some((e) => e.t === 'error' && /Too far/.test(e.message))).toBe(true);
+
+    // Pick a fight, then walk back to the shop still being chased.
+    const mob = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+    player.pos = { x: mob.pos.x - 2, z: mob.pos.z };
+    world.submit(player.id, { t: 'target', id: mob.id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+    world.advance(3000);
+    expect(world.inCombat(player.id), 'the harness never got into a fight').toBe(true);
+    world.submit(player.id, { t: 'autoAttack', on: false });
+    player.pos = home;
+    world.submit(player.id, { t: 'respec', vendorId });
+    expect(world.tick().some((e) => e.t === 'error' && /still on you/.test(e.message))).toBe(true);
+  });
+
+  it('is offered by every zone hold and by nobody else', () => {
+    const holds = Object.values(VENDORS).filter((v) => v.respec);
+    // One per zone at least, and never a specialist: a smith would have no
+    // idea how, and the point of it being the hold is that the hold is a place.
+    expect(holds.length).toBeGreaterThanOrEqual(Object.keys(ZONES).length);
+    for (const zone of Object.values(ZONES)) {
+      const here = (zone.settlements ?? []).filter((t) => VENDORS[t.vendorId]?.respec);
+      expect(here.length, `${zone.id} has nowhere to think again`).toBeGreaterThan(0);
+      expect(here.every((t) => t.role === 'hold')).toBe(true);
     }
   });
 });

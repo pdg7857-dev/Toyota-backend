@@ -28,6 +28,7 @@ import {
   healthRegenPerSec,
   MAX_SKILL_RANK,
   POINTS_PER_LEVEL,
+  respecCost,
   SKILL_CRIT_MULTIPLIER,
   SKILL_POINTS_PER_LEVEL,
   skillCritChance,
@@ -1637,6 +1638,9 @@ export class World {
         break;
       case 'leystone':
         this.tryLeystone(e, cmd.stoneId);
+        break;
+      case 'respec':
+        this.tryRespec(e, cmd.vendorId);
         break;
       case 'reclaim':
         if (e.kind === 'player') this.reclaim(e);
@@ -4017,6 +4021,83 @@ export class World {
   }
 
   // ------------------------------------------------------------------ trade
+
+  /**
+   * What taking your points back costs right now.
+   *
+   * Public because the shop row has to show it before the player commits, and
+   * a price the sim charges that the panel had to guess at is a price the two
+   * can disagree about.
+   */
+  respecPrice(player: Entity): number {
+    return respecCost(player.level);
+  }
+
+  /**
+   * Take every attribute and skill point back.
+   *
+   * The whole of "attributes are a build" was a decision made once, at level
+   * six, before the game had said what Focus does — and then lived with for
+   * ninety-four levels. Nothing else in this game is irreversible: a death is
+   * a debt you pay off, a front you lose is one you can take back, and a bad
+   * drop is another kill.
+   *
+   * Gear is deliberately left on. A character who respecs is briefly wearing a
+   * weapon they could no longer equip, which reads as exactly what it is — a
+   * build half-finished — and fixes itself the moment they spend the points.
+   * Stripping them would turn one decision into a dressing-up session, and it
+   * is the only version of this that could lose somebody an item.
+   */
+  private tryRespec(player: Entity, vendorId: EntityId): void {
+    if (player.kind !== 'player') return;
+    if (!this.vendorInReach(player, vendorId)) {
+      this.events.push({ t: 'error', entityId: player.id, message: 'Too far from the trader.' });
+      return;
+    }
+    if (this.inCombat(player.id)) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: 'Not with something still on you.',
+      });
+      return;
+    }
+    const price = this.respecPrice(player);
+    if ((player.gold ?? 0) < price) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `That costs ${price.toLocaleString()} gold.`,
+      });
+      return;
+    }
+
+    const base = CLASSES[player.classId ?? 'warrior'].baseAttributes;
+    const spent = Object.keys(base).reduce(
+      (n, key) =>
+        n +
+        Math.max(
+          0,
+          (player.attributes?.[key as keyof Attributes] ?? 0) - base[key as keyof Attributes],
+        ),
+      0,
+    );
+    const ranks = Object.values(player.skillRanks ?? {}).reduce((n, r) => n + r, 0);
+
+    player.gold = (player.gold ?? 0) - price;
+    player.attributes = { ...base };
+    player.unspentPoints = (player.unspentPoints ?? 0) + spent;
+    player.skillRanks = {};
+    player.skillPoints = (player.skillPoints ?? 0) + ranks;
+
+    this.events.push({
+      t: 'respec',
+      entityId: player.id,
+      gold: price,
+      points: spent,
+      skillPoints: ranks,
+    });
+  }
 
   /** Resolve a vendor the player is standing close enough to deal with. */
   private vendorInReach(player: Entity, vendorId: EntityId): Entity | null {

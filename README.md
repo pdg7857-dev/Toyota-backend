@@ -50,6 +50,14 @@ Add `?fresh` to the URL to discard your save and start over.
 
 Progress autosaves to `localStorage` every 10 seconds.
 
+## Nothing here is irreversible
+
+Five attribute points a level and one skill point, for a hundred levels — and
+the hold in each zone will take every one of them back for a few kills' worth
+of gold, free below level 10. A build you made at level six, before the game
+had said what Focus was for, is not a thing to be stuck with for ninety-four
+levels.
+
 ## Four ways to get dressed
 
 Drops, the story chain, the kit chain — and one camp per zone worth emptying.
