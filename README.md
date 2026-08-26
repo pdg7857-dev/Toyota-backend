@@ -239,6 +239,17 @@ two and you will almost certainly die.
 level keeps climbing: about 6 kills for your first level, 147 by the twenties.
 Grey mobs give almost nothing, so pushing south is the only way forward.
 
+## Eight grades of the same piece
+
+Gear drops at a grade: Minor, Lesser, Greater, Grand, Royal, Majestic,
+Imperial, Godly. Ordinary creatures carry Minor up to Grand; a boss never
+carries below Royal and rarely carries Godly. You have the Longsword — but you
+have a Royal one, and there is a Godly one.
+
+The one-of-a-kind pieces have no grades: a named creature's signature weapon, a
+dragon's, and what the luxury trader sells are the only ones of their kind and
+stay that way.
+
 ## Attributes are a build
 
 Every attribute buys something for everybody: Strength puts damage on every

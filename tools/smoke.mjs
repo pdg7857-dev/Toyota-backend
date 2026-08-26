@@ -2228,6 +2228,69 @@ async function main() {
     };
   });
 
+  // Eight grades of the same piece.
+  //
+  // The whole reason a boss stays worth killing: you have the Longsword, but
+  // you have a Royal one and there is a Godly one. What only a browser can say
+  // is whether the grade reaches the *player* — the name, the colour and the
+  // comparison against what they are wearing.
+  const grades = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const seen = { camp: new Set(), boss: new Set() };
+    const roll = (mobId, n) => {
+      const def = g.mobOf(mobId);
+      const out = new Set();
+      for (let i = 0; i < n; i++) {
+        const mob = [...g.world.entities.values()].find((e) => e.kind === 'mob');
+        if (!mob) break;
+        const was = mob.defId;
+        mob.defId = mobId;
+        g.world.rollLootFor(mob, me);
+        for (const st of mob.corpseLoot ?? []) {
+          const tier = g.tierOf(st.itemId);
+          if (tier) out.add(tier);
+        }
+        mob.defId = was;
+      }
+      void def;
+      return out;
+    };
+    // A camp creature and a boss, many kills each: the question is which
+    // grades each *can* produce, not which one this kill did.
+    for (const t of roll('bog_wolf', 400)) seen.camp.add(t);
+    for (const t of roll('old_scar', 400)) seen.boss.add(t);
+
+    // And one on the ground, so the card and the bags say what it is.
+    const prize = `godly__${Object.values(g.allItems()).find((it) => it.slot === 'weapon' && g.canUse(it.id) && !it.critBonus).id}`;
+    const victim = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
+    victim.pos = { x: me.pos.x + 1, z: me.pos.z };
+    victim.dead = true;
+    victim.health = 0;
+    victim.corpseLoot = [{ itemId: prize, qty: 1 }];
+    victim.corpseGold = 1;
+    victim.respawnInMs = 120000;
+    g.world.submit(me.id, { t: 'loot', id: victim.id });
+    await new Promise((r) => setTimeout(r, 900));
+    const card = document.querySelector('#drop-name')?.textContent ?? '';
+
+    const base = g.itemOf(prize.slice('godly__'.length));
+    const godly = g.itemOf(prize);
+    return {
+      ok: true,
+      camp: [...seen.camp],
+      boss: [...seen.boss],
+      // The rule: a camp never carries a boss grade and a boss never carries
+      // a camp one.
+      campStaysBelow: [...seen.camp].every((t) => !['royal', 'majestic', 'imperial', 'godly'].includes(t)),
+      bossStaysAbove: [...seen.boss].every((t) => ['royal', 'majestic', 'imperial', 'godly'].includes(t)),
+      // And it reaches the player as a name, not as an id.
+      named: /^Godly /.test(card),
+      stronger: (godly.damageMax ?? 0) > (base.damageMax ?? 0),
+      card,
+    };
+  });
+
   // The drop that was worth the hour.
   //
   // A rare or an epic used to arrive as one grey line in a nine-line log,
@@ -3038,6 +3101,9 @@ async function main() {
     ['somebody else pulls a real creature', pulling.ok && pulling.came],
     ['and it is a real fight', pulling.hurt && pulling.alive],
     ['and you get it back whole when you want it', pulling.handedBack],
+    ['a camp never carries a boss grade', grades.ok && grades.campStaysBelow && grades.camp.length > 2],
+    ['and a boss never carries a camp one', grades.bossStaysAbove && grades.boss.length > 2],
+    ['a grade reaches the player by name', grades.named && grades.stronger],
     ['a rare drop is a moment, not a log line', drop.ok && drop.shown && drop.names],
     ['and says how it compares to what you wear', drop.compares],
     ['and the four hundredth pelt says nothing', drop.quiet],
@@ -3184,6 +3250,7 @@ async function main() {
   console.log('levelling:', JSON.stringify(levelling));
   console.log('kit:', JSON.stringify(kit));
   console.log('build:', JSON.stringify(build));
+  console.log('grades:', JSON.stringify(grades));
   console.log('drop:', JSON.stringify(drop), '| sell-all:', JSON.stringify(sellAll));
   console.log('pulling:', JSON.stringify(pulling), '| tidy:', JSON.stringify(tidy));
   console.log('belt:', JSON.stringify(belt));

@@ -534,6 +534,56 @@ asserts the dominance relation — if one mob is no easier on both level and sta
 and strictly harder on one, it must pay more — which already caught an outlaw
 bonus letting a level-16 mob out-earn a level-21 one.
 
+## Eight grades of the same piece
+
+A drop used to be a single fixed object: the Iron Longsword was the Iron
+Longsword, and once you had it that camp had nothing left to give you. The
+whole back half of a hundred-level game is farming things you have already
+beaten, and *you have already got that one* is the worst thing a loot table can
+say.
+
+A **tier** (`content/tiers.ts`) is a grade of an existing piece, not a new
+piece: same name, same slot, same silhouette, a prefix and a multiplier. Minor,
+Lesser, Greater, Grand, Royal, Majestic, Imperial, Godly. A ladder of eight
+*new* items per slot would be eight times the content to write and would say
+nothing new; what this buys is a reason to kill the same boss again — you have
+the Longsword, but you have a Royal one and there is a Godly one.
+
+Two rules decide where they come from, and between them they are the design:
+
+- **Ordinary creatures roll Minor to Grand.** A ★1 can hand you a Minor piece
+  and, one drop in fifty, a Grand one. Nothing below a boss ever carries
+  better, so the ladder of camps is a ladder of *odds* rather than of ceilings.
+- **A boss never rolls below Royal, and rarely rolls Godly.** A ★5 pays Godly
+  about one drop in fifty and a ★6 about one in seventeen, so the answer to
+  "why fight Old Scar again" is a number rather than a shrug.
+
+**Greater is 1.0** — the piece exactly as it was authored. That is not a
+detail: the DPS budget, the armour curve and every boss win rate in the suite
+were fitted against that ladder, so the grade a piece "normally" is has to be
+the one those numbers were measured at. Minor and Lesser sit below it and the
+four boss grades above.
+
+Three things fall out of it for free, which is how you know the axis was the
+right one:
+
+- **Quality still means what it meant.** A tier maps onto `ItemQuality`, so
+  Royal and Majestic read as rare and Imperial and Godly as epic — which means
+  a boss grade gets the drop card and a camp grade goes quietly to the log,
+  without the card ever being told what a tier is.
+- **The trader maths holds.** Value scales with the square of the multiplier,
+  so a Godly piece is a Godly price and no buy-and-resell loop opens up.
+- **The one-of-a-kind pieces are untouched.** `canBeGraded` refuses anything
+  carrying an affix — the signature pieces a named creature drops, a dragon's
+  weapon, the luxury offhands, the quest sets. A Godly Mirefang Blade would
+  turn "the only one of these in the game" into a ladder.
+
+Graded items are **built the first time anybody asks for one**. Generating them
+up front is two thousand three hundred extra entries in a table a dozen tests
+walk, to cover the handful any one character will ever see; `getItem`
+materialises whatever a save or a loot roll hands it, so a graded id is always
+resolvable and nothing needs telling about them in advance.
+
 ## Rare spawns: the thing you farm for
 
 Some creatures are not in the zone layout at all. Every time a **host** camp

@@ -73,6 +73,7 @@ import {
   weatherAt,
 } from '../src/content/daylight.js';
 import { ITEMS, bestDrink, canEquip, gearSetFor, getItem } from '../src/content/items.js';
+import { TIER_ORDER, baseItemId, splitTier } from '../src/content/tiers.js';
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
 import {
   ARMOUR_LINES,
@@ -946,10 +947,18 @@ describe('boss class weapons', () => {
       world.advance(4000);
 
       expect(boss.dead).toBe(true);
-      expect(boss.corpseLoot?.some((s) => s.itemId === expected)).toBe(true);
+      // Through the base id: a boss's weapon comes out at a grade now, so the
+      // drop is a Royal Scarred Fang or better rather than the plain one. What
+      // the test is about is *which* weapon, not which grade of it.
+      const dropped = boss.corpseLoot?.find((s) => baseItemId(s.itemId) === expected);
+      expect(dropped, `no ${expected} on the corpse`).toBeDefined();
       // And it must actually be equippable by the class that earned it.
-      const drop = getItem(expected);
+      const drop = getItem(dropped!.itemId);
       expect(canEquip(drop, classId)).toBe(true);
+      // A boss never hands out below Royal — that is what a boss is for.
+      const tier = splitTier(dropped!.itemId)?.tier;
+      expect(tier, `${expected} came out ungraded`).toBeDefined();
+      expect(TIER_ORDER.indexOf(tier!)).toBeGreaterThanOrEqual(TIER_ORDER.indexOf('royal'));
     });
   }
 });

@@ -5,6 +5,7 @@ import { buildConsumables } from './consumables.js';
 import { buildQuestGear } from './questgear.js';
 import { buildSignatureItems } from './rares.js';
 import { skillsTaughtBy, tomeNoun } from './skills.js';
+import { TIERS, splitTier, tieredId, type ItemTier } from './tiers.js';
 import type { Attributes, ClassId, DamageType, ItemDef, ItemQuality } from '../sim/types.js';
 
 /**
@@ -795,10 +796,70 @@ Object.assign(ITEMS, buildDragonItems());
 Object.assign(ITEMS, buildLuxuryGoods());
 Object.assign(ITEMS, buildConsumables());
 
+/**
+ * Whether a piece can carry a grade at all.
+ *
+ * Everything a camp or a boss can hand you does. What does not: the signature
+ * pieces a named creature carries, a dragon's weapon, the luxury shop's
+ * offhands, and the quest sets. Those are already *one specific thing* — a
+ * Godly Mirefang Blade would turn "the only one of these in the game" into a
+ * ladder, which is the opposite of what a signature piece is for.
+ */
+export function canBeGraded(item: ItemDef): boolean {
+  if (!item.slot || item.slot === 'none') return false;
+  if (item.merchantGood || item.consumable || item.teaches) return false;
+  // Anything carrying an affix is a signature, a dragon's or a luxury piece.
+  if (item.critBonus || item.healthBonus || item.moveSpeedBonus) return false;
+  if (item.damageBonus || item.skillPower || item.regenBonus) return false;
+  return true;
+}
+
+/**
+ * One grade of one piece, built the first time anybody asks for it.
+ *
+ * Built on demand rather than generated up front because the alternative is
+ * two thousand three hundred extra entries in a table that a dozen tests walk,
+ * to cover the handful any one character will ever actually see. `getItem`
+ * materialises whatever a save or a loot roll hands it, so a tiered id is
+ * always resolvable and nothing has to be told about them in advance.
+ */
+function buildGraded(tier: ItemTier, base: ItemDef): ItemDef {
+  const t = TIERS[tier];
+  const scale = (n: number | undefined): number | undefined =>
+    n === undefined ? undefined : Math.max(1, Math.round(n * t.power));
+  const attrs = base.attributes
+    ? Object.fromEntries(
+        Object.entries(base.attributes).map(([k, v]) => [k, Math.round((v ?? 0) * t.power)]),
+      )
+    : undefined;
+  return {
+    ...base,
+    id: tieredId(base.id, tier),
+    name: `${t.prefix} ${base.name}`,
+    quality: t.quality,
+    // Worth what it does, so a Godly piece is a Godly price and the trader
+    // maths that the whole economy rests on keeps holding.
+    value: Math.max(1, Math.round(base.value * t.power * t.power)),
+    damageMin: scale(base.damageMin),
+    damageMax: scale(base.damageMax),
+    armor: scale(base.armor),
+    ...(attrs ? { attributes: attrs as ItemDef['attributes'] } : {}),
+  };
+}
+
 export function getItem(id: string): ItemDef {
   const item = ITEMS[id];
-  if (!item) throw new Error(`Unknown item: ${id}`);
-  return item;
+  if (item) return item;
+  const graded = splitTier(id);
+  if (graded) {
+    const base = ITEMS[graded.baseId];
+    if (base) {
+      const made = buildGraded(graded.tier, base);
+      ITEMS[id] = made;
+      return made;
+    }
+  }
+  throw new Error(`Unknown item: ${id}`);
 }
 
 /** Whether `classId` is allowed to equip this item. */

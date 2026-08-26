@@ -81,9 +81,10 @@ import type {
   QuestObjective,
   SimEvent,
   SkillDef,
+  StarRating,
   Vec2,
 } from './types.js';
-import { canEquip, getItem } from '../content/items.js';
+import { canBeGraded, canEquip, getItem } from '../content/items.js';
 import {
   CONSUMABLE_DROP_CHANCE,
   ELIXIR_COOLDOWN_MS,
@@ -152,6 +153,7 @@ import {
   type DiscoverySite,
 } from '../content/discoveries.js';
 import { zoneStructures as structuresOf } from '../content/structures.js';
+import { rollTier, tieredId } from '../content/tiers.js';
 import {
   MUSTER_AT,
   MUSTER_CELL,
@@ -2992,7 +2994,7 @@ export class World {
     // class-locked drop they can only vendor.
     if (table.classWeapons && killer?.kind === 'player' && killer.classId) {
       const weaponId = table.classWeapons[killer.classId];
-      if (weaponId) loot.push({ itemId: weaponId, qty: 1 });
+      if (weaponId) loot.push({ itemId: this.graded(weaponId, def.stars), qty: 1 });
     }
 
     // The same resolution for a skill tome, minus anything the killer already
@@ -3023,7 +3025,10 @@ export class World {
       }
       if (isGear) gearChance += chance;
       if (!this.rng.chance(chance)) continue;
-      loot.push({ itemId: entry.itemId, qty: this.rng.int(entry.min, entry.max) });
+      loot.push({
+        itemId: isGear ? this.graded(entry.itemId, def.stars) : entry.itemId,
+        qty: this.rng.int(entry.min, entry.max),
+      });
     }
 
     // A potion, often. Deliberately outside the loot table and outside the
@@ -3037,6 +3042,21 @@ export class World {
     const gold = goldForKill(def.level, def.stars, table.goldMultiplier ?? 1);
     mob.corpseLoot = loot;
     mob.corpseGold = this.rng.int(gold.min, gold.max);
+  }
+
+  /**
+   * The grade a creature of this rating hands this piece out at.
+   *
+   * Rolled here rather than baked into the table, because the whole point is
+   * that the *same* piece comes back better: an Iron Longsword off a ★2 is a
+   * Lesser one and off Old Scar it is a Royal one at worst. Anything that
+   * cannot carry a grade — a signature piece, a dragon's weapon, a tome —
+   * passes straight through.
+   */
+  private graded(itemId: string, stars: StarRating): string {
+    const base = getItem(itemId);
+    if (!canBeGraded(base)) return itemId;
+    return tieredId(itemId, rollTier(this.rng, stars));
   }
 
   private awardXp(player: Entity, amount: number): void {

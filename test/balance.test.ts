@@ -29,6 +29,7 @@ import {
   ABILITY_ANSWERS,
   BOSS_STARS,
   type ClassId,
+  type StarRating,
   type Entity,
   type MobDef,
 } from '../src/sim/types.js';
@@ -127,7 +128,22 @@ import {
   PRESSURE_PER_KILL,
   getFaction,
 } from '../src/content/factions.js';
-import { ITEMS, WEAPON_LADDER, canEquip, gearSetFor, getItem } from '../src/content/items.js';
+import {
+  ITEMS,
+  WEAPON_LADDER,
+  canBeGraded,
+  canEquip,
+  gearSetFor,
+  getItem,
+} from '../src/content/items.js';
+import {
+  TIERS,
+  TIER_ORDER,
+  TIER_WEIGHTS,
+  killsPerTier,
+  tieredId,
+  type ItemTier,
+} from '../src/content/tiers.js';
 import { MAX_STOCK_QUALITY, VENDORS, buyPrice, sellPrice } from '../src/content/vendors.js';
 import { LUXURY_VENDOR_ID } from '../src/content/luxury.js';
 import { skillBarFor, skillsForClass, skillsTaughtBy } from '../src/content/skills.js';
@@ -2555,6 +2571,106 @@ describe('every creature does something, not just bosses', () => {
       expect(t.answer.length, `${t.id} says what it does but not what to do`).toBeGreaterThan(12);
       expect(t.line.length).toBeGreaterThan(12);
     }
+  });
+});
+
+describe('eight grades of the same piece', () => {
+  /**
+   * The printed table is the whole point. "A boss is worth farming" is not a
+   * thing any single assertion can see — it is a distribution, and the number
+   * that matters is how many kills a Godly piece is.
+   */
+  it('prints what each rating hands out, and keeps a boss above a camp', () => {
+    const rows: string[] = [];
+    for (const stars of [1, 2, 3, 4, 5, 6] as StarRating[]) {
+      const parts = TIER_ORDER.filter((t) => TIER_WEIGHTS[stars][t] !== undefined).map((t) => {
+        const kills = killsPerTier(stars, t);
+        return `${TIERS[t].prefix} 1 in ${kills.toFixed(kills >= 10 ? 0 : 1)}`;
+      });
+      rows.push(`  ★${stars}  ${parts.join('   ')}`);
+    }
+    // eslint-disable-next-line no-console
+    console.log('\nWHAT A GRADE COSTS, PER DROP\n' + rows.join('\n'));
+
+    // The rule the whole thing rests on: an ordinary creature never carries
+    // what a boss carries, and a boss never carries what an ordinary creature
+    // does. Without that a bag of hare drops quietly out-gears Old Scar.
+    const bossFloor = TIER_ORDER.indexOf('royal');
+    for (const stars of [1, 2, 3, 4] as StarRating[]) {
+      for (const tier of Object.keys(TIER_WEIGHTS[stars]) as ItemTier[]) {
+        expect(
+          TIER_ORDER.indexOf(tier),
+          `a ★${stars} can drop a ${tier}`,
+        ).toBeLessThan(bossFloor);
+      }
+    }
+    for (const stars of [5, 6] as StarRating[]) {
+      for (const tier of Object.keys(TIER_WEIGHTS[stars]) as ItemTier[]) {
+        expect(
+          TIER_ORDER.indexOf(tier),
+          `a ★${stars} can drop a ${tier}`,
+        ).toBeGreaterThanOrEqual(bossFloor);
+      }
+    }
+
+    // And the best grade has to be rare enough to be worth going back for, and
+    // common enough to be worth hoping for.
+    expect(killsPerTier(5, 'godly')).toBeGreaterThan(20);
+    expect(killsPerTier(6, 'godly')).toBeLessThan(30);
+  });
+
+  it('climbs, and puts Greater exactly where the ladder always was', () => {
+    // Greater is the piece as it was authored. The entire game is fitted
+    // against that ladder — the DPS budget, the armour curve, every boss win
+    // rate in this file — so the grade a piece "normally" is has to be the one
+    // those numbers were measured at.
+    expect(TIERS.greater.power).toBe(1);
+    for (let i = 1; i < TIER_ORDER.length; i++) {
+      const below = TIERS[TIER_ORDER[i - 1]!];
+      const above = TIERS[TIER_ORDER[i]!];
+      expect(above.power, `${TIER_ORDER[i]} is not above ${TIER_ORDER[i - 1]}`).toBeGreaterThan(
+        below.power,
+      );
+    }
+    // A Godly piece is a real jump on a Minor one and nothing like a tier of
+    // the ladder: the ladder roughly doubles every few levels, and this has to
+    // stay a *grade* rather than a shortcut past twenty levels of content.
+    expect(TIERS.godly.power / TIERS.minor.power).toBeGreaterThan(2);
+    expect(TIERS.godly.power / TIERS.greater.power).toBeLessThan(2);
+  });
+
+  it('leaves the one-of-a-kind pieces alone', () => {
+    // A Godly Mirefang Blade would turn "the only one of these in the game"
+    // into a ladder, which is the opposite of what a signature piece is for.
+    // Same for a dragon's weapon and the luxury shop's offhands.
+    const named = Object.values(ITEMS).filter(
+      (it) => it.critBonus || it.healthBonus || it.moveSpeedBonus || it.skillPower,
+    );
+    expect(named.length, 'no signature pieces to check').toBeGreaterThan(4);
+    for (const item of named) {
+      expect(canBeGraded(item), `${item.id} can be graded`).toBe(false);
+    }
+    // And everything an ordinary camp drops can be.
+    const droppable = Object.values(LOOT_TABLES)
+      .flatMap((t) => t.entries.map((e) => getItem(e.itemId)))
+      .filter((it) => it.slot && it.slot !== 'none' && !it.merchantGood && !it.teaches);
+    const gradable = droppable.filter((it) => canBeGraded(it));
+    expect(gradable.length / Math.max(1, droppable.length)).toBeGreaterThan(0.8);
+  });
+
+  it('scales what a piece does, and what it is worth', () => {
+    const base = getItem('iron_longsword');
+    const royal = getItem(tieredId('iron_longsword', 'royal'));
+    const minor = getItem(tieredId('iron_longsword', 'minor'));
+
+    expect(royal.name).toBe(`Royal ${base.name}`);
+    expect(royal.damageMax!).toBeGreaterThan(base.damageMax!);
+    expect(minor.damageMax!).toBeLessThan(base.damageMax!);
+    expect(royal.slot).toBe(base.slot);
+    expect(royal.classes).toEqual(base.classes);
+    // Worth more than it does, so the trader maths the whole economy rests on
+    // still holds: a Godly piece is a Godly price.
+    expect(royal.value / base.value).toBeGreaterThan(TIERS.royal.power);
   });
 });
 
