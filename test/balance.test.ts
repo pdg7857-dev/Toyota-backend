@@ -2674,6 +2674,92 @@ describe('eight grades of the same piece', () => {
   });
 });
 
+describe('gear asks for more than a level', () => {
+  it('lets a committed build wear its own ladder, and a spread one not', () => {
+    // The point of a requirement is that a build decides what you can put on.
+    // If every build clears it, it is decoration; if only one does, it is a
+    // trap. Committing to one attribute or splitting two both clear it;
+    // spreading across three does not.
+    const rows: string[] = [];
+    for (const level of [25, 50, 80]) {
+      const points = (level - 1) * POINTS_PER_LEVEL;
+      const set = gearSetFor('warrior', level).map((id) => getItem(id));
+      const weapon = set.find((it) => it.slot === 'weapon')!;
+      const armour = set.find((it) => it.slot === 'chest')!;
+      const wantStr = weapon.reqAttributes?.strength ?? 0;
+      const wantVit = armour.reqAttributes?.vitality ?? 0;
+
+      const committed = { str: 8 + points * 0.6, vit: 8 + points * 0.4 };
+      // Somebody who never touched the attribute their weapon fights with,
+      // and somebody who never touched Vitality. Both are builds a player can
+      // actually make by clicking + without reading anything.
+      const noStrength = 8;
+      const noVitality = 8;
+
+      rows.push(
+        `  lv${String(level).padStart(3)}  weapon wants ${String(wantStr).padStart(3)} str, ` +
+          `armour wants ${String(wantVit).padStart(3)} vit   ` +
+          `committed ${Math.round(committed.str)}/${Math.round(committed.vit)}   ` +
+          `ignored ${noStrength}/${noVitality}`,
+      );
+
+      expect(wantStr, `nothing asked at ${level}`).toBeGreaterThan(0);
+      expect(committed.str, `a committed build cannot hold its weapon at ${level}`)
+        .toBeGreaterThanOrEqual(wantStr);
+      expect(committed.vit, `a committed build cannot wear its armour at ${level}`)
+        .toBeGreaterThanOrEqual(wantVit);
+      // And it has to actually refuse somebody. A requirement every build
+      // clears is a line of text.
+      expect(noStrength, `a character with no Strength holds the weapon at ${level}`)
+        .toBeLessThan(wantStr);
+      expect(noVitality, `a character with no Vitality wears the plate at ${level}`)
+        .toBeLessThan(wantVit);
+    }
+    // eslint-disable-next-line no-console
+    console.log('\nWHAT GEAR ASKS FOR\n' + rows.join('\n'));
+  });
+
+  it('never hands a character gear it cannot wear', () => {
+    // `gearSetFor` is what the whole balance suite dresses in. It used to round
+    // to the nearest rung, which for levels 26 and 27 handed back a piece meant
+    // for 28 — and the moment gear asked for a level that meant the suite
+    // fought Old Scar naked and reported the fight unwinnable played well.
+    for (const cls of PLAYABLE_CLASSES) {
+      for (let level = 1; level <= 100; level++) {
+        for (const id of gearSetFor(cls.id, level)) {
+          const item = getItem(id);
+          expect(item.reqLevel ?? 0, `${cls.id} at ${level} is handed ${id}`).toBeLessThanOrEqual(
+            level,
+          );
+        }
+      }
+    }
+  });
+
+  it('asks more of a better grade', () => {
+    const base = getItem('bearhide_cuirass');
+    const godly = getItem(tieredId('bearhide_cuirass', 'godly'));
+    expect(base.reqAttributes?.vitality).toBeGreaterThan(0);
+    expect(godly.reqAttributes!.vitality!).toBeGreaterThan(base.reqAttributes!.vitality!);
+    // But the level is unchanged: a Godly piece of a level-19 item is still a
+    // level-19 item, and it is the build it asks more of.
+    expect(godly.reqLevel).toBe(base.reqLevel);
+  });
+
+  it('asks nothing of the first weapon anybody is handed', () => {
+    // A character who cannot equip the weapon they were created with, or the
+    // first one they find, has been told to fix a build before they have
+    // played the game.
+    for (const cls of PLAYABLE_CLASSES) {
+      for (const id of WEAPON_LADDER[cls.id].slice(0, 2)) {
+        const item = getItem(id);
+        expect(item.reqAttributes, `${id} asks for a build`).toBeUndefined();
+        expect(item.reqLevel ?? 1, `${id} asks for a level`).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+});
+
 describe('every attribute is worth spending on', () => {
   /**
    * Two of the four used to be dead weight for most of the roster. Strength

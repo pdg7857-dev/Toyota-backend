@@ -239,6 +239,14 @@ two and you will almost certainly die.
 level keeps climbing: about 6 kills for your first level, 147 by the twenties.
 Grey mobs give almost nothing, so pushing south is the only way forward.
 
+## Gear asks for more than a level
+
+A weapon wants the attribute its class fights with; armour wants Vitality; a
+better grade wants more of it. Commit to one attribute or split two and your
+own ladder fits; spread across three and you will be carrying drops you cannot
+put on. The bag greys out what you cannot wear and says which attribute is
+short.
+
 ## Eight grades of the same piece
 
 Gear drops at a grade: Minor, Lesser, Greater, Grand, Royal, Majestic,

@@ -534,6 +534,47 @@ asserts the dominance relation — if one mob is no easier on both level and sta
 and strictly harder on one, it must pay more — which already caught an outlaw
 bonus letting a level-16 mob out-earn a level-21 one.
 
+## Gear asks for more than a level
+
+A level said *when* a piece was for you and nothing said *who*. Gear now asks
+for attributes as well — a weapon for the attribute its class fights with,
+armour for Vitality — and that is what stops a build being a set of numbers
+nobody can feel: spreading points across three attributes means a rack of drops
+you cannot put on.
+
+Three numbers hold it, and each was measured rather than picked:
+
+- **A weapon asks 60% of `expectedPrimary`.** Committing to one attribute
+  clears it with room; splitting two clears it; ignoring it entirely does not.
+- **Armour asks 40%.** Nobody builds Vitality as a primary, and a share fitted
+  to a weapon's would leave every piece of plate in the game one bad level-up
+  from unwearable. What armour asks is "have you got some constitution".
+- **The first two rungs of every weapon ladder ask nothing.** A character who
+  cannot equip the weapon they were created with, or the first one they find,
+  has been told to go and fix a build before they have played the game.
+
+A **better grade asks more** — a Godly piece wants a character actually built
+for it — but never a higher *level*: a Godly piece of a level-19 item is still
+a level-19 item. That is what keeps the boss grades from being a free upgrade
+you stumble into at twelve.
+
+Set centrally rather than in each generator (`assignRequirements`). There are
+four ladders and two of them are generated from curves; a requirement typed
+into three of the four is a fourth that quietly asks for nothing.
+
+The bag greys out what you cannot wear and the tooltip says which attribute is
+short and by how much, because a bag that lets you click something the sim will
+refuse is a bag that argues with you.
+
+### And it found a bug in the harness the day it landed
+
+`gearSetFor` is what the whole balance suite dresses in, and it rounded to the
+*nearest* rung — which for levels 26 and 27 handed back a piece meant for 28.
+Harmless while gear asked for nothing. The moment it asked for a level, the
+suite fought Old Scar naked and reported the fight as unwinnable played well,
+which is exactly the shape of the six other harness bugs in this file: a
+number that looks like a balance problem and is a test dressing itself wrong.
+
 ## Eight grades of the same piece
 
 A drop used to be a single fixed object: the Iron Longsword was the Iron

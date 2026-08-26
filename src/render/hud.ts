@@ -2208,6 +2208,7 @@ export class Hud {
                 item.slot && item.slot !== 'none'
                   ? (player.equipment?.[item.slot as EquipSlot] ?? null)
                   : null,
+              short: this.world.shortOn(player, item),
               foot: `${price}g — you have ${gold.toLocaleString()}g`,
             })
           : {
@@ -2939,14 +2940,19 @@ export class Hud {
   private buildBagSlot(player: Entity, stack: ItemStack): HTMLElement {
     const item = getItem(stack.itemId);
     const usable = canEquip(item, player.classId);
-    const wearable = !!item.slot && item.slot !== 'none' && usable;
+    // Not just "your class can use it" — whether you can actually put it on.
+    // A grade you cannot wear yet is the whole point of grades asking for a
+    // build, and the bag has to say so rather than let you click and be told.
+    const short = this.world.shortOn(player, item);
+    const underLevelled = !!item.reqLevel && player.level < item.reqLevel;
+    const wearable = !!item.slot && item.slot !== 'none' && usable && !short && !underLevelled;
     const drinkable = !!item.consumable;
     const taught = item.teaches ? getSkill(item.teaches) : null;
     const known = taught ? (player.learnedSkills ?? []).includes(taught.id) : false;
     const learnable = !!taught && usable && !known && player.level >= taught.reqLevel;
 
     const cell = document.createElement('div');
-    cell.className = `bag-slot${usable ? '' : ' unusable'}`;
+    cell.className = `bag-slot${usable && !short && !underLevelled ? '' : ' unusable'}`;
     cell.style.borderColor = QUALITY_COLORS[item.quality];
 
     // Is anything you are carrying this for? A collection grind is a lot
@@ -2979,6 +2985,7 @@ export class Hud {
         equipped: item.slot && item.slot !== 'none'
           ? (this.world.player.equipment?.[item.slot as EquipSlot] ?? null)
           : null,
+        short: this.world.shortOn(this.world.player, item),
       }),
     );
 
@@ -3129,10 +3136,21 @@ function renderTip(c: TipContent): string {
  * has to open the character sheet, read six numbers, close it and come back is
  * a player who will just equip whatever has the bigger name.
  */
-function itemTip(itemId: string, opts: { equipped?: string | null; foot?: string } = {}): TipContent {
+function itemTip(
+  itemId: string,
+  opts: {
+    equipped?: string | null;
+    foot?: string;
+    /** Set when the wearer does not have what the piece asks for. */
+    short?: { attr: string; needed: number; have: number } | null;
+  } = {},
+): TipContent {
   const item = getItem(itemId);
   const lines: string[] = [];
   if (item.reqLevel) lines.push(`Requires level ${item.reqLevel}`);
+  for (const [attr, needed] of Object.entries(item.reqAttributes ?? {})) {
+    lines.push(`Requires ${needed} ${attr}`);
+  }
   if (item.classes) lines.push(`${item.classes.join(' / ')} only`);
 
   if (item.damageMin !== undefined) {
@@ -3179,6 +3197,11 @@ function itemTip(itemId: string, opts: { equipped?: string | null; foot?: string
     desc: item.flavor,
     compare: worn ? compareItems(item, worn) : undefined,
     note,
+    // The one thing a player needs before they click, not after: a bag that
+    // lets you try something the sim will refuse is a bag that argues with you.
+    warn: opts.short
+      ? `Needs ${opts.short.needed} ${opts.short.attr} — you have ${opts.short.have}.`
+      : undefined,
     foot: opts.foot ?? `Worth ${item.value.toLocaleString()}g`,
   };
 }

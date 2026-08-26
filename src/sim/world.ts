@@ -75,6 +75,7 @@ import type {
   Entity,
   EntityId,
   EquipSlot,
+  ItemDef,
   ItemStack,
   MobAbilityDef,
   MobDef,
@@ -4076,6 +4077,28 @@ export class World {
     this.events.push({ t: 'skillRanked', entityId: player.id, skillId, rank: rank + 1 });
   }
 
+  /**
+   * The first attribute this piece asks for that the wearer has not got.
+   *
+   * Public because the HUD asks the same question to grey a row out: a bag
+   * that lets you click something the sim will refuse is a bag that argues
+   * with you.
+   */
+  shortOn(
+    player: Entity,
+    def: ItemDef,
+  ): { attr: keyof Attributes; needed: number; have: number } | null {
+    if (!def.reqAttributes) return null;
+    const have = this.displayAttributes(player);
+    for (const [attr, needed] of Object.entries(def.reqAttributes) as [
+      keyof Attributes,
+      number,
+    ][]) {
+      if (have[attr] < needed) return { attr, needed, have: have[attr] };
+    }
+    return null;
+  }
+
   private tryEquip(player: Entity, itemId: string): void {
     const def = getItem(itemId);
     // A potion has a slot of 'none' rather than null, so the inventory can tell
@@ -4097,6 +4120,18 @@ export class World {
         t: 'error',
         entityId: player.id,
         message: `${def.name} needs level ${def.reqLevel}.`,
+      });
+      return;
+    }
+    // And what the piece asks of your build. Measured against your *total*
+    // attributes, gear included — taking off the ring that let you wear the
+    // helm would otherwise be a puzzle nobody asked for.
+    const short = this.shortOn(player, def);
+    if (short) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: `${def.name} needs ${short.needed} ${short.attr} — you have ${short.have}.`,
       });
       return;
     }

@@ -180,6 +180,20 @@ export interface ItemDef {
    * the game from being a shortcut past eighty levels of it.
    */
   reqLevel?: number;
+  /**
+   * Attributes you must actually have to wear it.
+   *
+   * A level says *when* a piece is for you; this says *who* it is for. A
+   * grimoire asking for Focus is the shortest way to say "this is a caster's",
+   * and it is what stops a build from being a set of numbers nobody can feel:
+   * spreading points across three attributes now means a rack of gear you
+   * cannot put on.
+   *
+   * Deliberately set at a little over half what a committed build has at that
+   * level — see `equipRequirements`. Committing to one attribute or splitting
+   * two both clear it; spreading thin does not.
+   */
+  reqAttributes?: Partial<Attributes>;
 }
 
 export interface ItemStack {

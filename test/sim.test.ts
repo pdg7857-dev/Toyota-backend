@@ -648,7 +648,9 @@ describe('loot and inventory', () => {
 
   it('swaps equipment and returns the old item to the bags', () => {
     const world = new World({ seed: 2, zone: emptyZone(), classId: 'warrior' });
-    const player = world.player;
+    // Levelled, because the cudgel asks for a level and some Strength now.
+    // Swapping gear you are not allowed to wear is a different test.
+    const player = levelPlayer(world, { level: 12 });
     expect(player.equipment?.weapon).toBe('rusted_blade');
     const before = world.statsOf(player).damageMin;
 
@@ -909,7 +911,9 @@ describe('classes', () => {
   it('lets either class wear the same armour', () => {
     for (const classId of ['warrior', 'priest'] as const) {
       const world = new World({ seed: 1, zone: emptyZone(), classId });
-      const player = world.player;
+      // Levelled first: armour asks for a level and some Vitality now, and
+      // what this test is about is that it never asks which class you are.
+      const player = levelPlayer(world, { level: 25 });
       world.addItem(player, { itemId: 'bearhide_cuirass', qty: 1 });
       world.submit(player.id, { t: 'equip', itemId: 'bearhide_cuirass' });
       world.tick();

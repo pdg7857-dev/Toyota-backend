@@ -1,10 +1,11 @@
 import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from './curves.js';
+import { expectedPrimary } from '../sim/formulas.js';
 import { buildDragonItems } from './dragons.js';
 import { buildLuxuryGoods } from './luxury.js';
 import { buildConsumables } from './consumables.js';
 import { buildQuestGear } from './questgear.js';
 import { buildSignatureItems } from './rares.js';
-import { skillsTaughtBy, tomeNoun } from './skills.js';
+import { CLASS_ATTRIBUTES, skillsTaughtBy, tomeNoun } from './skills.js';
 import { TIERS, splitTier, tieredId, type ItemTier } from './tiers.js';
 import type { Attributes, ClassId, DamageType, ItemDef, ItemQuality } from '../sim/types.js';
 
@@ -709,20 +710,112 @@ export const ARMOR_LADDER: Record<'head' | 'chest' | 'legs' | 'ring', string[]> 
     ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_ring`)],
 };
 
+/**
+ * What a piece asks of you, beyond a level.
+ *
+ * A weapon asks for the attribute its class fights with; armour asks for
+ * Vitality. Both at **62% of what a committed build has** at that level, which
+ * is the number that makes this a decision rather than a tax: committing to
+ * one attribute clears it comfortably, splitting two clears it, and spreading
+ * across three does not. A player who ignores the character sheet entirely
+ * ends up unable to put their drops on, which is the game saying "spend your
+ * points" in the only language it has.
+ *
+ * Set centrally rather than in each generator. There are four ladders and two
+ * of them are generated from curves; a requirement typed into three of the
+ * four is a fourth that quietly asks for nothing.
+ */
+export const WEAPON_REQUIREMENT_SHARE = 0.6;
+
+/**
+ * Armour asks for less, because nobody builds Vitality as a primary.
+ *
+ * A standard build carries about two thirds of `expectedPrimary` in Vitality,
+ * so a share fitted to a weapon's would have every piece of plate in the game
+ * sitting one bad level-up away from unwearable. What armour is asking is "do
+ * you have some constitution", not "did you commit to this".
+ */
+export const ARMOUR_REQUIREMENT_SHARE = 0.4;
+
+function requirementFor(
+  level: number,
+  attr: keyof Attributes,
+  share: number,
+): Partial<Attributes> {
+  return { [attr]: Math.max(1, Math.round(expectedPrimary(level) * share)) };
+}
+
+/** The level each rung of a ladder is meant for. */
+function ladderLevels(ladder: string[]): number[] {
+  const earlyCount = ladder.length - LATE_TIER_LEVELS.length;
+  // `i` rather than `i + 1`: a rung is for the level you can *first* plausibly
+  // be carrying it, not the level you have outgrown it at. The strict version
+  // put the tier-3 sword at 13 and made the hand-authored level-12 encounter
+  // in the balance suite unwearable, which is the suite saying the mapping is
+  // a band too mean rather than the encounter being wrong.
+  return ladder.map((_, i) =>
+    i < earlyCount
+      ? Math.max(1, Math.round((i / earlyCount) * 25))
+      : LATE_TIER_LEVELS[i - earlyCount]!,
+  );
+}
+
+function assignRequirements(): void {
+  for (const [classId, ladder] of Object.entries(WEAPON_LADDER) as [ClassId, string[]][]) {
+    const levels = ladderLevels(ladder);
+    ladder.forEach((id, i) => {
+      const item = ITEMS[id];
+      if (!item) return;
+      const level = levels[i]!;
+      // The first two rungs ask for nothing. A character who cannot equip the
+      // weapon they were handed at creation, or the first one they find, has
+      // been told to go and fix a build before they have played the game.
+      if (i <= 1) return;
+      item.reqLevel = level;
+      item.reqAttributes = requirementFor(
+        level,
+        CLASS_ATTRIBUTES[classId].power,
+        WEAPON_REQUIREMENT_SHARE,
+      );
+    });
+  }
+  for (const ladder of Object.values(ARMOR_LADDER)) {
+    const levels = ladderLevels(ladder);
+    ladder.forEach((id, i) => {
+      const item = ITEMS[id];
+      if (!item || i === 0) return;
+      item.reqLevel = levels[i]!;
+      item.reqAttributes = requirementFor(levels[i]!, 'vitality', ARMOUR_REQUIREMENT_SHARE);
+    });
+  }
+}
+
 /** A full gear set appropriate to `level`, for tests and vendor stocking. */
 export function gearSetFor(classId: ClassId, level: number): string[] {
   const pick = (ladder: string[]): string => {
+    // Walked back down to something the character can actually put on.
+    //
+    // The index maths below rounds to the *nearest* rung, which for levels 26
+    // and 27 hands back the first late-ladder piece — and that one is meant
+    // for 28. Harmless while gear asked for nothing; the moment it asked for a
+    // level it meant the balance harness fought Old Scar naked and reported
+    // the fight as unwinnable played well.
+    const wearable = (id: string): string => {
+      let at = ladder.indexOf(id);
+      while (at > 0 && (ITEMS[ladder[at]!]?.reqLevel ?? 0) > level) at--;
+      return ladder[at]!;
+    };
     // Early tiers cover 1-25 in eight steps; late tiers are LATE_TIER_LEVELS.
     const earlyCount = ladder.length - LATE_TIER_LEVELS.length;
     if (level <= 25) {
       const i = Math.min(earlyCount - 1, Math.max(0, Math.floor((level / 25) * earlyCount) - 1));
-      return ladder[Math.max(0, i)]!;
+      return wearable(ladder[Math.max(0, i)]!);
     }
     let lateIndex = 0;
     for (let i = 0; i < LATE_TIER_LEVELS.length; i++) {
       if (level >= LATE_TIER_LEVELS[i]!) lateIndex = i;
     }
-    return ladder[earlyCount + lateIndex]!;
+    return wearable(ladder[earlyCount + lateIndex]!);
   };
   return [
     pick(WEAPON_LADDER[classId]),
@@ -796,6 +889,10 @@ Object.assign(ITEMS, buildDragonItems());
 Object.assign(ITEMS, buildLuxuryGoods());
 Object.assign(ITEMS, buildConsumables());
 
+// Last, because it reads the ladders back: every rung has to exist before it
+// can be told what it asks for.
+assignRequirements();
+
 /**
  * Whether a piece can carry a grade at all.
  *
@@ -843,6 +940,20 @@ function buildGraded(tier: ItemTier, base: ItemDef): ItemDef {
     damageMin: scale(base.damageMin),
     damageMax: scale(base.damageMax),
     armor: scale(base.armor),
+    // A better grade asks more of you. The level is unchanged — a Godly piece
+    // of a level-20 item is still a level-20 item — but a Godly one wants a
+    // character actually built for it, which is what keeps the boss grades
+    // from being a free upgrade you stumble into at twelve.
+    ...(base.reqAttributes
+      ? {
+          reqAttributes: Object.fromEntries(
+            Object.entries(base.reqAttributes).map(([k, v]) => [
+              k,
+              Math.max(1, Math.round((v ?? 0) * t.power)),
+            ]),
+          ) as ItemDef['reqAttributes'],
+        }
+      : {}),
     ...(attrs ? { attributes: attrs as ItemDef['attributes'] } : {}),
   };
 }
