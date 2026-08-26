@@ -40,8 +40,10 @@ you within seconds of getting one whether the rest is viable.
 
 ## Inputs you must supply
 
-This pipeline cannot obtain the client; network access reaches package
-registries only. Put the files here:
+This pipeline cannot obtain the client, and a cloud session cannot either —
+no USB, no hardware virtualisation for an emulator, and outbound network
+reaching package registries only. **Run the pipeline on the machine your
+device plugs into.** Put the files here:
 
 ```
 reference/client/
@@ -50,6 +52,17 @@ reference/client/
   split_config.xxhdpi.apk      # if the install uses split APKs
   main.<version>.obb           # if an OBB expansion exists
 ```
+
+```bash
+tools/extract/pull_client.sh         # finds the device, pulls every APK + the OBB
+```
+
+It auto-detects the install, pulls **all** the split APKs (not just `base.apk`)
+and the OBB, and launches the app once first because many mobile games download
+most of their content on first run. Pass a package name to skip auto-detection:
+`tools/extract/pull_client.sh com.example.game`.
+
+By hand, if you prefer:
 
 ```bash
 adb shell pm path com.<package>      # more than one line = split APK install
@@ -87,6 +100,7 @@ Or one stage at a time:
 
 | Stage | Script | Produces |
 |---|---|---|
+| — | `pull_client.sh` | pulls the client off a connected Android device |
 | 0 | `00_probe.py` | `extract/manifest/probe.json` — **hard gate** |
 | 1 | `01_inventory.py` | `objects.json`, `counts.json`, `scene_map.suggested.json` |
 | 2 | `02_terrain.py` | heightmap PNGs + `terrain_meta.json` — **the most useful artefact** |
