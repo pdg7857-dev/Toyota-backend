@@ -1,0 +1,8 @@
+{
+  "_README": "Tunables shared by the stages. Defaults match the extraction spec.",
+  "runSpeedMps": 6.0,
+  "traversalBandSeconds": [30, 90],
+  "compressionBand": [0.40, 0.50],
+  "landmarkKeywords": "leystone|ley_|portal|teleport|spawn|boss|npc|vendor|merchant|waypoint|marker|entrance|exit|door|bridge|camp|shrine",
+  "compressVertical": false
+}

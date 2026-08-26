@@ -1,0 +1,23 @@
+{
+  "_README": [
+    "Target zone sizes come from the map sheet §4. That document was not present",
+    "in this repo when the pipeline was built, so only the Stonevale figure quoted",
+    "in the extraction spec is filled in. Add one entry per zone before Stage 4/5,",
+    "or those stages will report the zone as unconfigured and skip its ratio.",
+    "",
+    "Keys are zone ids (lower-case slugs). Fields:",
+    "  targetSizeMetres  [x, z] compressed world size the design targets",
+    "  terrainNames      TerrainData m_Name values that map to this zone",
+    "  worldOriginMetres [minX, minZ] if the terrain is not placed at the world",
+    "                    origin; anchors land outside bounds without it"
+  ],
+  "runSpeedMps": 6.0,
+  "zones": {
+    "stonevale": {
+      "targetSizeMetres": [900, 700],
+      "terrainNames": [],
+      "worldOriginMetres": null,
+      "_source": "extraction spec §6 worked example"
+    }
+  }
+}

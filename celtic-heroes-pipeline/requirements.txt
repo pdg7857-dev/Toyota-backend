@@ -1,0 +1,4 @@
+UnityPy==1.25.3
+pillow>=11,<14
+numpy>=2,<3
+pytest>=8,<9

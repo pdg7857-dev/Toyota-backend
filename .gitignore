@@ -8,3 +8,8 @@ coverage/
 .vscode/
 .idea/
 screenshots/
+
+# Game-client binaries (asset extraction pipeline) — never commit anywhere in the tree
+*.apk
+*.obb
+*.ipa
