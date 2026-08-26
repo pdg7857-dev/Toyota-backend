@@ -1658,3 +1658,301 @@ canvas { display: block; }
   outline: none;
   border-color: rgba(230, 205, 130, 0.85);
 }
+
+/* ========================================================================== */
+/* Playing it with your thumbs                                                */
+/*                                                                            */
+/* Two things, and they are separate on purpose: the *controls* appear         */
+/* because the device has a finger (`body.touch`), and the *layout* changes    */
+/* because the window is small. A phone gets both. A touchscreen laptop gets   */
+/* the thumbstick and keeps the roomy layout, which is the right answer for a  */
+/* screen that has the room.                                                  */
+/* ========================================================================== */
+
+/* Nothing the browser does with a swipe is ever what this game wants: no
+   scroll, no pull-to-refresh, no double-tap zoom, no long-press callout. */
+body.touch,
+body.touch canvas {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  overscroll-behavior: none;
+}
+
+/* --- the thumbstick ------------------------------------------------------ */
+/*
+ * Floating: it appears under the thumb rather than waiting in a corner for the
+ * thumb to find it. A fixed stick is a thing you have to look at, and nobody
+ * looks at their left hand.
+ */
+#stick {
+  position: fixed;
+  z-index: 12;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  transition: opacity 0.12s;
+  pointer-events: none;
+}
+
+#stick.live { opacity: 1; }
+
+#stick-ring {
+  position: absolute;
+  left: -66px;
+  top: -66px;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  border: 2px solid rgba(201, 168, 76, 0.45);
+  background: radial-gradient(circle, rgba(14, 18, 16, 0.35), rgba(14, 18, 16, 0.6));
+}
+
+#stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 54px;
+  height: 54px;
+  margin: -27px 0 0 -27px;
+  border-radius: 50%;
+  background: rgba(201, 168, 76, 0.55);
+  border: 2px solid rgba(240, 226, 190, 0.75);
+}
+
+/* --- the verbs ----------------------------------------------------------- */
+
+#touch-pad {
+  position: fixed;
+  right: 10px;
+  bottom: 122px;
+  z-index: 12;
+  display: none;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+body.touch #touch-pad { display: flex; }
+
+/* The pad is a layout box, not a surface. Without this the gaps between the
+   buttons swallow taps meant for the creature behind them. */
+#touch-pad { pointer-events: none; }
+
+.touch-btn {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: rgba(18, 22, 20, 0.86);
+  border: 1px solid var(--panel-edge);
+  color: var(--ink);
+  font: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  pointer-events: auto;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.touch-btn:active { transform: translateY(1px); border-color: var(--gold); }
+.touch-glyph { font-size: 19px; line-height: 1; }
+.touch-label { font-size: 8.5px; letter-spacing: 0.3px; color: var(--muted); }
+.touch-more { background: rgba(40, 34, 20, 0.9); }
+
+/*
+ * The rest, behind one more tap. A sheet rather than a row: thirteen round
+ * buttons across the bottom of a phone is a keyboard drawn badly.
+ */
+#touch-menu {
+  position: fixed;
+  right: 10px;
+  bottom: 190px;
+  z-index: 13;
+  display: none;
+  grid-template-columns: repeat(4, 58px);
+  gap: 8px;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  pointer-events: auto;
+}
+
+#touch-menu.open { display: grid; }
+
+/* --- a small screen ------------------------------------------------------ */
+/*
+ * Keyed on the window rather than on the device, because the two questions are
+ * different: whether there is a finger decides what controls exist, and how
+ * much room there is decides where everything goes. A phone answers yes to
+ * both; a laptop with a touchscreen answers yes to one.
+ *
+ * Landscape is the assumed orientation — this is a game you steer with two
+ * thumbs — so the breakpoint is on height as well as width.
+ */
+@media (max-width: 900px), (max-height: 560px) {
+  /*
+   * Laid out against a real budget: 844x390, which is a phone held sideways.
+   * Every number below is somebody's y-range in that 390, and the whole point
+   * of writing them down is that two of them must never be the same range —
+   * the first pass put the log through the quest tracker and the skill bar off
+   * the bottom of the screen, and both were invisible to every check that was
+   * not a photograph.
+   */
+
+  /* The keyboard legend is the first thing to go: it is a list of keys nobody
+     on a phone has, and it is four lines across the bottom of the screen. */
+  #help { display: none; }
+
+  /* --- the top strip, y 2..115 --- */
+  #player-frame { top: 6px; left: 6px; transform: scale(0.8); transform-origin: top left; }
+  #target-frame { top: 6px; left: 200px; transform: scale(0.8); transform-origin: top left; }
+  #xp-bar { width: min(38vw, 300px); top: 2px; height: 11px; }
+  #xp-level { top: 15px; font-size: 9px; }
+  #minimap { top: 40px; right: 6px; transform: scale(0.62); transform-origin: top right; }
+  #tracker { top: 58px; left: 6px; width: 200px; transform: scale(0.85); transform-origin: top left; }
+
+  /* --- the left column, y 226..300 --- */
+  /* Clear of the tracker above it and of the skill bar below it. */
+  #log {
+    left: 6px;
+    bottom: 90px;
+    width: min(32vw, 262px);
+    max-height: 74px;
+    font-size: 10px;
+  }
+
+  /* --- the bottom strip, y 316..384 --- */
+  /*
+   * One row of skills at a time. Sixteen slots across a phone is four pixels
+   * each; ten at 42 is 460, which is the middle of the screen with the log to
+   * the left of it and the pad to the right. The other row is a button away
+   * and both keys still work.
+   */
+  #skill-bar { bottom: 6px; gap: 4px; }
+  .skill-row { gap: 4px; justify-content: center; }
+  .slot { width: 42px; height: 42px; }
+  .skill-row.secondary { display: none; }
+  #skill-bar.second .skill-row:not(.secondary) { display: none; }
+  #skill-bar.second .skill-row.secondary { display: flex; }
+  #skill-bar.second .skill-row.secondary .slot { width: 42px; height: 42px; }
+  .slot-name { font-size: 8.5px; }
+  .slot-key { font-size: 8px; }
+
+  /* The belt sits over the skill bar on a desktop. Here it goes beside it. */
+  #belt { transform: scale(0.78); transform-origin: bottom center; }
+
+  /*
+   * The pad is a block in the corner rather than a row along the bottom: a row
+   * of six runs straight through the middle of the skill bar, and the corner
+   * under the minimap is the one part of a landscape phone screen that nothing
+   * else wants.
+   */
+  #touch-pad {
+    right: 6px;
+    bottom: 6px;
+    display: none;
+    grid-template-columns: repeat(2, 50px);
+    gap: 6px;
+  }
+  body.touch #touch-pad { display: grid; }
+  .touch-btn { width: 50px; height: 50px; }
+  .touch-glyph { font-size: 17px; }
+  .touch-label { font-size: 7.5px; }
+
+  #touch-menu { bottom: 178px; right: 6px; grid-template-columns: repeat(4, 50px); gap: 6px; }
+
+  /*
+   * Panels become sheets.
+   *
+   * Every window in this HUD is anchored a fixed number of pixels from the
+   * right edge — `#realm-window` at 616, `#ley-window` at 940 — which is a
+   * layout that works on one screen size and falls off the side of every
+   * smaller one. On a phone they stop being windows beside the game and
+   * become a card over it, which is what a phone does with a panel.
+   */
+  #right-panels,
+  #realm-window,
+  #ley-window,
+  #journal-window,
+  #quest-log,
+  #vendor-window,
+  #away-report {
+    left: 50% !important;
+    right: auto !important;
+    top: 50% !important;
+    transform: translate(-50%, -50%);
+    width: min(94vw, 420px) !important;
+    max-height: 82vh !important;
+    overflow-y: auto;
+    z-index: 14;
+  }
+
+  #map-panel { width: 94vw !important; height: 82vh !important; }
+
+  /* A finger needs a row it can hit. */
+  .inv-row, .stat-row, .vendor-row, .realm-row, .quest-row { padding-top: 6px; padding-bottom: 6px; }
+}
+
+/* The notch, and the home bar. */
+@supports (padding: env(safe-area-inset-left)) {
+  body.touch #touch-pad { right: calc(10px + env(safe-area-inset-right)); }
+  body.touch #touch-menu { right: calc(10px + env(safe-area-inset-right)); }
+  body.touch #log { left: calc(8px + env(safe-area-inset-left)); }
+  body.touch #player-frame { left: calc(8px + env(safe-area-inset-left)); }
+}
+
+/*
+ * Held upright.
+ *
+ * Nobody should, and somebody will. The two frames sit side by side at a fixed
+ * offset, which is 420px of a 390px screen — so in portrait the target frame
+ * goes under the player's instead of beside it, the log comes up off the pad,
+ * and the menu sheet loses a column. Everything else the small-screen rules
+ * above already handle; this is only the part that cannot fit either way.
+ */
+@media (max-width: 460px) {
+  #target-frame { top: 62px; left: 6px; }
+  #tracker { top: 118px; }
+  #log { bottom: 200px; width: min(72vw, 280px); max-height: 92px; }
+  #skill-bar { bottom: 84px; }
+  .skill-row { flex-wrap: wrap; max-width: 92vw; }
+  #touch-pad { grid-template-columns: repeat(3, 50px); }
+  #touch-menu { bottom: 124px; grid-template-columns: repeat(3, 50px); }
+}
+
+/*
+ * Turn your phone.
+ *
+ * Portrait was made to fit once and the picture said no: the experience bar
+ * through the player frame, the skill bar through the button pad, the log
+ * through both. It can be made to fit — but a game steered with a thumb on
+ * each side of the screen is a landscape game, and squeezing it into 390
+ * points of width produces a layout nobody would choose and everybody would
+ * have to use.
+ *
+ * So it asks, which is what every action game on a phone does. The game keeps
+ * running behind the card, so turning it back is instant and loses nothing.
+ * Only ever on a device with a finger — a narrow *window* on a desktop is a
+ * window somebody chose, and telling them to rotate their monitor is absurd.
+ */
+#rotate {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 11, 9, 0.94);
+  pointer-events: auto;
+  text-align: center;
+}
+
+.rotate-inner { padding: 0 32px; }
+.rotate-glyph { font-size: 54px; color: var(--gold); margin-bottom: 14px; }
+.rotate-head { font-size: 21px; font-weight: 700; letter-spacing: 0.4px; }
+.rotate-sub { margin-top: 8px; font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+@media (orientation: portrait) and (max-width: 560px) {
+  body.touch #rotate { display: flex; }
+}

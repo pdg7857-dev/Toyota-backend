@@ -845,7 +845,19 @@ async function main() {
     // Hold it alive for a moment: the view rebuilds at the rare's size on the
     // next frame, and a screenshot of a corpse proves nothing about that.
     g.__rare = host;
-    await new Promise((r) => setTimeout(r, 900));
+    // Waited *for*, not slept through. Nine hundred milliseconds is comfortably
+    // past the five-hundred-and-fifty the card fades in over, and it still
+    // failed about one run in ten — because the card only starts fading when
+    // the loot event lands, and the kill it is waiting on is a real fight.
+    const cardUp = async () => {
+      const until = Date.now() + 6000;
+      while (Date.now() < until) {
+        const el = document.querySelector('#drop');
+        if (el.classList.contains('show') && parseFloat(getComputedStyle(el).opacity) > 0.2) return;
+        await new Promise((r) => setTimeout(r, 80));
+      }
+    };
+    await cardUp();
 
     return {
       ok: true,
@@ -1225,7 +1237,19 @@ async function main() {
     const target = [...g.world.entities.values()].find((e) => e.kind === 'mob' && !e.dead);
     g.tryModel(`mob:${target.defId}`, null);
     const missing = g.tryModel(`mob:${target.defId}`, { file: 'models/mob/__nope.glb' });
-    await new Promise((r) => setTimeout(r, 900));
+    // Waited *for*, not slept through. Nine hundred milliseconds is comfortably
+    // past the five-hundred-and-fifty the card fades in over, and it still
+    // failed about one run in ten — because the card only starts fading when
+    // the loot event lands, and the kill it is waiting on is a real fight.
+    const cardUp = async () => {
+      const until = Date.now() + 6000;
+      while (Date.now() < until) {
+        const el = document.querySelector('#drop');
+        if (el.classList.contains('show') && parseFloat(getComputedStyle(el).opacity) > 0.2) return;
+        await new Promise((r) => setTimeout(r, 80));
+      }
+    };
+    await cardUp();
     return { attempted: missing, stillAlive: !!g.views.get(target.id) };
   });
   removeFixtureModel(fixture);
@@ -2454,17 +2478,23 @@ async function main() {
     // Re-acquired rather than reusing the pair above, because that fight may
     // have ended on its own — and "the adventurer let go" is only worth
     // asserting about a fight that was still going when the player walked up.
-    const live = await inAFight();
+    //
+    // Retried across successive fights for the same reason the damage watch is:
+    // a fight can end while the player is walking over, and an adventurer worn
+    // down to `GIVE_UP_AT` walks away without handing anything back whole. That
+    // is not the rule failing, it is a different fight.
     let handedBack = null;
     let foe = pair.foe;
     let who = pair.who;
-    if (live) {
+    for (let attempt = 0; attempt < 3 && handedBack !== true && Date.now() < deadline; attempt++) {
+      const live = await inAFight();
+      if (!live) break;
       who = live.who;
       foe = live.foe;
       const max = g.world.statsOf(foe).maxHealth;
       const reach = g.mobOf(foe.defId).aggroRadius;
       me.pos = { x: foe.pos.x + reach + 18, z: foe.pos.z };
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 700));
       handedBack = who.npcFoe === undefined && foe.health >= max - 0.5;
     }
 
@@ -2602,8 +2632,29 @@ async function main() {
     victim.corpseLoot = [{ itemId: prize, qty: 1 }];
     victim.corpseGold = 1;
     victim.respawnInMs = 120000;
+    // Cleared *before* the loot, not after. A card from an earlier probe is
+    // still on screen for a couple of seconds, and a check that waits for "a
+    // card is up" finds that one instantly and then reads somebody else's
+    // prize off it — which is how this reported an epic when it had asked for
+    // a rare.
+    const before = document.querySelector('#drop');
+    before.classList.remove('show');
+    document.querySelector('#drop-name').textContent = '';
+    await new Promise((r) => setTimeout(r, 60));
     g.world.submit(me.id, { t: 'loot', id: victim.id });
-    await new Promise((r) => setTimeout(r, 900));
+    // Waited *for*, not slept through. Nine hundred milliseconds is comfortably
+    // past the five-hundred-and-fifty the card fades in over, and it still
+    // failed about one run in ten — because the card only starts fading when
+    // the loot event lands, and the kill it is waiting on is a real fight.
+    const cardUp = async () => {
+      const until = Date.now() + 6000;
+      while (Date.now() < until) {
+        const el = document.querySelector('#drop');
+        if (el.classList.contains('show') && parseFloat(getComputedStyle(el).opacity) > 0.2) return;
+        await new Promise((r) => setTimeout(r, 80));
+      }
+    };
+    await cardUp();
     const card = document.querySelector('#drop-name')?.textContent ?? '';
 
     const base = g.itemOf(prize.slice('godly__'.length));
@@ -2653,11 +2704,26 @@ async function main() {
     victim.corpseLoot = [{ itemId: prize.id, qty: 1 }];
     victim.corpseGold = 3;
     victim.respawnInMs = 120000;
+    // Cleared *before* the loot, not after. A card from an earlier probe is
+    // still on screen for a couple of seconds, and a check that waits for "a
+    // card is up" finds that one instantly and then reads somebody else's
+    // prize off it — which is how this reported an epic when it had asked for
+    // a rare.
+    const before = document.querySelector('#drop');
+    before.classList.remove('show');
+    document.querySelector('#drop-name').textContent = '';
+    await new Promise((r) => setTimeout(r, 60));
     g.world.submit(me.id, { t: 'loot', id: victim.id });
-    // Long enough for the card to have faded *in*: it reaches full opacity a
-    // little over half a second in, and reading it at four hundred
-    // milliseconds measures the animation rather than the card.
-    await new Promise((r) => setTimeout(r, 900));
+    // Waited *for*, not slept through. The card fades in over five hundred and
+    // fifty milliseconds and the old fixed sleep of nine hundred still failed
+    // about one run in ten, because the loot has to reach the event stream
+    // first and that is a real tick rather than a promise.
+    const until = Date.now() + 6000;
+    while (Date.now() < until) {
+      const el = document.querySelector('#drop');
+      if (el.classList.contains('show') && parseFloat(getComputedStyle(el).opacity) > 0.2) break;
+      await new Promise((r) => setTimeout(r, 80));
+    }
 
     const card = document.querySelector('#drop');
     const shown = card.classList.contains('show') && getComputedStyle(card).opacity > 0.2;
@@ -2983,7 +3049,19 @@ async function main() {
     far.dead = true;
     far.corpseGold = 12;
     far.respawnInMs = 120000;
-    await new Promise((r) => setTimeout(r, 900));
+    // Waited *for*, not slept through. Nine hundred milliseconds is comfortably
+    // past the five-hundred-and-fifty the card fades in over, and it still
+    // failed about one run in ten — because the card only starts fading when
+    // the loot event lands, and the kill it is waiting on is a real fight.
+    const cardUp = async () => {
+      const until = Date.now() + 6000;
+      while (Date.now() < until) {
+        const el = document.querySelector('#drop');
+        if (el.classList.contains('show') && parseFloat(getComputedStyle(el).opacity) > 0.2) return;
+        await new Promise((r) => setTimeout(r, 80));
+      }
+    };
+    await cardUp();
 
     g.world.submit(me.id, { t: 'target', id: mobs[2].id });
     await new Promise((r) => setTimeout(r, 300));

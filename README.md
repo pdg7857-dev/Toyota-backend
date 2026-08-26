@@ -50,6 +50,21 @@ Add `?fresh` to the URL to discard your save and start over.
 
 Progress autosaves to `localStorage` every 10 seconds.
 
+## On a phone
+
+It plays with two thumbs. Anything with a touchscreen gets the controls
+automatically:
+
+| | |
+|---|---|
+| Left thumb | Walk. The stick appears wherever you put your thumb down. |
+| Right thumb | Drag to look, tap to select. |
+| Two fingers | Zoom. |
+| Skill slots | Tap. One row at a time — **⇅** flips to the other. |
+| Corner pad | Attack, loot, next target, back, and **☰** for every panel. |
+
+Hold it sideways: it is a two-thumb game and it will say so if you don't.
+
 ## Somebody is watching
 
 Four other adventurers work each zone, and they now have opinions about you: a

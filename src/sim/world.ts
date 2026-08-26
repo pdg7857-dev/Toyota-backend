@@ -1736,7 +1736,14 @@ export class World {
     switch (cmd.t) {
       case 'move': {
         const len = Math.hypot(cmd.dir.x, cmd.dir.z);
-        e.moveDir = len > 0 ? { x: cmd.dir.x / len, z: cmd.dir.z / len } : { x: 0, z: 0 };
+        // Clamped rather than normalised. Normalising threw away how far the
+        // stick was pushed, which is fine for a keyboard — it only ever sends
+        // a whole direction — and is the entire expressiveness of a thumb: a
+        // player edging round a telegraph wants to edge. Clamping keeps the
+        // half that mattered, which is that a crafted command must never move
+        // anybody faster than walking pace.
+        e.moveDir =
+          len > 1 ? { x: cmd.dir.x / len, z: cmd.dir.z / len } : { x: cmd.dir.x, z: cmd.dir.z };
         // Moving cancels an interruptible cast, as it does in most tab-target games.
         if (e.cast && e.cast.kind === 'skill' && getSkill(e.cast.id).interruptible && len > 0) {
           this.events.push({

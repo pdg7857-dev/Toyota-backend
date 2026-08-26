@@ -32,6 +32,56 @@ const VENDOR_RANGE = 5.5;
 /** Slot index the second hotkey row starts at — Shift+1 is the eleventh skill. */
 const SECOND_ROW_START = 10;
 
+/** Everything the player can do that is not moving, looking or a skill. */
+export type Action =
+  | 'cycleTarget'
+  | 'autoAttack'
+  | 'loot'
+  | 'potion'
+  | 'elixir'
+  | 'trade'
+  | 'travel'
+  | 'quests'
+  | 'realm'
+  | 'leystones'
+  | 'reckoning'
+  | 'horse'
+  | 'ride'
+  | 'character'
+  | 'inventory'
+  | 'map'
+  | 'reclaim'
+  | 'mute'
+  | 'louder'
+  | 'quieter'
+  | 'skillRow'
+  | 'back';
+
+/** Which key does which. The touch pad reads the same verbs by name. */
+const KEY_ACTIONS: Record<string, Action> = {
+  Tab: 'cycleTarget',
+  KeyT: 'autoAttack',
+  KeyF: 'loot',
+  KeyQ: 'potion',
+  KeyX: 'elixir',
+  KeyE: 'trade',
+  KeyG: 'travel',
+  KeyJ: 'quests',
+  KeyK: 'realm',
+  KeyL: 'leystones',
+  KeyB: 'reckoning',
+  KeyH: 'horse',
+  KeyR: 'ride',
+  KeyC: 'character',
+  KeyI: 'inventory',
+  KeyM: 'map',
+  KeyV: 'reclaim',
+  KeyN: 'mute',
+  BracketRight: 'louder',
+  BracketLeft: 'quieter',
+  Escape: 'back',
+};
+
 export class InputController {
   private keys = new Set<string>();
   private lastMove = { x: 0, z: 0 };
@@ -43,6 +93,8 @@ export class InputController {
   private pointer = new THREE.Vector2();
   /** Index into the sorted hostile list, for Tab cycling. */
   private tabIndex = 0;
+  /** The thumbstick, on a device that has one. Set after construction. */
+  private touch: { move: { x: number; y: number } } | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -60,6 +112,7 @@ export class InputController {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => this.onPointerDown(e));
     window.addEventListener('pointerup', (e) => {
+      if (e.pointerType === 'touch') return;
       const wasDrag = this.dragged;
       this.dragging = false;
       this.dragged = false;
@@ -96,68 +149,88 @@ export class InputController {
         if (skillId) this.emit({ t: 'useSkill', skillId });
         break;
       }
-      case 'Tab':
+      default: {
+        const action = KEY_ACTIONS[e.code];
+        if (action) this.act(action);
+      }
+    }
+  }
+
+  /**
+   * Every verb the game has, by name.
+   *
+   * The keyboard maps codes onto these and the touch pad maps buttons onto the
+   * same ones. Naming them was the whole point: the first pass at the touch
+   * controls copied the key handler's switch into a second file, and a second
+   * copy of "what F does" is a second copy that stops agreeing with the first
+   * the next time somebody adds a key.
+   */
+  act(action: Action): void {
+    switch (action) {
+      case 'cycleTarget':
         this.cycleTarget();
         break;
-      case 'KeyT':
+      case 'autoAttack':
         this.emit({ t: 'autoAttack', on: !this.world.player.autoAttack });
         break;
-      case 'KeyF':
+      case 'loot':
         this.lootNearest();
         break;
-      case 'KeyQ':
+      case 'potion':
         this.drink('potion');
         break;
-      case 'KeyX':
+      case 'elixir':
         this.drink('elixir');
         break;
-      case 'KeyE':
+      case 'trade':
         this.talkToNearestVendor();
         break;
-
-      case 'KeyG':
+      case 'travel':
         this.travelIfOnRoad();
         break;
-      case 'KeyJ':
+      case 'quests':
         this.hud.toggleQuestLog();
         break;
-      case 'KeyK':
+      case 'realm':
         this.hud.toggleRealm();
         break;
-      case 'KeyL':
+      case 'leystones':
         this.hud.toggleLeystones();
         break;
-      case 'KeyB':
+      case 'reckoning':
         this.hud.toggleJournal();
         break;
-      case 'KeyH':
+      case 'horse':
         this.captureNearestHorse();
         break;
-      case 'KeyR':
+      case 'ride':
         this.toggleRide();
         break;
-      case 'KeyC':
+      case 'character':
         this.hud.toggleCharacter();
         break;
-      case 'KeyI':
+      case 'inventory':
         this.hud.toggleInventory();
         break;
-      case 'KeyM':
+      case 'map':
         this.map.toggle();
         break;
-      case 'KeyV':
+      case 'reclaim':
         this.emit({ t: 'reclaim' });
         break;
-      case 'KeyN':
+      case 'mute':
         this.hud.showVolume(this.audio.toggleMute(), this.audio.level);
         break;
-      case 'BracketLeft':
-        this.hud.showVolume(this.audio.isMuted, this.audio.nudge(-0.05));
+      case 'skillRow':
+        this.hud.toggleSkillRow();
         break;
-      case 'BracketRight':
+      case 'louder':
         this.hud.showVolume(this.audio.isMuted, this.audio.nudge(0.05));
         break;
-      case 'Escape':
+      case 'quieter':
+        this.hud.showVolume(this.audio.isMuted, this.audio.nudge(-0.05));
+        break;
+      case 'back':
         // Back out one layer at a time. The away report is the outermost thing
         // on screen when it is up, so it goes first.
         if (this.hud.awayReportOpen) this.hud.hideAwayReport();
@@ -170,6 +243,9 @@ export class InputController {
   }
 
   private onPointerDown(e: PointerEvent): void {
+    // Touch has its own scheme — see `render/touch.ts`. Letting both run means
+    // a thumb on the left of the screen both walks and spins the camera.
+    if (e.pointerType === 'touch') return;
     if (e.button === 2) {
       this.dragging = true;
       return;
@@ -194,8 +270,17 @@ export class InputController {
    * Split out of the press handler because a press is now ambiguous until it
    * ends: the same button looks around and selects, and which one it was is
    * only knowable once you see whether the pointer moved.
+   *
+   * Public because a tap has to mean what a click means, and `render/touch.ts`
+   * calls this rather than deciding for itself — two answers to "what did the
+   * player just point at" is how the two input schemes drift apart.
    */
-  private selectAt(clientX: number, clientY: number): void {
+  /** Hand the controller its thumbstick. */
+  useTouch(touch: { move: { x: number; y: number } }): void {
+    this.touch = touch;
+  }
+
+  selectAt(clientX: number, clientY: number): void {
     this.pointer.set(
       (clientX / window.innerWidth) * 2 - 1,
       -(clientY / window.innerHeight) * 2 + 1,
@@ -223,6 +308,7 @@ export class InputController {
   }
 
   private onPointerMove(e: PointerEvent): void {
+    if (e.pointerType === 'touch') return;
     if (!this.dragging) return;
     // A few pixels of travel is a shaky click, not a look.
     if (Math.abs(e.movementX) + Math.abs(e.movementY) > 1) this.dragged = true;
@@ -436,6 +522,13 @@ export class InputController {
     if (this.keys.has('KeyS') || this.keys.has('ArrowDown')) forward -= 1;
     if (this.keys.has('KeyA')) strafe -= 1;
     if (this.keys.has('KeyD')) strafe += 1;
+    // The stick, if there is one. It adds rather than replaces, because a
+    // tablet with a keyboard attached is a real thing and a control scheme
+    // that switches modes under you is not.
+    if (this.touch) {
+      forward += this.touch.move.y;
+      strafe += this.touch.move.x;
+    }
 
     // Camera-relative basis. Forward is where the camera looks, (sin, cos);
     // screen-right is that crossed with up, which is (-cos, sin) — NOT
@@ -446,7 +539,9 @@ export class InputController {
     const x = forward * sin - strafe * cos;
     const z = forward * cos + strafe * sin;
 
-    if (Math.abs(x - this.lastMove.x) < 1e-6 && Math.abs(z - this.lastMove.z) < 1e-6) return;
+    // A thumb is never still, so a raw comparison would emit a command every
+    // frame. A hundredth of a unit is well under what anybody can steer.
+    if (Math.abs(x - this.lastMove.x) < 0.01 && Math.abs(z - this.lastMove.z) < 0.01) return;
     this.lastMove = { x, z };
     this.emit({ t: 'move', dir: { x, z } });
   }

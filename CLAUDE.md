@@ -67,6 +67,8 @@ input / HUD click ──> Command ──> World.submit()
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
 | `src/render/map.ts` | The minimap and the map. Both drawn from one relief bitmap. |
 | `src/render/audio.ts` | Every sound in the game, synthesised. No audio files. |
+| `src/render/touch.ts` | The thumbstick, and the verbs as buttons. |
+| `src/render/device.ts` | Whether there is a finger, and what a frame may cost. |
 | `src/render/wildlife.ts` | Birds, midges and rings. Alive, and not creatures. |
 | `src/content/bodies.ts` | What each creature is shaped like. Pure data. |
 | `src/render/body.ts` | Turns a body plan into geometry. Knows *how*, not *which*. |
@@ -80,6 +82,7 @@ input / HUD click ──> Command ──> World.submit()
 | `tools/muster.mjs` | Empties a camp and photographs it answering back. |
 | `tools/questrun.mjs` | Takes the first quest on offer and reads it back. |
 | `tools/towns.mjs` | Walks into every town in a zone and photographs it. |
+| `tools/mobile.mjs` | Plays it on a phone, with a thumb, and photographs that. |
 
 Adding a mob, item or skill should mean editing `src/content/` only.
 
@@ -1449,6 +1452,103 @@ The mark goes down on the **map** and not on the minimap, though it draws on
 both. A minimap click already means "open the map", and a control that does
 two different things depending on how hard you meant it is a control nobody
 trusts.
+
+## Playing it with your thumbs
+
+Every control in this game was a key, and there are twenty-one of them. On a
+phone that is not "a bit awkward", it is a game you cannot move in — and the
+genre this one is a love letter to is a **mobile** one, so a version that only
+runs on a laptop misses the point of the thing it is copying.
+
+Two things change, and they are gated on **different questions** on purpose:
+
+| | Gated on | Because |
+|---|---|---|
+| The controls | is there a finger (`maxTouchPoints`) | A touchscreen laptop wants a thumbstick and has the room for the desktop layout. |
+| The layout | how big is the window | A narrow window on a desktop is a window somebody chose. |
+
+### The scheme
+
+The one every mobile action RPG converged on, because it is the one that works
+with the hands you have:
+
+- **Left thumb walks.** A *floating* stick: put your thumb down anywhere in the
+  left two fifths and it appears under it. A fixed stick is a thing you have to
+  find without looking, and nobody looks at their left thumb.
+- **Right thumb looks, and a tap selects.** The same ambiguity the mouse has,
+  resolved the same way and by the same code — `InputController.selectAt` — but
+  with a much larger slop. The mouse threshold is two pixels; a finger lands,
+  rolls and lifts across ten or twelve on a deliberate tap, so at two
+  **nothing was ever a tap**.
+- **Two fingers zoom.** The only gesture on a phone that already means this.
+- **Everything else is a button.** Four verbs and a row-switch in the corner
+  under the minimap, and every panel behind one more tap. The sixteen skill
+  slots were already tappable — the one part of this HUD that was mobile all
+  along.
+
+`Action` is what stops the two schemes drifting: every verb has a name, the
+keyboard maps codes onto those names and the pad maps buttons onto the same
+ones. The first pass copied the key handler's switch into the touch file, which
+is a second copy of "what F does" that stops agreeing with the first the moment
+somebody adds a key.
+
+### And nothing names a key that is not there
+
+"Press F to loot" on a device with no F is not a wording problem. It is the
+only instruction on screen, and it names a control that does not exist. One
+helper (`verb`) rather than a conditional at each of the nine places, because
+nine conditionals is nine chances for one of them to keep saying F. The opening
+tutorial line reads *"Tap it to target, then Attack. Your left thumb walks."*
+
+### Turn your phone
+
+Portrait was made to fit once and the picture said no: the experience bar
+through the player frame, the skill bar through the button pad, the log through
+both. It could be made to fit — but a game steered with a thumb on each side is
+a landscape game, and squeezing it into 390 points of width produces a layout
+nobody would choose and everybody would have to use. So it asks. The game keeps
+running behind the card, so turning back is instant.
+
+### What a frame may cost
+
+A phone's device pixel ratio is routinely 3 — nine times the fragments of a 1x
+buffer, for a screen held at arm's length — and this game is fill-bound rather
+than geometry-bound. Capping the buffer is the single biggest thing that can be
+done for a phone and it costs almost nothing anybody can see. 1.5 rather than 1,
+because at 1 the nameplates go soft and this game asks you to read a creature's
+name and level before deciding whether to pull it; antialiasing goes instead.
+
+**Shadows stay on.** Turning them off is the other obvious lever and it is the
+wrong one: a boss telegraph is a flat circle you read off the ground, and the
+ground reads as flat without them. The shadow map halves instead, which costs
+sharpness at an edge nobody is looking at.
+
+### The sim change it was worth making
+
+`move` used to **normalise** the direction, which threw away how far the stick
+was pushed. That is fine for a keyboard — it only ever sends a whole direction
+— and it is the entire expressiveness of a thumb: a player edging round a
+telegraph wants to edge. It **clamps** now, which keeps the half that mattered
+(a crafted command must never move anybody faster than walking pace) and
+returns the half that did not exist. The keyboard is bit-identical either way,
+because every vector it sends is already length 1.
+
+### What the pictures caught
+
+`tools/mobile.mjs` boots the real game in a phone viewport with touch
+emulation, walks with the stick, taps a creature, casts, opens the panels
+through the pad and photographs all of it. Everything in this section past the
+first paragraph is something a screenshot found and no assertion could:
+
+- **Sixteen skill slots do not fit on a phone.** They wrapped to three ragged
+  rows and ran off the bottom of the screen. One row at a time, and a button.
+- **The log went straight through the quest tracker**, and the pad through the
+  skill bar. The small-screen block is written as a budget now — every rule is
+  somebody's y-range in 390 points, and two of them must never be the same one.
+- **A media query that swallowed the rest of its block.** A stray brace put the
+  log, the skill bar and the panel rules inside a narrower query than they were
+  meant for, so at 844 points none of them applied. The map ran off the screen
+  and the check that caught it was the one measuring the map.
 
 ## Looking at it
 

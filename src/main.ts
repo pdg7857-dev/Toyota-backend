@@ -19,6 +19,8 @@ import { Hud } from './render/hud.js';
 import { MapView } from './render/map.js';
 import { GameAudio } from './render/audio.js';
 import { InputController } from './render/input.js';
+import { TouchControls } from './render/touch.js';
+import { isTouchDevice, setTouchUI } from './render/device.js';
 import { chooseClass, cleanName } from './render/classSelect.js';
 import type { ClassId, Command, SimEvent } from './sim/types.js';
 
@@ -41,6 +43,11 @@ async function boot(): Promise<void> {
   if (!container) throw new Error('#app missing');
 
   const params = new URLSearchParams(location.search);
+  // Asked once, before anything draws. Every "press F to loot" in the HUD reads
+  // this, and a phone that boots telling you to press F has named the one
+  // control it does not have.
+  const onTouch = isTouchDevice() || params.has('touch');
+  setTouchUI(onTouch);
   const fresh = params.has('fresh');
 
   // Resume a save if there is one; otherwise pick a class before building the
@@ -99,6 +106,13 @@ async function boot(): Promise<void> {
   // simulate identically.
   const audio = new GameAudio(world);
   const input = new InputController(rig.renderer.domElement, world, rig, hud, emit, map, audio);
+  // A thumbstick and a pad of verbs, on anything with a finger. Both schemes
+  // stay live at once — a tablet with a keyboard attached is a real thing, and
+  // a control scheme that switches modes under you is not one.
+  if (onTouch) {
+    const touch = new TouchControls(container, rig, input);
+    input.useTouch(touch);
+  }
 
   // Browsers refuse to start an AudioContext before a gesture, and one created
   // too early stays suspended with no error — the game is just silent and

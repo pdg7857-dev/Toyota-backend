@@ -11,6 +11,7 @@ import {
   type ZoneDef,
 } from '../content/zone.js';
 import { zoneStructures, type StructureDef } from '../content/structures.js';
+import { qualityFor } from './device.js';
 import type { Vec2 } from '../sim/types.js';
 import { NIGHT_FLOOR, type Daylight, type Weather } from '../content/daylight.js';
 import { Wildlife } from './wildlife.js';
@@ -195,8 +196,12 @@ export class SceneRig {
   distance = 13;
 
   constructor(container: HTMLElement, zone: ZoneDef) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const quality = qualityFor();
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: quality.antialias,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.pixelRatio));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -210,7 +215,7 @@ export class SceneRig {
 
     this.sun = new THREE.DirectionalLight(0xffffff, 1.5);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.mapSize.set(quality.shadowMap, quality.shadowMap);
     this.sun.shadow.camera.near = SUN_DISTANCE - SHADOW_DEPTH;
     this.sun.shadow.camera.far = SUN_DISTANCE + SHADOW_DEPTH;
     // Without a bias, a shadow frustum this size self-shadows the ground it is

@@ -4,6 +4,7 @@ import { QUALITY_COLORS, bestDrink, canEquip, getItem } from '../content/items.j
 import { MOBS, getMob, mobDropping } from '../content/mobs.js';
 import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
 import { ROLE_LABEL } from '../content/settlements.js';
+import { touchUI, verb } from './device.js';
 import { getSet, type SetBonus } from '../content/sets.js';
 import { getQuest } from '../content/quests.js';
 import {
@@ -665,7 +666,7 @@ export class Hud {
               `${ev.gold > 0 ? ` for ${ev.gold.toLocaleString()} gold` : ''}.`,
             'log-good',
           );
-          this.log('Press C to spend them again.', 'log-loot');
+          this.log(touchUI() ? 'Open your character sheet to spend them.' : 'Press C to spend them again.', 'log-loot');
           // The shop shows the price and what it would take back, and both
           // just changed. So did the character sheet, which repaints off its
           // own signature.
@@ -678,7 +679,12 @@ export class Hud {
           // are twenty of them in the game — so it gets the same voice a front
           // changing hands gets and not the one an epic gets.
           this.log(`The stone at ${ev.name} wakes to you.`, 'log-ley');
-          this.log('You can step here from any stone you have woken. (L)', 'log-loot');
+          this.log(
+            touchUI()
+              ? 'You can step here from any stone you have woken.'
+              : 'You can step here from any stone you have woken. (L)',
+            'log-loot',
+          );
           this.showZoneBanner(`${ev.name} — ${ev.role}`, 'realm');
           break;
         }
@@ -786,7 +792,11 @@ export class Hud {
     const plural = (n: number, word: string) => `+${n} ${word} point${n === 1 ? '' : 's'}`;
     if (POINTS_PER_LEVEL > 0) points.push(plural(POINTS_PER_LEVEL, 'attribute'));
     if (SKILL_POINTS_PER_LEVEL > 0) points.push(plural(SKILL_POINTS_PER_LEVEL, 'skill'));
-    if (points.length) lines.push(`<b>${points.join(' · ')}</b> — press C to spend`);
+    if (points.length) {
+      lines.push(
+        `<b>${points.join(' · ')}</b> — ${touchUI() ? 'spend them on your character sheet' : 'press C to spend'}`,
+      );
+    }
 
     for (const skillId of learned) {
       const slot = this.skillOrder.indexOf(skillId);
@@ -1026,7 +1036,8 @@ export class Hud {
       const owed = player.xpDebt ?? 0;
       this.els.deathCost.textContent =
         owed > 0
-          ? `${owed.toLocaleString()} experience owed. Walk back to where you fell and press V to take it back.`
+          ? `${owed.toLocaleString()} experience owed. Walk back to where you fell and ` +
+            `${touchUI() ? 'use Reclaim' : 'press V'} to take it back.`
           : 'That one was free.';
       this.els.deathRecap.innerHTML = (this.lastStand ?? []).map((l) => `<div>${l}</div>`).join('');
     } else if (this.lastStand !== null) {
@@ -1321,7 +1332,9 @@ export class Hud {
       if (!prey) return null;
       return {
         title: 'Find something to fight',
-        line: 'Click it to target, then press <b>T</b> to start swinging.',
+        line: touchUI()
+          ? 'Tap it to target, then <b>Attack</b>. Your left thumb walks.'
+          : 'Click it to target, then press <b>T</b> to start swinging.',
         where: { x: prey.pos.x, z: prey.pos.z, label: prey.name },
       };
     }
@@ -1334,7 +1347,7 @@ export class Hud {
     if (!corpse) return null;
     return {
       title: 'Take what it left',
-      line: 'Stand over it and press <b>F</b>.',
+      line: touchUI() ? 'Stand over it and tap <b>Loot</b>.' : 'Stand over it and press <b>F</b>.',
       where: { x: corpse.pos.x, z: corpse.pos.z, label: corpse.name },
     };
   }
@@ -1507,13 +1520,20 @@ export class Hud {
         ? (player.inventory ?? []).filter((s) => s.itemId === itemId).reduce((n, s) => n + s.qty, 0)
         : 0;
       slot.innerHTML =
-        `<span class="belt-key">${hotkey}</span>` +
+        // No key letter on a device with no keys — the slot is the control
+        // there, and a Q over a button nobody can press is a lie about how to
+        // use it.
+        (touchUI() ? '' : `<span class="belt-key">${hotkey}</span>`) +
         `<span class="belt-name">${itemId ? getItem(itemId).name : family}</span>` +
         (qty > 1 ? `<span class="belt-qty">${qty}</span>` : '') +
         (left > 0 ? `<span class="belt-cd">${Math.ceil(left / 1000)}s</span>` : '');
       if (itemId) {
         slot.addEventListener('click', () => this.emit({ t: 'use', itemId }));
-        this.tip(slot, () => itemTip(itemId, { foot: `${hotkey} to drink · ${qty} in the bag` }));
+        this.tip(slot, () =>
+          itemTip(itemId, {
+            foot: `${touchUI() ? 'Tap' : hotkey} to drink · ${qty} in the bag`,
+          }),
+        );
       } else {
         this.tip(slot, () => ({
           title: `No ${family}`,
@@ -2009,10 +2029,10 @@ export class Hud {
       const spent =
         horse && !entity.dead && entity.health / this.world.statsOf(entity).maxHealth <= 0.25;
       if (spent && !(player.stable ?? []).includes(horse!)) {
-        name.textContent = `${entity.name} — press H to take it`;
+        name.textContent = `${entity.name} — ${verb('H', 'take it')}`;
       } else if (lootable) {
         name.textContent =
-          entity.id === nearestCorpse ? `${entity.name} — press F to loot` : entity.name;
+          entity.id === nearestCorpse ? `${entity.name} — ${verb('F', 'loot')}` : entity.name;
         plate.classList.toggle('muted', entity.id !== nearestCorpse);
       } else {
         const trait = def ? traitFor(def) : null;
@@ -2104,7 +2124,7 @@ export class Hud {
     plate.style.opacity = '1';
     plate.querySelector<HTMLElement>('.np-bar')!.style.display = 'none';
     plate.querySelector<HTMLElement>('.np-name')!.textContent =
-      distance <= 5.5 ? `${entity.name} — press E to trade` : entity.name;
+      distance <= 5.5 ? `${entity.name} — ${verb('E', 'trade')}` : entity.name;
   }
 
   /**
@@ -2444,7 +2464,7 @@ export class Hud {
     this.els.travelPrompt.style.display = 'block';
     this.els.travelPrompt.className = canGo ? '' : 'barred';
     this.els.travelPrompt.textContent = canGo
-      ? `${exit.label} — press G to travel`
+      ? `${exit.label} — ${verb('G', 'travel')}`
       : `${exit.label} — return at level ${exit.minLevel}`;
   }
 
@@ -2663,6 +2683,22 @@ export class Hud {
       none.textContent = 'No stone has woken to you yet. Walk into a town.';
       body.appendChild(none);
     }
+  }
+
+  /**
+   * Flip which row of skills is showing.
+   *
+   * Only ever visible on a small screen, where sixteen slots across a phone is
+   * four pixels each. Both rows still exist and both keys still work — this
+   * changes what is *drawn*, not what is bound, so a tablet with a keyboard
+   * attached is unaffected either way.
+   */
+  toggleSkillRow(): void {
+    this.els.skillBar.classList.toggle('second');
+  }
+
+  get secondSkillRow(): boolean {
+    return this.els.skillBar.classList.contains('second');
   }
 
   toggleRealm(): void {
@@ -3658,6 +3694,14 @@ const TEMPLATE = `
     <div id="death-recap"></div>
     <p id="death-cost"></p>
     <button id="respawn-btn" class="clickable">Return to the standing stones</button>
+  </div>
+
+  <div id="rotate">
+    <div class="rotate-inner">
+      <div class="rotate-glyph">⟳</div>
+      <div class="rotate-head">Turn your phone</div>
+      <div class="rotate-sub">Emerald Isle is played with two thumbs.</div>
+    </div>
   </div>
 
   <div id="help">
