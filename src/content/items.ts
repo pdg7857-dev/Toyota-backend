@@ -4,6 +4,7 @@ import { buildDragonItems } from './dragons.js';
 import { buildLuxuryGoods } from './luxury.js';
 import { buildConsumables } from './consumables.js';
 import { buildQuestGear } from './questgear.js';
+import { buildHoardGear } from './sets.js';
 import { buildSignatureItems } from './rares.js';
 import { CLASS_ATTRIBUTES, skillsTaughtBy, tomeNoun } from './skills.js';
 import { TIERS, splitTier, tieredId, type ItemTier } from './tiers.js';
@@ -890,6 +891,7 @@ Object.assign(ITEMS, buildSignatureItems());
 
 // Trophies, armour sets and capstone weapons from the zones' armour lines.
 Object.assign(ITEMS, buildQuestGear());
+Object.assign(ITEMS, buildHoardGear());
 
 // And the four things you cannot plan for.
 Object.assign(ITEMS, buildDragonItems());
@@ -917,6 +919,10 @@ export function canBeGraded(item: ItemDef): boolean {
   // Anything carrying an affix is a signature, a dragon's or a luxury piece.
   if (item.critBonus || item.healthBonus || item.moveSpeedBonus) return false;
   if (item.damageBonus || item.skillPower || item.regenBonus) return false;
+  // And a set piece is a set piece. A Godly Mirewrought Cuirass would turn a
+  // bonus you farmed four hundred kills for into a ladder to climb again, and
+  // the grade would be doing the work the set is meant to do.
+  if (item.setId) return false;
   return true;
 }
 

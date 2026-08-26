@@ -50,6 +50,16 @@ Add `?fresh` to the URL to discard your save and start over.
 
 Progress autosaves to `localStorage` every 10 seconds.
 
+## Four ways to get dressed
+
+Drops, the story chain, the kit chain — and one camp per zone worth emptying.
+Pick the hardest ordinary camp in a zone, farm it, and the town armourer will
+make you a **set**: four pieces, and a bonus for wearing two of them and
+another for wearing all four. The pieces themselves sit exactly on the curve,
+so what you are buying is the bonus — the one thing no single piece of gear in
+this game can give you. Roughly four hundred kills of one camp, at a published
+rate, entirely optional.
+
 ## Towns
 
 Every zone has **six of them**, on the road, and each sells something the others

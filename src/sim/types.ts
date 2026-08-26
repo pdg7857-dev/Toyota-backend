@@ -172,6 +172,16 @@ export interface ItemDef {
   regenBonus?: number;
 
   /**
+   * Which set this piece belongs to, if any — see `content/sets.ts`.
+   *
+   * The only thing in this game a single piece of gear cannot buy: wearing
+   * enough of one pays a bonus on top of what the pieces themselves do, which
+   * is what makes farming one camp for a whole rack worth more than wearing
+   * the four best pieces you happen to own.
+   */
+  setId?: string;
+
+  /**
    * Level needed to equip it.
    *
    * Only the luxury goods use this. Gold can be earned at any level — a

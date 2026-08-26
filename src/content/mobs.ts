@@ -9,6 +9,7 @@ import {
 } from './dragons.js';
 import { MOUNTS, type MountDef } from './mounts.js';
 import { TROPHY_DROP_CHANCE, trophiesByMob } from './questgear.js';
+import { HOARD_TOKEN_CHANCE, hoardTokensByMob } from './sets.js';
 import {
   BOUNTIES,
   BOUNTY_MULTIPLIER,
@@ -1350,6 +1351,24 @@ for (const [mobId, itemId] of Object.entries(trophiesByMob())) {
   LOOT_TABLES[table.id] = {
     ...table,
     entries: [...table.entries, { itemId, chance: TROPHY_DROP_CHANCE, min: 1, max: 1 }],
+  };
+}
+
+// --------------------------------------------------------------------------
+// Hoard tokens.
+//
+// The same mechanism as a trophy and deliberately so — a known rate off one
+// named camp — but rarer, and from a camp no armour line already sends you to.
+// See `content/sets.ts` for why the set is worth the walk.
+// --------------------------------------------------------------------------
+
+for (const [mobId, itemId] of Object.entries(hoardTokensByMob())) {
+  const mob = MOBS[mobId];
+  if (!mob) throw new Error(`A hoard set asks for a token from unknown mob ${mobId}`);
+  const table = LOOT_TABLES[mob.lootTableId]!;
+  LOOT_TABLES[table.id] = {
+    ...table,
+    entries: [...table.entries, { itemId, chance: HOARD_TOKEN_CHANCE, min: 1, max: 1 }],
   };
 }
 

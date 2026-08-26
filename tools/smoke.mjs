@@ -1933,6 +1933,88 @@ async function main() {
     };
   });
 
+  // Armour you farm one camp for.
+  //
+  // The set bonus is the whole feature and it is invisible in a screenshot, so
+  // this measures it the only way that proves anything: the derived stat block
+  // with two pieces on against the same character with one. It also opens the
+  // tooltip, because a bonus nobody can find out about is a bonus nobody farms
+  // four hundred kills for.
+  const sets = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const set = g.allSets().find((s) => s.zoneId === g.world.zone.id) ?? g.allSets()[0];
+    if (!set) return { ok: false, why: 'no set in this zone' };
+
+    const home = { ...me.equipment };
+    const worn = (n) => {
+      me.equipment = {};
+      for (const slot of set.slots.slice(0, n)) me.equipment[slot] = `hoard_${set.zoneId}_${slot}`;
+      return g.world.statsOf(me);
+    };
+    const one = worn(1);
+    const two = worn(2);
+    const four = worn(4);
+
+    // The keeper who makes them up, and the camp that pays for them.
+    const quests = Object.values(g.allQuests()).filter((q) => q.chain === `${set.zoneId}_hoard`);
+    const keeper = [...g.world.entities.values()].find(
+      (e) => e.kind === 'vendor' && e.vendorId === quests[0]?.giverVendorId,
+    );
+
+    // The tooltip on a piece, with two of them on: it has to say what the set
+    // is, which half is live and which is not.
+    me.equipment = {};
+    for (const slot of set.slots.slice(0, 2)) me.equipment[slot] = `hoard_${set.zoneId}_${slot}`;
+    g.world.addItem(me, { itemId: `hoard_${set.zoneId}_${set.slots[3]}`, qty: 1 });
+    g.hud.toggleInventory();
+    await new Promise((r) => setTimeout(r, 400));
+    const cell = [...document.querySelectorAll('#inventory-body .bag-slot')].find((c) =>
+      (c.textContent ?? '').includes(set.name),
+    );
+    cell?.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, clientX: 500, clientY: 400 }));
+    await new Promise((r) => setTimeout(r, 80));
+    const tip = document.querySelector('#tip');
+    const text = getComputedStyle(tip).display === 'none' ? '' : (tip.textContent ?? '');
+    const live = tip.querySelectorAll('.tip-up').length;
+    const dark = tip.querySelectorAll('.tip-off').length;
+    cell?.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
+
+    // And the sheet says what it is paying right now.
+    g.hud.toggleInventory();
+    g.hud.toggleCharacter();
+    await new Promise((r) => setTimeout(r, 400));
+    const sheet = [...document.querySelectorAll('#character-body .stat-row')]
+      .map((r) => r.textContent ?? '')
+      .find((t) => t.includes(set.name));
+    g.hud.toggleCharacter();
+
+    me.equipment = home;
+    me.inventory = (me.inventory ?? []).filter((st) => !st.itemId.startsWith('hoard_'));
+    return {
+      ok: true,
+      set: set.name,
+      // Two pieces pay something one does not, and four pays something two
+      // does not. Which number moves depends on the set, so it watches the
+      // whole derived block rather than a field this probe had to be told
+      // about — the four sets deliberately pay in four different currencies.
+      twoPays: moved(one, two),
+      fourPays: moved(two, four),
+      keeper: keeper ? keeper.name : null,
+      steps: quests.length,
+      saysTheSet: text.includes(set.name),
+      live,
+      dark,
+      sheet: sheet ?? null,
+    };
+
+    function moved(a, b) {
+      return ['maxHealth', 'moveSpeed', 'regenPerSec', 'critChance', 'defense', 'skillPower'].some(
+        (k) => Math.abs((a[k] ?? 0) - (b[k] ?? 0)) > 1e-6,
+      );
+    }
+  });
+
   // Towns, and the leystone road between them.
   //
   // The whole feature is about *places*, so the probe walks the character into
@@ -3207,6 +3289,13 @@ async function main() {
     ['a boss frame gives nothing away at first', kit.ok && kit.quietFirst],
     ['and names what it has actually shown you', kit.names],
     ['and what to do about it', kit.saysTheAnswer],
+    ['a set can be farmed off one camp', sets.ok && sets.steps === 4],
+    ['made up by the keeper in a town', !!sets.keeper],
+    ['two pieces pay a bonus', sets.twoPays],
+    ['and four pay another', sets.fourPays],
+    ['a piece says what set it is part of', sets.saysTheSet],
+    ['and which half of it is live', sets.live > 0 && sets.dark > 0],
+    ['the sheet says what a set is paying', /\d \/ 4/.test(sets.sheet ?? '')],
     ['every zone has towns in it', leystones.towns >= 4 && leystones.towns <= 7],
     ['each selling something different', leystones.roles >= 3],
     ['a trader standing in each', leystones.keeperNear],
@@ -3370,6 +3459,7 @@ async function main() {
   console.log('timing:', JSON.stringify(timing));
   console.log('reckoning:', JSON.stringify(reckoning));
   console.log('leystones:', JSON.stringify(leystones));
+  console.log('sets:', JSON.stringify(sets));
   console.log('levelling:', JSON.stringify(levelling));
   console.log('kit:', JSON.stringify(kit));
   console.log('build:', JSON.stringify(build));

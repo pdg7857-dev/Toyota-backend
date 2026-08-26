@@ -54,7 +54,7 @@ import {
   dragonMobId,
   dragonWeaponId,
 } from '../src/content/dragons.js';
-import { curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
+import { ARMOR_SLOT_SHARE, curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
 import { CLASS_ATTRIBUTES, SKILLS, getSkill } from '../src/content/skills.js';
 import { weaponLookFor, type WeaponLook } from '../src/content/bodies.js';
 import { TICK_MS } from '../src/sim/formulas.js';
@@ -149,6 +149,13 @@ import {
 } from '../src/content/tiers.js';
 import { MAX_STOCK_QUALITY, VENDORS, buyPrice, sellPrice } from '../src/content/vendors.js';
 import { ROLE_LABEL, settlementsFor } from '../src/content/settlements.js';
+import {
+  HOARD_SETS,
+  HOARD_TOKEN_CHANCE,
+  hoardGiver,
+  hoardPieceId,
+  hoardTokenId,
+} from '../src/content/sets.js';
 import { LUXURY_VENDOR_ID } from '../src/content/luxury.js';
 import { skillBarFor, skillsForClass, skillsTaughtBy } from '../src/content/skills.js';
 
@@ -3410,5 +3417,155 @@ describe('every zone has towns, and a road between them', () => {
         }
       }
     }
+  });
+});
+
+
+// --------------------------------------------------------------------------
+// Armour you farm one camp for.
+// --------------------------------------------------------------------------
+
+describe('the hoard sets', () => {
+  const bonusKeys = (set: (typeof HOARD_SETS)[number]): string =>
+    set.bonuses
+      .map((b) =>
+        Object.keys(b)
+          .filter((k) => k !== 'at' && k !== 'label')
+          .sort()
+          .join('+'),
+      )
+      .join(' / ');
+
+  it('names one camp per zone, and never one an armour line already uses', () => {
+    const taken = new Set(ARMOUR_LINES.flatMap((l) => l.steps.map((st) => st.mobId)));
+    const rows: string[] = [];
+    for (const set of HOARD_SETS) {
+      const mob = MOBS[set.mobId]!;
+      rows.push(
+        `  ${set.name.padEnd(11)} ${ZONES[set.zoneId]!.name.padEnd(16)} ` +
+          `${mob.name.padEnd(20)} lv${String(mob.level).padStart(3)} ★${mob.stars}   ${bonusKeys(set)}`,
+      );
+      // "Farm this place" has to name a place you would not otherwise be
+      // standing, or it is the kit chain with a different log entry.
+      expect(taken.has(set.mobId), `${set.name} sends you where the kit chain already does`).toBe(
+        false,
+      );
+      // The level is hand-written here because `content/mobs.ts` imports this
+      // file and cannot be imported back. This is the half that keeps it true.
+      expect(set.level, `${set.name} is built for the wrong level`).toBe(mob.level);
+      // Not a garrison: a holding's camp is replaced by whoever wins the front,
+      // and a set whose camp can be taken away is a set you can get stuck in.
+      const spawns = ZONES[set.zoneId]!.spawns.filter((sp) => sp.mobId === set.mobId);
+      expect(spawns.length, `${set.name} has no camp in its zone`).toBeGreaterThan(0);
+      expect(
+        spawns.every((sp) => sp.holding === undefined),
+        `${set.name} is farmed off a garrison that can change hands`,
+      ).toBe(true);
+    }
+    console.log('\nWHAT EACH SET IS MADE OF\n' + rows.join('\n'));
+
+    // Each has to answer a different question — the rule the boss kits, the
+    // creature traits and the timed skills all already run under. Four sets
+    // that all give health are one set drawn four times.
+    const signatures = new Set(HOARD_SETS.map(bonusKeys));
+    expect(signatures.size, 'two sets pay the same way').toBe(HOARD_SETS.length);
+  });
+
+  it('costs a decided-on grind, and prints what that is', () => {
+    const rows: string[] = [];
+    for (const set of HOARD_SETS) {
+      const kills = set.costs.map((c) => c / HOARD_TOKEN_CHANCE);
+      const total = kills.reduce((a, b) => a + b, 0);
+      rows.push(
+        `  ${set.name.padEnd(11)} ${set.costs.map((c) => String(c).padStart(2)).join(' ')} tokens` +
+          `   ${kills.map((k) => `${Math.round(k)}`.padStart(4)).join(' ')} kills` +
+          `   ${Math.round(total)} in all`,
+      );
+      for (const [i, k] of kills.entries()) {
+        // Long enough to be a decision, short enough to be one somebody makes.
+        expect(k, `${set.name} piece ${i + 1} is ${Math.round(k)} kills`).toBeGreaterThan(40);
+        expect(k, `${set.name} piece ${i + 1} is ${Math.round(k)} kills`).toBeLessThan(180);
+      }
+      expect(total, `${set.name} is ${Math.round(total)} kills`).toBeGreaterThan(250);
+      expect(total, `${set.name} is ${Math.round(total)} kills`).toBeLessThan(520);
+      // And rising, so the last piece is the commitment the four-piece bonus
+      // sits behind rather than a formality.
+      expect([...set.costs].sort((a, b) => a - b)).toEqual(set.costs);
+    }
+    console.log('\nWHAT A SET COSTS, IN KILLS OF ITS OWN CAMP\n' + rows.join('\n'));
+  });
+
+  it('pays in the bonus, not in the pieces', () => {
+    // Exactly on the ladder curve — a hair BELOW what the kit chain hands out,
+    // because guaranteed gear that also beat the drops would make the drops
+    // pointless. What you are buying is the set.
+    for (const set of HOARD_SETS) {
+      for (const slot of set.slots) {
+        const piece = getItem(hoardPieceId(set, slot));
+        const onCurve = curveArmorTotal(set.level) * ARMOR_SLOT_SHARE[slot];
+        expect(piece.armor ?? 0, `${piece.name} is off the curve`).toBeCloseTo(
+          Math.round(onCurve),
+          -0.5,
+        );
+        // Rare, which is also what keeps it out of every generated shop in the
+        // game: a keeper's stock stops at uncommon.
+        expect(piece.quality, `${piece.name} could be stocked`).toBe('rare');
+        // And never a grade of itself: a Godly Mirewrought Cuirass would turn
+        // the set bonus into a ladder to climb again.
+        expect(canBeGraded(piece), `${piece.name} can be graded`).toBe(false);
+      }
+    }
+  });
+
+  it('drops its token from its own camp and nowhere else', () => {
+    for (const set of HOARD_SETS) {
+      const tokenId = hoardTokenId(set);
+      const carriers = Object.values(MOBS).filter((mob) =>
+        (LOOT_TABLES[mob.lootTableId]?.entries ?? []).some((e) => e.itemId === tokenId),
+      );
+      expect(carriers.length, `nothing drops ${set.token}`).toBeGreaterThan(0);
+      // Star variants of the same creature share a table, which is right — a
+      // Gaunt Marsh Bear is a Marsh Bear. Anything else is a leak.
+      for (const mob of carriers) {
+        const base = mob.starOf ?? mob.rareOf ?? mob.id;
+        expect(base, `${mob.name} drops ${set.token}`).toBe(set.mobId);
+      }
+    }
+  });
+
+  it('is handed over by the zone armourer, in a town', () => {
+    for (const set of HOARD_SETS) {
+      const giver = hoardGiver(set);
+      expect(VENDORS[giver], `${set.name} has no keeper`).toBeTruthy();
+      const town = (ZONES[set.zoneId]!.settlements ?? []).find((t) => t.vendorId === giver);
+      expect(town, `${set.name}'s keeper stands in no town`).toBeTruthy();
+      expect(town!.role).toBe('armoury');
+      // Four steps, one per slot, in an unbroken chain.
+      const chain = Object.values(QUESTS).filter((q) => q.chain === `${set.zoneId}_hoard`);
+      expect(chain.length, `${set.name} has ${chain.length} steps`).toBe(set.slots.length);
+      expect(chain.every((q) => q.giverVendorId === giver)).toBe(true);
+    }
+  });
+
+  it('pays less experience than either chain it sits beside', () => {
+    // The levelling curve is tuned against the story chain plus the grind. A
+    // third chain paying story-sized experience would quietly shorten every
+    // band, and this one is meant to be worth doing for the gear alone.
+    const rows: string[] = [];
+    for (const zone of Object.values(ZONES)) {
+      const xpOf = (suffix: string): number =>
+        Object.values(QUESTS)
+          .filter((q) => q.chain === `${zone.id}_${suffix}`)
+          .reduce((n, q) => n + (q.rewards.xp ?? 0), 0);
+      const story = xpOf('story');
+      const kit = xpOf('kit');
+      const hoard = xpOf('hoard');
+      rows.push(
+        `  ${zone.name.padEnd(16)} story ${story.toLocaleString().padStart(9)}` +
+          `   kit ${kit.toLocaleString().padStart(8)}   hoard ${hoard.toLocaleString().padStart(8)}`,
+      );
+      expect(hoard, `${zone.id}'s hoard chain out-earns its kit chain`).toBeLessThan(kit);
+    }
+    console.log('\nWHAT EACH CHAIN PAYS\n' + rows.join('\n'));
   });
 });

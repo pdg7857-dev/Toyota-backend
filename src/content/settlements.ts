@@ -466,6 +466,19 @@ export function settlementVendorId(zoneId: string, planId: string): string {
   return `keeper_${zoneId}_${planId}`;
 }
 
+/**
+ * The keeper of a zone's shop of this kind.
+ *
+ * Derived rather than written down twice. The hoard sets are handed over by a
+ * zone's armourer, and naming `keeper_fenmarch_moorwatch` in a second file is a
+ * name that stops being right the moment somebody renames a town.
+ */
+export function keeperOfTrade(zoneId: string, role: SettlementRole): string | undefined {
+  const plan = (SETTLEMENT_PLANS[zoneId] ?? []).find((p) => p.role === role);
+  if (!plan) return undefined;
+  return plan.vendorId ?? settlementVendorId(zoneId, plan.id);
+}
+
 /** Every settlement in the game, without needing a built zone. For vendors. */
 export function allSettlementPlans(): Array<{ zoneId: string; plan: SettlementPlan }> {
   const out: Array<{ zoneId: string; plan: SettlementPlan }> = [];

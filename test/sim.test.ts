@@ -102,6 +102,15 @@ import {
 import { BOSS_STARS, isBoss } from '../src/sim/types.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
 import type { ZoneDef } from '../src/content/zone.js';
+import { BASE_MOVE_SPEED } from '../src/sim/formulas.js';
+import {
+  HOARD_SETS,
+  HOARD_TOKEN_CHANCE,
+  hoardLevel,
+  hoardPieceId,
+  hoardTokenId,
+  setBonusesActive,
+} from '../src/content/sets.js';
 
 function newWorld(seed = 1, zone = duelZone('mossback_boar')) {
   return new World({ seed, zone, classId: 'warrior' });
@@ -4730,5 +4739,77 @@ describe('the leystone road', () => {
     const back = World.deserialize(world.serialize(), world.zone);
     expect(back.stones.ley_test_a).toBe(true);
     expect(back.knownStones().map((s) => s.id)).toEqual(['ley_test_a']);
+  });
+});
+
+// --------------------------------------------------------------------------
+// Armour you farm one camp for.
+// --------------------------------------------------------------------------
+
+describe('a set is worth more than its pieces', () => {
+  // Two sets, chosen for what can be *measured*. Every piece carries
+  // attributes, so health, defence and crit all move when you put another one
+  // on whether the set pays or not. Movement and regeneration are the two
+  // numbers nothing else on a set piece touches, so they are the only two that
+  // can prove a bonus landed rather than a stat block growing.
+  const evade = HOARD_SETS.find((s) => s.bonuses.some((b) => b.moveSpeedBonus))!;
+  const endure = HOARD_SETS.find((s) => s.bonuses.some((b) => b.regenBonus))!;
+
+  function dressedIn(set: typeof evade, count: number): ReturnType<World['statsOf']> {
+    const world = new World({ seed: 3, zone: emptyZone(), classId: 'warrior' });
+    const player = levelPlayer(world, { level: hoardLevel(set) + 4 });
+    player.equipment = {};
+    for (const slot of set.slots.slice(0, count)) {
+      player.equipment[slot] = hoardPieceId(set, slot);
+    }
+    return world.statsOf(player);
+  }
+
+  it('pays nothing for one piece, and pays at two', () => {
+    const bonus = evade.bonuses.find((b) => b.at === 2)!;
+    expect(dressedIn(evade, 1).moveSpeed).toBeCloseTo(BASE_MOVE_SPEED);
+    expect(dressedIn(evade, 2).moveSpeed).toBeCloseTo(BASE_MOVE_SPEED + bonus.moveSpeedBonus!);
+  });
+
+  it('and pays again at four, without taking the first back', () => {
+    const four = endure.bonuses.find((b) => b.at === 4)!;
+    expect(dressedIn(endure, 2).regenPerSec).toBe(0);
+    expect(dressedIn(endure, 3).regenPerSec).toBe(0);
+    expect(dressedIn(endure, 4).regenPerSec).toBe(four.regenBonus);
+    // Cumulative: both are live at four, which is what makes the last piece
+    // read as an upgrade rather than as a swap.
+    expect(setBonusesActive(endure.slots.map(() => endure.id)).length).toBe(2);
+  });
+
+  it('counts the set, not the slots', () => {
+    // Two pieces of one and two of another is two twos, not a four. The whole
+    // decision a set creates is whether to commit to it.
+    const world = new World({ seed: 3, zone: emptyZone(), classId: 'warrior' });
+    const player = levelPlayer(world, { level: hoardLevel(endure) + 4 });
+    player.equipment = {
+      ring: hoardPieceId(endure, 'ring'),
+      head: hoardPieceId(endure, 'head'),
+      legs: hoardPieceId(evade, 'legs'),
+      chest: hoardPieceId(evade, 'chest'),
+    };
+    const mixed = world.statsOf(player);
+    // Four pieces on, and neither four-piece bonus: no regeneration from one
+    // set, and the other's movement bonus needs two of *its* pieces, which is
+    // exactly what it has.
+    expect(mixed.regenPerSec).toBe(0);
+    expect(mixed.moveSpeed).toBeCloseTo(
+      BASE_MOVE_SPEED + evade.bonuses.find((b) => b.at === 2)!.moveSpeedBonus!,
+    );
+  });
+
+  it('is a thing you buy with kills at a rate you can count', () => {
+    // The token is on the camp's own table at the published rate, which is
+    // what makes "a hundred more kills" a sentence a player can say.
+    for (const set of HOARD_SETS) {
+      const table = LOOT_TABLES[MOBS[set.mobId]!.lootTableId]!;
+      const entry = table.entries.find((e) => e.itemId === hoardTokenId(set));
+      expect(entry, `${set.token} is not on its camp's table`).toBeTruthy();
+      expect(entry!.chance).toBe(HOARD_TOKEN_CHANCE);
+    }
   });
 });

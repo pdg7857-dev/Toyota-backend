@@ -4,6 +4,7 @@ import { QUALITY_COLORS, bestDrink, canEquip, getItem } from '../content/items.j
 import { MOBS, getMob, mobDropping } from '../content/mobs.js';
 import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
 import { ROLE_LABEL } from '../content/settlements.js';
+import { getSet, type SetBonus } from '../content/sets.js';
 import { getQuest } from '../content/quests.js';
 import {
   MAX_LEVEL,
@@ -1066,14 +1067,35 @@ export class Hud {
   private characterSignature(player: Entity): string {
     const attrs = Object.entries(player.attributes ?? {}).map(([k, v]) => `${k}${v}`).join(',');
     const ranks = Object.entries(player.skillRanks ?? {}).map(([k, v]) => `${k}${v}`).join(',');
+    // What is worn is in it because the sheet now reports the derived block and
+    // which sets are paying. Without this, swapping a piece left the panel
+    // showing the old numbers until something else happened to change.
+    const worn = Object.values(player.equipment ?? {}).join(',');
     return `${player.level}|${attrs}|${ranks}|${player.unspentPoints ?? 0}|${player.skillPoints ?? 0}` +
-      `|${(player.learnedSkills ?? []).length}`;
+      `|${(player.learnedSkills ?? []).length}|${worn}`;
   }
 
   private questSignature(player: Entity): string {
     return (player.quests ?? [])
       .map((q) => `${q.questId}:${q.counts.join('.')}`)
       .join(',') + `|${(player.questsDone ?? []).length}`;
+  }
+
+  /**
+   * Every set id currently on the character.
+   *
+   * Read fresh each time a tooltip opens rather than cached: the whole thing a
+   * set tooltip has to answer is "would putting this on turn the bonus on",
+   * and an answer from before the last swap is the wrong one.
+   */
+  private wornSets(player: Entity): string[] {
+    const out: string[] = [];
+    for (const itemId of Object.values(player.equipment ?? {})) {
+      if (!itemId) continue;
+      const set = getItem(itemId).setId;
+      if (set) out.push(set);
+    }
+    return out;
   }
 
   private leySignature(player: Entity): string {
@@ -2232,6 +2254,7 @@ export class Hud {
                   ? (player.equipment?.[item.slot as EquipSlot] ?? null)
                   : null,
               short: this.world.shortOn(player, item),
+              wornSets: this.wornSets(player),
               foot: `${price}g — you have ${gold.toLocaleString()}g`,
             })
           : {
@@ -2314,6 +2337,7 @@ export class Hud {
             item.slot && item.slot !== 'none'
               ? (player.equipment?.[item.slot as EquipSlot] ?? null)
               : null,
+          wornSets: this.wornSets(player),
           foot:
             stack.qty > 1
               ? `Click to sell all ${stack.qty} for ${unit * stack.qty}g (${unit} each)`
@@ -2898,7 +2922,50 @@ export class Hud {
       body.appendChild(row);
     }
 
+    this.renderSets(player, body);
     this.renderSkillRanks(player, body);
+  }
+
+  /**
+   * What you are getting for wearing most of a set.
+   *
+   * The tooltip on a piece says what the set is worth; this says what it is
+   * paying you *right now*, which is a different question and the one a player
+   * asks when they are deciding whether the fourth piece is worth another
+   * hundred and forty kills. Nothing shows if you are wearing none — an empty
+   * heading teaches the reader to skip the block.
+   */
+  private renderSets(player: Entity, body: HTMLElement): void {
+    const worn = this.wornSets(player);
+    if (worn.length === 0) return;
+    const counts = new Map<string, number>();
+    for (const id of worn) counts.set(id, (counts.get(id) ?? 0) + 1);
+
+    const head = document.createElement('div');
+    head.className = 'skills-head';
+    head.innerHTML = '<span>Sets</span>';
+    body.appendChild(head);
+
+    for (const [setId, n] of counts) {
+      const set = getSet(setId);
+      if (!set) continue;
+      const row = document.createElement('div');
+      row.className = 'stat-row';
+      row.innerHTML =
+        `<span>${set.name}</span><span class="${n >= set.bonuses[0]!.at ? 'v' : 'muted'}">` +
+        `${n} / ${set.slots.length}</span>`;
+      this.tip(row, () => ({
+        title: `${set.name} — ${n} of ${set.slots.length}`,
+        lines: [set.blurb],
+        rich: set.bonuses.map(
+          (b) =>
+            `<span class="${n >= b.at ? 'tip-up' : 'tip-off'}">(${b.at}) ${b.label} ` +
+            `${setBonusText(b)}</span>`,
+        ),
+        foot: `Made up in a town from what the camp drops.`,
+      }));
+      body.appendChild(row);
+    }
   }
 
   /**
@@ -3122,6 +3189,7 @@ export class Hud {
           ? (this.world.player.equipment?.[item.slot as EquipSlot] ?? null)
           : null,
         short: this.world.shortOn(this.world.player, item),
+        wornSets: this.wornSets(this.world.player),
       }),
     );
 
@@ -3279,6 +3347,8 @@ function itemTip(
     foot?: string;
     /** Set when the wearer does not have what the piece asks for. */
     short?: { attr: string; needed: number; have: number } | null;
+    /** Every set id currently worn, so a set piece can say what is live. */
+    wornSets?: string[];
   } = {},
 ): TipContent {
   const item = getItem(itemId);
@@ -3316,6 +3386,24 @@ function itemTip(
     lines.push(c.family === 'potion' ? 'Potion — 18s between draughts' : 'Elixir — 2 minutes between');
   }
 
+  // What the rest of the set is worth, and which half of it you are already
+  // getting. A set bonus is the only thing in this game a single piece cannot
+  // buy, so a piece that does not say what it is part of is a piece whose whole
+  // reason for existing is invisible.
+  const rich: string[] = [];
+  const set = item.setId ? getSet(item.setId) : undefined;
+  if (set) {
+    const on = (opts.wornSets ?? []).filter((id) => id === set.id).length;
+    rich.push(`<span class="tip-same">${set.name} set — ${set.slots.length} pieces</span>`);
+    for (const bonus of set.bonuses) {
+      const live = on >= bonus.at;
+      rich.push(
+        `<span class="${live ? 'tip-up' : 'tip-off'}">(${bonus.at}) ${bonus.label} ` +
+          `${setBonusText(bonus)}</span>`,
+      );
+    }
+  }
+
   let note: string | undefined;
   if (item.teaches) {
     const skill = getSkill(item.teaches);
@@ -3330,6 +3418,7 @@ function itemTip(
       .filter(Boolean)
       .join(', '),
     lines,
+    rich: rich.length ? rich : undefined,
     desc: item.flavor,
     compare: worn ? compareItems(item, worn) : undefined,
     note,
@@ -3340,6 +3429,19 @@ function itemTip(
       : undefined,
     foot: opts.foot ?? `Worth ${item.value.toLocaleString()}g`,
   };
+}
+
+/** One set bonus, as a number a player can compare with a piece's own. */
+function setBonusText(bonus: SetBonus): string {
+  const bits: string[] = [];
+  if (bonus.healthBonus) bits.push(`+${bonus.healthBonus}`);
+  if (bonus.regenBonus) bits.push(`+${bonus.regenBonus}`);
+  if (bonus.armorBonus) bits.push(`+${bonus.armorBonus}`);
+  if (bonus.damageBonus) bits.push(`+${bonus.damageBonus}`);
+  if (bonus.moveSpeedBonus) bits.push(`+${bonus.moveSpeedBonus}`);
+  if (bonus.critBonus) bits.push(`+${(bonus.critBonus * 100).toFixed(1)}%`);
+  if (bonus.skillPower) bits.push(`+${Math.round((bonus.skillPower - 1) * 100)}%`);
+  return bits.join(' ');
 }
 
 function itemDps(item: ItemDef): number {

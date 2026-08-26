@@ -6,6 +6,14 @@ import {
   trophyId,
   type ArmourLine,
 } from './questgear.js';
+import {
+  HOARD_SETS,
+  hoardGiver,
+  hoardLevel,
+  hoardPieceId,
+  hoardTokenId,
+  type HoardSet,
+} from './sets.js';
 import type { QuestDef } from '../sim/types.js';
 
 /**
@@ -606,3 +614,74 @@ function buildArmourLines(): Record<string, QuestDef> {
 }
 
 Object.assign(QUESTS, buildArmourLines());
+
+// --------------------------------------------------------------------------
+// The hoard sets.
+//
+// A third chain per zone, and the only optional one. Where the story chain
+// walks you down the zone and the kit chain sends you to four camps in turn,
+// this one names ONE camp and asks you to decide to work it.
+//
+// Handed over by the zone's armourer rather than by its hold: the towns are
+// where a player goes to be dressed, and a keeper with a reason to exist
+// beyond their stock is the difference between a town and a shopfront.
+//
+// Lighter in experience than either of the others, because what it pays is a
+// set bonus — the one thing no single piece of gear in this game can buy.
+// --------------------------------------------------------------------------
+
+function hoardQuestId(set: HoardSet, index: number): string {
+  return `${set.zoneId}_hoard_${String(index + 1).padStart(2, '0')}`;
+}
+
+function buildHoardLines(): Record<string, QuestDef> {
+  const out: Record<string, QuestDef> = {};
+  for (const set of HOARD_SETS) {
+    const level = hoardLevel(set);
+    const giver = hoardGiver(set);
+    set.slots.forEach((slot, i) => {
+      const id = hoardQuestId(set, i);
+      const last = i === set.slots.length - 1;
+      out[id] = {
+        id,
+        name: `${set.name} ${SLOT_WORD[slot]}`,
+        zoneId: set.zoneId,
+        chain: `${set.zoneId}_hoard`,
+        giverVendorId: giver,
+        minLevel: level,
+        ...(i > 0 ? { requires: hoardQuestId(set, i - 1) } : {}),
+        summary: i === 0 ? set.blurb : hoardSummary(set, last),
+        objectives: [
+          {
+            kind: 'collect',
+            itemId: hoardTokenId(set),
+            count: set.costs[i]!,
+            text: `Collect ${set.token}`,
+          },
+        ],
+        rewards: {
+          ...reward(level, 0.1, 0.3),
+          items: [hoardPieceId(set, slot)],
+        },
+      };
+    });
+  }
+  return out;
+}
+
+const SLOT_WORD: Record<string, string> = {
+  ring: 'Signet',
+  head: 'Hood',
+  legs: 'Legguards',
+  chest: 'Cuirass',
+};
+
+/** What the keeper says on the way up. The last one names what it finishes. */
+function hoardSummary(set: HoardSet, last: boolean): string {
+  if (last) {
+    return `The last of it. Bring enough and the ${set.name} set is finished — and a set is worth more than its pieces.`;
+  }
+  return `More of the same, and the ${set.name} kit comes together a piece at a time.`;
+}
+
+Object.assign(QUESTS, buildHoardLines());

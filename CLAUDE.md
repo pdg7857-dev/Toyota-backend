@@ -61,6 +61,7 @@ input / HUD click ──> Command ──> World.submit()
 | `src/content/adventurers.ts` | Who else is out there, and what they say. |
 | `src/content/structures.ts` | The things somebody built, and where they stand. |
 | `src/content/settlements.ts` | The towns, what each one sells, and the stone in it. |
+| `src/content/sets.ts` | The one camp per zone worth emptying, and what it dresses you in. |
 | `src/render/` | three.js, DOM, input. Nothing gameplay-authoritative. |
 | `src/render/scene.ts` | Builds a zone from its theme. Knows *how*, not *which*. |
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
@@ -354,6 +355,65 @@ Turning in a collection step **consumes** the items. Collection objectives read
 the bags rather than counting pickups, so without that a single stack would
 satisfy the same requirement twice — and the capstone, which asks for the same
 trophies again, would cost nothing.
+
+### And one camp worth emptying
+
+There were three ways to get dressed and all three are somebody else's
+schedule. A drop is a rate you fight and hope against. The story chain walks you
+down the zone. The kit chain sends you to four camps in turn. What none of them
+is, is **a thing you can decide to go and do**: pick one place, work it, and
+come out with a set.
+
+A **hoard set** (`content/sets.ts`) is one camp — the hardest ordinary one in
+its zone, and never one an armour line already uses — a token at a known rate,
+and the zone's **armourer**, in a town, who will make the pieces up. Entirely
+optional and entirely off the main line, which is the point: it is the first
+reward in this game whose whole cost is deciding to.
+
+**The pieces are not what makes it worth doing.** Each one sits exactly on the
+ladder curve, a hair *below* what the kit chain hands out. What you are buying
+is the **set bonus** — the only thing in this game a single piece of gear
+cannot give you — and it is what makes farming one camp for a whole rack worth
+more than wearing the four best pieces you happen to own.
+
+Each set has to answer a different question, which is the rule the boss kits,
+the creature traits and the timed skills all already run under:
+
+| Set | Camp | 2 pieces | 4 pieces |
+|---|---|---|---|
+| Mirewrought | Marsh Bear (19) | health | health a second |
+| Stormhewn | Clan Berserker (38) | crit chance | damage a swing |
+| Tidebound | Grey Seal Bull (66) | armour | skill power |
+| Breachward | Siege Engineer (84) | movement | crit and health |
+
+A bonus lands on **the same accumulator a piece's own affixes do**, which is
+most of why the feature is cheap: anything a set can give, one item could have
+given, so `deriveStats` knows nothing about sets and a tooltip can put the two
+side by side. Cumulative at four, so the last piece reads as an upgrade rather
+than as a swap.
+
+`npm test` prints what each set costs in kills of its own camp — currently 57,
+86, 114 and 143, four hundred in all, rising so that the last piece is the
+commitment the four-piece bonus sits behind.
+
+Three things the design had to get right, and each is a test:
+
+- **A set piece must never reach a shop.** Keepers' stock is *generated* from
+  the item registry now, and the only thing stopping a set turning up in one is
+  that it is `rare` and the generator stops at uncommon. Asserted twice on
+  purpose.
+- **And never a grade of itself.** `canBeGraded` refuses anything with a
+  `setId`: a Godly Mirewrought Cuirass would turn a bonus you farmed four
+  hundred kills for into a ladder to climb again.
+- **And never off a garrison.** A holding's camp is replaced by whoever wins
+  the front, so a set farmed off one is a set a player can be locked out of by
+  a war they were not fighting.
+
+The camp's level is written down in `sets.ts` rather than read off the
+bestiary, because `content/mobs.ts` imports this file to hang the token on the
+camp's loot table and the two must not form a cycle — the same reason
+`questgear.ts` writes its step levels out. A test asserts the two agree, which
+is the half a hand-typed number needs.
 
 ## Each zone teaches you something
 

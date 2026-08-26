@@ -154,6 +154,7 @@ import {
   type DiscoverySite,
 } from '../content/discoveries.js';
 import { zoneStructures as structuresOf } from '../content/structures.js';
+import { setBonusesActive } from '../content/sets.js';
 import {
   LEYSTONE_RANGE,
   ROLE_LABEL,
@@ -1441,6 +1442,8 @@ export class World {
         armor: 0,
         affix: emptyAffixes(),
       };
+      // Which sets are on, counted as the gear is walked.
+      const worn: string[] = [];
       let weapon = {
         damageMin: 1,
         damageMax: 3,
@@ -1453,6 +1456,7 @@ export class World {
         if (!itemId) continue;
         const item = getItem(itemId);
         applyItem(acc, item);
+        if (item.setId) worn.push(item.setId);
         if (slot === 'weapon') {
           weapon = {
             damageMin: item.damageMin ?? weapon.damageMin,
@@ -1463,6 +1467,20 @@ export class World {
           };
         }
       }
+      // A set bonus lands on the same accumulator a piece's own affixes do.
+      // That is deliberate and is most of why the feature is cheap: anything a
+      // set can give, a single item could have given, so `deriveStats` needs
+      // to know nothing about sets and the two can be compared in a tooltip.
+      for (const bonus of setBonusesActive(worn)) {
+        acc.affix.crit += bonus.critBonus ?? 0;
+        acc.affix.health += bonus.healthBonus ?? 0;
+        acc.affix.moveSpeed += bonus.moveSpeedBonus ?? 0;
+        acc.affix.damage += bonus.damageBonus ?? 0;
+        acc.affix.regen += bonus.regenBonus ?? 0;
+        acc.affix.skillPower *= bonus.skillPower ?? 1;
+        acc.armor += bonus.armorBonus ?? 0;
+      }
+
       // Whatever you are riding rides with you: its speed replaces yours and
       // its bonus lands on the same accumulator gear uses, so a mount is
       // simply another source of the same numbers.

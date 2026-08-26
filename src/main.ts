@@ -9,6 +9,7 @@ import { SKILLS } from './content/skills.js';
 import { DAY_LENGTH_MS } from './content/daylight.js';
 import { getQuest, QUESTS } from './content/quests.js';
 import { splitTier } from './content/tiers.js';
+import { HOARD_SETS } from './content/sets.js';
 import { getHolding } from './content/factions.js';
 import { DRAGONS } from './content/dragons.js';
 import { getVendor } from './content/vendors.js';
@@ -285,6 +286,7 @@ async function boot(): Promise<void> {
     },
     questOf: (questId: string) => getQuest(questId),
     allQuests: () => QUESTS,
+    allSets: () => HOARD_SETS,
     /** The grade on an item id, if it carries one. See `content/tiers.ts`. */
     tierOf: (itemId: string) => splitTier(itemId)?.tier ?? null,
     holdingOf: (holdingId: string) => getHolding(holdingId),

@@ -1622,3 +1622,6 @@ canvas { display: block; }
 
 /* A stone waking up. Same voice as a discovery, one step quieter. */
 .log-ley { color: #7fe6ff; font-weight: 600; }
+
+/* A set bonus you have not earned yet. Present, and plainly not on. */
+.tip-off { color: #7d786c; }
