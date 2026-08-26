@@ -341,8 +341,88 @@ async function boot(): Promise<void> {
     xpToNext: (level: number) => xpToNext(level),
   };
 
+  /**
+   * Saving, and catching up, when the app goes away and comes back.
+   *
+   * `beforeunload` alone is a desktop assumption. A phone does not unload a
+   * tab, it *backgrounds* it — and then may evict it later with no event at
+   * all — so the only reliable moments are the page going hidden and
+   * `pagehide`. Without them a player who switches apps mid-camp loses
+   * whatever has happened since the last autosave, and sometimes the session.
+   *
+   * Coming back is the other half, and it is the same feature the load path
+   * already has. A backgrounded tab's `requestAnimationFrame` stops, so twenty
+   * minutes in another app used to be twenty minutes the world did not move —
+   * which contradicts the one thing this game says loudest about itself. The
+   * gap is handed to `catchUp`, exactly as a fortnight away is, so the same
+   * rules run and the report says what changed.
+   */
+  let hiddenAt = 0;
+  const stow = (): void => {
+    save(world);
+    hiddenAt = Date.now();
+  };
+  /**
+   * Come back after being away for `awayMs`.
+   *
+   * A duration rather than a reading, which is the rule `catchUp` itself runs
+   * under and the reason this is a named function instead of four lines inside
+   * the listener: the listener's job is to *measure* the gap, and this one's is
+   * to act on it. It is also the only way to test the thing, and a return that
+   * can only be triggered by actually waiting half an hour is untested.
+   */
+  const returnAfter = (awayMs: number): void => {
+    // Under a minute is a notification being dismissed, not a session ending.
+    // Reporting "while you were away" for it would make the card meaningless.
+    if (awayMs < 60_000) return;
+    // `showAwayReport` opens itself only when something actually moved, which
+    // is the rule that keeps the card worth reading — so this hands it over
+    // unconditionally and lets it decide.
+    hud.showAwayReport(world.catchUp(awayMs));
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      stow();
+      return;
+    }
+    const away = hiddenAt > 0 ? Date.now() - hiddenAt : 0;
+    hiddenAt = 0;
+    returnAfter(away);
+  });
+  window.addEventListener('pagehide', stow);
   window.addEventListener('beforeunload', () => save(world));
+
+  // On the debug handle so `tools/mobile.mjs` can drive a return without
+  // waiting half an hour for one. Time is a parameter, never a reading.
+  const handle = (window as unknown as { __game: Record<string, unknown> }).__game;
+  handle.returnAfter = returnAfter;
+  handle.saveNow = (): void => save(world);
+
+  keepAwake();
   requestAnimationFrame(frame);
+}
+
+/**
+ * Keep the screen on while the game is up.
+ *
+ * A phone dims and sleeps after thirty seconds of not being touched, and this
+ * game asks you to stand still and watch a telegraph. Best-effort by design:
+ * the API is not everywhere, it is refused when the tab is not visible, and
+ * the lock is dropped when the page is backgrounded — so it is re-taken every
+ * time the page comes back, and every failure is silent. A game that cannot
+ * hold a wake lock is exactly as playable as one that can.
+ */
+function keepAwake(): void {
+  const nav = navigator as Navigator & {
+    wakeLock?: { request(kind: 'screen'): Promise<unknown> };
+  };
+  if (!nav.wakeLock) return;
+  const take = (): void => {
+    if (document.visibilityState !== 'visible') return;
+    void nav.wakeLock!.request('screen').catch(() => {});
+  };
+  document.addEventListener('visibilitychange', take);
+  take();
 }
 
 /**

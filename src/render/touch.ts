@@ -126,6 +126,22 @@ export class TouchControls {
     this.knob = this.root.querySelector<HTMLElement>('#stick-knob')!;
     this.menu = this.buildPad(container);
 
+    // Ask for the whole screen on the first tap.
+    //
+    // A phone browser's address bar is a sixth of a landscape screen, and
+    // fullscreen can only be requested from inside a gesture. Once, quietly,
+    // and never retried: a game that asks twice is a game arguing with
+    // somebody who said no, and it is exactly as playable in a browser frame.
+    const goBig = (): void => {
+      window.removeEventListener('pointerdown', goBig);
+      const el = document.documentElement as HTMLElement & {
+        webkitRequestFullscreen?: () => Promise<void>;
+      };
+      const ask = el.requestFullscreen ?? el.webkitRequestFullscreen;
+      if (ask) void ask.call(el).catch(() => {});
+    };
+    window.addEventListener('pointerdown', goBig);
+
     const canvas = rig.renderer.domElement;
     canvas.addEventListener('pointerdown', (e) => this.onDown(e));
     canvas.addEventListener('pointermove', (e) => this.onMove(e), { passive: false });

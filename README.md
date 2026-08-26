@@ -65,6 +65,11 @@ automatically:
 
 Hold it sideways: it is a two-thumb game and it will say so if you don't.
 
+Add it to your home screen and it opens fullscreen, without the address bar.
+It saves the moment you switch apps, keeps the screen awake while you are
+playing, and catches the world up when you come back — a front that fell while
+you were reading a message is a front that fell.
+
 ## Somebody is watching
 
 Four other adventurers work each zone, and they now have opinions about you: a

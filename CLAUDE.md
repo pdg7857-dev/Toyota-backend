@@ -1533,6 +1533,38 @@ telegraph wants to edge. It **clamps** now, which keeps the half that mattered
 returns the half that did not exist. The keyboard is bit-identical either way,
 because every vector it sends is already length 1.
 
+### A phone is not a laptop with a small screen
+
+The controls and the layout are only half of it. The other half is that a phone
+treats a running game as something to be interrupted, and every assumption in
+the boot code was a desktop one.
+
+- **It saves when it goes away, not when it unloads.** `beforeunload` is a
+  desktop event. A phone does not unload a tab, it *backgrounds* it — and may
+  evict it later with no event at all — so the reliable moments are the page
+  going hidden and `pagehide`. Without them a player who switches apps mid-camp
+  loses everything since the last autosave, and sometimes the session.
+- **And it catches up when it comes back.** A backgrounded tab's
+  `requestAnimationFrame` stops, so twenty minutes in another app was twenty
+  minutes the world did not move — which contradicts the loudest thing this
+  game says about itself. The gap goes to `catchUp` exactly as a fortnight away
+  does, so the same rules run and the same card says what changed. Under a
+  minute is a notification being dismissed rather than a session ending, and
+  reporting one would make the card meaningless.
+- **`returnAfter` takes a duration, not a reading.** The listener's job is to
+  *measure* the gap and this one's is to act on it — which is the rule `catchUp`
+  itself runs under, and the only reason a return can be checked without
+  waiting half an hour for one.
+- **It is installable, and it opens fullscreen.** A phone browser's address bar
+  is a sixth of a landscape screen. A manifest, `apple-mobile-web-app-capable`
+  and `viewport-fit=cover` between them recover it, and the HUD keeps clear of
+  the notch with `env(safe-area-inset-*)`. Fullscreen is also *asked for* on
+  the first tap, once and quietly: a game that asks twice is arguing with
+  somebody who said no.
+- **The screen does not go to sleep.** Best-effort by design — the wake lock is
+  refused when the tab is not visible and dropped when it is backgrounded, so
+  it is re-taken on every return and every failure is silent.
+
 ### What the pictures caught
 
 `tools/mobile.mjs` boots the real game in a phone viewport with touch

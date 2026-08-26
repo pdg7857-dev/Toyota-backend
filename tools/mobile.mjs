@@ -423,6 +423,68 @@ check('held upright, it asks you to turn it', portrait.asks);
 check('and keeps running behind the card', stillTicking > portrait.ticking);
 await page.screenshot({ path: join(OUT, '6-portrait.png') });
 
+// --- it survives being put in a pocket ----------------------------------
+//
+// A phone does not unload a tab, it backgrounds it — and may evict it later
+// with no event at all. `beforeunload` is a desktop assumption; the reliable
+// moments are the page going hidden and `pagehide`, and without them a player
+// who switches apps mid-camp loses everything since the last autosave.
+await page.setViewportSize({ width: 844, height: 390 });
+await wait(500);
+const pocket = await page.evaluate(async () => {
+  const g = window.__game;
+  const KEY = 'emerald-isle:save:v1';
+  // Something only in memory, so a stale save cannot pass this by accident.
+  g.world.player.gold = 987654;
+  localStorage.removeItem(KEY);
+  // Actually hidden. Firing the event with the document still visible takes
+  // the *return* branch, which is the opposite of what this is measuring.
+  const real = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
+  Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+  document.dispatchEvent(new Event('visibilitychange'));
+  await new Promise((r) => setTimeout(r, 200));
+  delete document.visibilityState;
+  if (real) Object.defineProperty(Document.prototype, 'visibilityState', real);
+  const raw = localStorage.getItem(KEY);
+  return { saved: !!raw && raw.includes('987654') };
+});
+check('going to the background writes a save', pocket.saved);
+
+// And coming back moves the world on, the way closing the game does. A
+// backgrounded tab's requestAnimationFrame stops, so twenty minutes in another
+// app used to be twenty minutes the world did not move — which contradicts the
+// one thing this game says loudest about itself.
+const returned = await page.evaluate(async () => {
+  const g = window.__game;
+  const before = g.world.worldTimeMs;
+  // Half an hour, handed over as a duration. The listener's job is to measure
+  // the gap; this is the half that acts on one, and driving it directly is the
+  // only way to check a return without waiting half an hour for it.
+  g.returnAfter(30 * 60 * 1000);
+  await new Promise((r) => setTimeout(r, 400));
+  return { before, after: g.world.worldTimeMs, moved: g.world.worldTimeMs - before };
+});
+check('coming back catches the world up', returned.after > returned.before);
+
+// --- it is installable ---------------------------------------------------
+const installable = await page.evaluate(async () => {
+  const link = document.querySelector('link[rel="manifest"]');
+  if (!link) return { ok: false, why: 'no manifest link' };
+  const res = await fetch(link.getAttribute('href'));
+  const manifest = await res.json();
+  return {
+    ok: res.ok,
+    display: manifest.display,
+    orientation: manifest.orientation,
+    icons: (manifest.icons ?? []).length,
+    capable: !!document.querySelector('meta[name="mobile-web-app-capable"]'),
+    cover: (document.querySelector('meta[name="viewport"]')?.content ?? '').includes('viewport-fit=cover'),
+  };
+});
+check('it can be added to a home screen', installable.ok && installable.icons > 0);
+check('and opens without browser chrome', installable.display === 'fullscreen' && installable.capable);
+check('and paints under the notch', installable.cover);
+
 check('no page errors', errors.length === 0);
 
 let failed = 0;
@@ -439,6 +501,8 @@ console.log('pad:', JSON.stringify(pad));
 console.log('frame:', JSON.stringify(frame));
 if (spill.length) console.log('spill:', spill.join(' | '));
 console.log('portrait:', JSON.stringify(portrait));
+console.log('pocket:', JSON.stringify(pocket), '| returned:', JSON.stringify(returned));
+console.log('installable:', JSON.stringify(installable));
 if (errors.length) console.log('errors:', errors.slice(0, 5).join(' | '));
 console.log(`\nscreenshots in ${OUT}`);
 

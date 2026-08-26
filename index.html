@@ -2,7 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <!-- `viewport-fit=cover` is what lets the game paint under the notch; the
+         HUD keeps clear of it with `env(safe-area-inset-*)`. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <!-- Added to a home screen, it opens without browser chrome. On a phone
+         held sideways that chrome is a sixth of the screen, and this game has
+         390 points of height to work with. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Emerald Isle" />
+    <meta name="theme-color" content="#0c0f0d" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
     <title>Emerald Isle</title>
     <link
       rel="icon"
