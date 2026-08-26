@@ -135,10 +135,10 @@ export const ITEMS: Record<string, ItemDef> = {
   // === PRIEST WEAPONS — Focus, slower, heavier per swing ====================
   oaken_walking_staff: {
     id: 'oaken_walking_staff',
-    name: 'Oaken Walking Staff',
+    name: 'Oaken Totem',
     slot: 'weapon',
     quality: 'common',
-    classes: ['priest'],
+    classes: ['druid'],
     value: 4,
     damageMin: 3,
     damageMax: 5,
@@ -148,10 +148,10 @@ export const ITEMS: Record<string, ItemDef> = {
   },
   rowan_stave: {
     id: 'rowan_stave',
-    name: 'Rowan Stave',
+    name: 'Rowan Totem',
     slot: 'weapon',
     quality: 'common',
-    classes: ['priest'],
+    classes: ['druid'],
     value: 18,
     damageMin: 8,
     damageMax: 13,
@@ -162,10 +162,10 @@ export const ITEMS: Record<string, ItemDef> = {
   },
   blessed_mace: {
     id: 'blessed_mace',
-    name: 'Blessed Mace',
+    name: 'Blessed Idol',
     slot: 'weapon',
     quality: 'uncommon',
-    classes: ['priest'],
+    classes: ['druid'],
     value: 55,
     damageMin: 14,
     damageMax: 22,
@@ -176,10 +176,10 @@ export const ITEMS: Record<string, ItemDef> = {
   },
   vigil_stave: {
     id: 'vigil_stave',
-    name: 'Vigil Stave',
+    name: 'Vigil Totem',
     slot: 'weapon',
     quality: 'uncommon',
-    classes: ['priest'],
+    classes: ['druid'],
     value: 120,
     damageMin: 22,
     damageMax: 33,
@@ -190,10 +190,10 @@ export const ITEMS: Record<string, ItemDef> = {
   },
   reliquary_mace: {
     id: 'reliquary_mace',
-    name: 'Reliquary Mace',
+    name: 'Wayside Idol',
     slot: 'weapon',
     quality: 'rare',
-    classes: ['priest'],
+    classes: ['druid'],
     value: 260,
     damageMin: 31,
     damageMax: 45,
@@ -204,10 +204,10 @@ export const ITEMS: Record<string, ItemDef> = {
   },
   prayerwood_stave: {
     id: 'prayerwood_stave',
-    name: 'Prayerwood Stave',
+    name: 'Prayerwood Totem',
     slot: 'weapon',
     quality: 'rare',
-    classes: ['priest'],
+    classes: ['druid'],
     value: 380,
     damageMin: 42,
     damageMax: 59,
@@ -218,10 +218,10 @@ export const ITEMS: Record<string, ItemDef> = {
   },
   chieftains_reliquary: {
     id: 'chieftains_reliquary',
-    name: "Chieftain's Reliquary",
+    name: "Chieftain's Effigy",
     slot: 'weapon',
     quality: 'epic',
-    classes: ['priest'],
+    classes: ['druid'],
     value: 900,
     damageMin: 52,
     damageMax: 73,
@@ -232,10 +232,10 @@ export const ITEMS: Record<string, ItemDef> = {
   },
   bonecarved_stave: {
     id: 'bonecarved_stave',
-    name: 'Bonecarved Stave',
+    name: 'Bonecarved Totem',
     slot: 'weapon',
     quality: 'epic',
-    classes: ['priest'],
+    classes: ['druid'],
     value: 1800,
     damageMin: 66,
     damageMax: 92,
@@ -406,13 +406,13 @@ export const ITEMS: Record<string, ItemDef> = {
 
 // === GENERATED WEAPON LADDERS ============================================
 //
-// Warrior and Priest ladders above are hand-written and are the reference.
+// Warrior and Druid ladders above are hand-written and are the reference.
 // The remaining three classes are generated against the same per-tier DPS
 // budget so no class can silently end up ahead of the others: only the
 // *feel* differs (a Rogue swings fast for little, a Ranger slowly from
 // range), never the throughput. A test asserts the parity holds.
 
-/** Per-tier DPS budget, read off the hand-tuned Warrior and Priest ladders. */
+/** Per-tier DPS budget, read off the hand-tuned Warrior and Druid ladders. */
 const WEAPON_TIERS: Array<{
   dps: number;
   quality: ItemQuality;
@@ -469,7 +469,7 @@ const ARCHETYPES: WeaponArchetype[] = [
       ['poachers_knife', "Poacher's Knife"],
       ['twin_fangs', 'Twin Fangs'],
       ['outlaw_stiletto', 'Outlaw Stiletto'],
-      ['fenblade', 'Fenblade'],
+      ['fenblade', 'Fen Dirk'],
       ['cadfaels_skinning_knife', "Cadfael's Skinning Knife"],
       ['scarred_kris', 'Scarred Kris'],
     ],
@@ -487,7 +487,7 @@ const ARCHETYPES: WeaponArchetype[] = [
       ['stormcaller_rod', 'Stormcaller Rod'],
       ['outlaws_focus', "Outlaw's Focus"],
       ['fenlight_rod', 'Fenlight Rod'],
-      ['cadfaels_talisman', "Cadfael's Talisman"],
+      ['cadfaels_talisman', "Cadfael's Wand"],
       ['scarred_heartwood', 'Scarred Heartwood'],
     ],
   },
@@ -551,11 +551,20 @@ const LATE_TIER_ADJECTIVES = [
 ];
 
 /** Weapon noun per class, changing every four tiers so a zone feels distinct. */
+/**
+ * Weapon noun per class, changing every four tiers so a zone feels distinct.
+ *
+ * Each class's three nouns are three *different silhouettes* on purpose. A
+ * Warrior who carries a Blade, then a Warblade, then a Greatsword has carried
+ * one object at three sizes for a hundred levels; a Warrior who carries a
+ * spear, then an axe, then a greatsword has changed weapon twice. The
+ * silhouette is the only thing about a weapon a player sees while playing.
+ */
 const LATE_WEAPON_NOUNS: Record<ClassId, [string, string, string]> = {
-  warrior: ['Blade', 'Warblade', 'Greatsword'],
-  priest: ['Stave', 'Crozier', 'Reliquary'],
+  warrior: ['Warspear', 'Battleaxe', 'Greatsword'],
+  druid: ['Totem', 'Idol', 'Effigy'],
   ranger: ['Bow', 'Longbow', 'Warbow'],
-  rogue: ['Dagger', 'Kris', 'Fang'],
+  rogue: ['Dagger', 'Knuckle', 'Fang'],
   mage: ['Rod', 'Scepter', 'Focus'],
 };
 
@@ -580,7 +589,7 @@ function lateTierValue(level: number, quality: ItemQuality): number {
  * Weapon feel per class for the late tiers.
  *
  * Separate from ARCHETYPES because that table only covers the three classes
- * whose EARLY ladders are generated — Warrior and Priest are hand-written down
+ * whose EARLY ladders are generated — Warrior and Druid are hand-written down
  * there and would otherwise silently have no gear past level 25.
  */
 const LATE_WEAPON_FEEL: Record<
@@ -588,7 +597,7 @@ const LATE_WEAPON_FEEL: Record<
   { primary: keyof Attributes; swingMs: number; attackRange: number; damageType: DamageType }
 > = {
   warrior: { primary: 'strength', swingMs: 1850, attackRange: 2.7, damageType: 'physical' },
-  priest: { primary: 'focus', swingMs: 2100, attackRange: 2.9, damageType: 'nature' },
+  druid: { primary: 'focus', swingMs: 2100, attackRange: 2.9, damageType: 'nature' },
   ranger: { primary: 'dexterity', swingMs: 2400, attackRange: 12, damageType: 'physical' },
   rogue: { primary: 'dexterity', swingMs: 1400, attackRange: 2.3, damageType: 'physical' },
   mage: { primary: 'focus', swingMs: 2000, attackRange: 10, damageType: 'fire' },
@@ -680,7 +689,7 @@ const EARLY_WEAPONS: Record<ClassId, string[]> = {
     'rusted_blade', 'bronze_shortsword', 'ironbark_cudgel', 'iron_longsword',
     'outlaw_saber', 'boar_spear', 'cadfaels_cleaver', 'scarred_fang',
   ],
-  priest: [
+  druid: [
     'oaken_walking_staff', 'rowan_stave', 'blessed_mace', 'vigil_stave',
     'reliquary_mace', 'prayerwood_stave', 'chieftains_reliquary', 'bonecarved_stave',
   ],
@@ -692,7 +701,7 @@ const EARLY_WEAPONS: Record<ClassId, string[]> = {
 /** Full 20-tier weapon progression per class. */
 export const WEAPON_LADDER: Record<ClassId, string[]> = {
   warrior: [...EARLY_WEAPONS.warrior, ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_warrior_weapon`)],
-  priest: [...EARLY_WEAPONS.priest, ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_priest_weapon`)],
+  druid: [...EARLY_WEAPONS.druid, ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_druid_weapon`)],
   ranger: [...EARLY_WEAPONS.ranger, ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_ranger_weapon`)],
   rogue: [...EARLY_WEAPONS.rogue, ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_rogue_weapon`)],
   mage: [...EARLY_WEAPONS.mage, ...LATE_TIER_ADJECTIVES.map((a) => `${a.toLowerCase()}_mage_weapon`)],
@@ -871,7 +880,7 @@ function buildTomes(): Record<string, ItemDef> {
 /** Zones that teach skills. The Fenmarch grants its kit by level instead. */
 const TAUGHT_ZONE_IDS = ['ardmoor', 'reach', 'caer_dubh'];
 
-const PLAYABLE_CLASS_IDS: ClassId[] = ['warrior', 'priest', 'ranger', 'rogue', 'mage'];
+const PLAYABLE_CLASS_IDS: ClassId[] = ['warrior', 'druid', 'ranger', 'rogue', 'mage'];
 
 Object.assign(ITEMS, buildTomes());
 

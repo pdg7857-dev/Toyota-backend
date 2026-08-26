@@ -18,7 +18,7 @@ import { zoneTomes } from './skills.js';
  * the same piece of luck, and turns a good hour into a wasted one.
  *
  * Every rare is named for what it carries. `Mirefang the Bog Wolf` drops the
- * `Mirefang Blade`, and a Priest killing the same creature gets the
+ * `Mirefang Blade`, and a Druid killing the same creature gets the
  * `Mirefang Stave` — one epithet, one creature, an item per class that shares
  * its name.
  */
@@ -162,7 +162,7 @@ export function bountyLootTableId(spec: BountySpec): string {
 /** Weapon noun per class, so one epithet names five weapons. */
 const SIGNATURE_WEAPON_NOUN: Record<ClassId, string> = {
   warrior: 'Blade',
-  priest: 'Stave',
+  druid: 'Totem',
   ranger: 'Bow',
   rogue: 'Dirk',
   mage: 'Rod',
@@ -187,7 +187,7 @@ const SIGNATURE_FEEL: Record<
   { swingMs: number; attackRange: number; damageType: ItemDef['damageType']; primary: 'strength' | 'dexterity' | 'focus' }
 > = {
   warrior: { swingMs: 1800, attackRange: 2.7, damageType: 'physical', primary: 'strength' },
-  priest: { swingMs: 2050, attackRange: 2.9, damageType: 'nature', primary: 'focus' },
+  druid: { swingMs: 2050, attackRange: 2.9, damageType: 'nature', primary: 'focus' },
   ranger: { swingMs: 2350, attackRange: 12, damageType: 'physical', primary: 'dexterity' },
   rogue: { swingMs: 1350, attackRange: 2.3, damageType: 'physical', primary: 'dexterity' },
   mage: { swingMs: 1950, attackRange: 10, damageType: 'fire', primary: 'focus' },

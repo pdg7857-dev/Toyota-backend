@@ -263,7 +263,7 @@ describe('combat', () => {
     let slamsSeen = 0;
     let brokenBySlam = 0;
     for (let seed = 0; seed < 6; seed++) {
-      const world = new World({ seed: seed * 131 + 5, zone: duelZone('old_scar'), classId: 'priest' });
+      const world = new World({ seed: seed * 131 + 5, zone: duelZone('old_scar'), classId: 'druid' });
       const player = levelPlayer(world, { level: 25, gear: ['bonecarved_stave', 'bearhide_cuirass'] });
       const boss = theMob(world);
       for (let i = 0; i < 1200; i++) {
@@ -771,7 +771,7 @@ describe('tick contract', () => {
 // --------------------------------------------------------------------------
 
 describe('interrupts', () => {
-  function bossFight(seed: number, mobId: string, classId: 'warrior' | 'priest') {
+  function bossFight(seed: number, mobId: string, classId: 'warrior' | 'druid') {
     const world = new World({ seed, zone: duelZone(mobId), classId });
     const player = levelPlayer(world, {
       level: 25,
@@ -794,7 +794,7 @@ describe('interrupts', () => {
   }
 
   it('stops an interruptible cast and locks the ability out', () => {
-    const { world, player, boss } = bossFight(61, 'cadfael', 'priest');
+    const { world, player, boss } = bossFight(61, 'cadfael', 'druid');
     expect(runUntilCasting(world, boss, 'bind_wounds')).toBe(true);
 
     world.submit(player.id, { t: 'useSkill', skillId: 'rebuke' });
@@ -811,7 +811,7 @@ describe('interrupts', () => {
   });
 
   it('prevents the heal from landing at all', () => {
-    const { world, player, boss } = bossFight(62, 'cadfael', 'priest');
+    const { world, player, boss } = bossFight(62, 'cadfael', 'druid');
     expect(runUntilCasting(world, boss, 'bind_wounds')).toBe(true);
 
     boss.health = world.statsOf(boss).maxHealth * 0.4;
@@ -824,7 +824,7 @@ describe('interrupts', () => {
   });
 
   it('keeps the ability unusable for the whole lockout', () => {
-    const { world, player, boss } = bossFight(63, 'cadfael', 'priest');
+    const { world, player, boss } = bossFight(63, 'cadfael', 'druid');
     expect(runUntilCasting(world, boss, 'bind_wounds')).toBe(true);
     world.submit(player.id, { t: 'useSkill', skillId: 'rebuke' });
     world.tick();
@@ -841,7 +841,7 @@ describe('interrupts', () => {
   });
 
   it('cannot interrupt an ability flagged uninterruptible — dodge that instead', () => {
-    const { world, player, boss } = bossFight(64, 'old_scar', 'priest');
+    const { world, player, boss } = bossFight(64, 'old_scar', 'druid');
     let casting = false;
     for (let i = 0; i < 3000 && !casting; i++) {
       boss.health = world.statsOf(boss).maxHealth;
@@ -857,7 +857,7 @@ describe('interrupts', () => {
   });
 
   it('reports a wasted interrupt when the target is not casting', () => {
-    const { world, player } = bossFight(65, 'cadfael', 'priest');
+    const { world, player } = bossFight(65, 'cadfael', 'druid');
     world.submit(player.id, { t: 'useSkill', skillId: 'rebuke' });
     const events = world.tick();
     expect(events.some((e) => e.t === 'interruptWasted')).toBe(true);
@@ -872,23 +872,23 @@ describe('interrupts', () => {
     const events = world.tick();
     const hit = events.find((e) => e.t === 'interrupted');
     expect(hit).toBeDefined();
-    // Warrior's lockout is shorter than the Priest's — interrupting is the
-    // Priest's speciality, not a tool both classes hold equally.
+    // Warrior's lockout is shorter than the Druid's — interrupting is the
+    // Druid's speciality, not a tool both classes hold equally.
     if (hit?.t === 'interrupted') expect(hit.lockoutMs).toBe(6000);
     expect(boss.abilityLockouts?.bind_wounds).toBeGreaterThan(5000);
   });
 });
 
 describe('classes', () => {
-  it('scales the Priest off Focus and the Warrior off Strength', () => {
-    const priest = new World({ seed: 1, zone: emptyZone(), classId: 'priest' });
+  it('scales the Druid off Focus and the Warrior off Strength', () => {
+    const druid = new World({ seed: 1, zone: emptyZone(), classId: 'druid' });
     const warrior = new World({ seed: 1, zone: emptyZone(), classId: 'warrior' });
 
-    const priestBefore = priest.statsOf(priest.player).attack;
-    priest.player.attributes!.focus += 10;
-    expect(priest.statsOf(priest.player).attack).toBe(priestBefore + 20);
-    priest.player.attributes!.strength += 10;
-    expect(priest.statsOf(priest.player).attack).toBe(priestBefore + 20);
+    const druidBefore = druid.statsOf(druid.player).attack;
+    druid.player.attributes!.focus += 10;
+    expect(druid.statsOf(druid.player).attack).toBe(druidBefore + 20);
+    druid.player.attributes!.strength += 10;
+    expect(druid.statsOf(druid.player).attack).toBe(druidBefore + 20);
 
     const warriorBefore = warrior.statsOf(warrior.player).attack;
     warrior.player.attributes!.strength += 10;
@@ -896,7 +896,7 @@ describe('classes', () => {
   });
 
   it('refuses to equip a weapon from another class', () => {
-    const world = new World({ seed: 1, zone: emptyZone(), classId: 'priest' });
+    const world = new World({ seed: 1, zone: emptyZone(), classId: 'druid' });
     const player = world.player;
     world.addItem(player, { itemId: 'scarred_fang', qty: 1 });
     world.submit(player.id, { t: 'equip', itemId: 'scarred_fang' });
@@ -909,7 +909,7 @@ describe('classes', () => {
   });
 
   it('lets either class wear the same armour', () => {
-    for (const classId of ['warrior', 'priest'] as const) {
+    for (const classId of ['warrior', 'druid'] as const) {
       const world = new World({ seed: 1, zone: emptyZone(), classId });
       // Levelled first: armour asks for a level and some Vitality now, and
       // what this test is about is that it never asks which class you are.
@@ -923,12 +923,12 @@ describe('classes', () => {
 
   it('gives each class its own skill bar', () => {
     const warriorKit = skillBarFor('warrior').map((s) => s.id);
-    const priestKit = skillBarFor('priest').map((s) => s.id);
+    const druidKit = skillBarFor('druid').map((s) => s.id);
     expect(warriorKit).toContain('bash');
-    expect(priestKit).toContain('rebuke');
-    expect(warriorKit.some((id) => priestKit.includes(id))).toBe(false);
+    expect(druidKit).toContain('rebuke');
+    expect(warriorKit.some((id) => druidKit.includes(id))).toBe(false);
     // Both must have an interrupt, or one class simply cannot answer a heal.
-    for (const kit of [warriorKit, priestKit]) {
+    for (const kit of [warriorKit, druidKit]) {
       expect(kit.some((id) => getSkill(id).kind === 'interrupt')).toBe(true);
     }
   });
@@ -937,9 +937,9 @@ describe('classes', () => {
 describe('boss class weapons', () => {
   for (const [classId, mobId, expected] of [
     ['warrior', 'old_scar', 'scarred_fang'],
-    ['priest', 'old_scar', 'bonecarved_stave'],
+    ['druid', 'old_scar', 'bonecarved_stave'],
     ['warrior', 'cadfael', 'cadfaels_cleaver'],
-    ['priest', 'cadfael', 'chieftains_reliquary'],
+    ['druid', 'cadfael', 'chieftains_reliquary'],
   ] as const) {
     it(`drops ${expected} for a ${classId} killing ${mobId}`, () => {
       const world = new World({ seed: 71, zone: duelZone(mobId, 2), classId });
@@ -1546,7 +1546,7 @@ describe('zone-taught skills', () => {
     const world = new World({ seed: 611, zone: emptyZone(), classId: 'warrior' });
     const player = levelPlayer(world, { level: 22, learned: [] });
     const warriorSkill = skillsTaughtBy('ardmoor').find((s) => s.classId === 'warrior')!;
-    const priestSkill = skillsTaughtBy('ardmoor').find((s) => s.classId === 'priest')!;
+    const priestSkill = skillsTaughtBy('ardmoor').find((s) => s.classId === 'druid')!;
     const lateSkill = skillsTaughtBy('caer_dubh').find((s) => s.classId === 'warrior')!;
 
     for (const [itemId, pattern] of [
@@ -2630,7 +2630,7 @@ describe('the other adventurers', () => {
       }
 
       // No two of the same person, and no two of the same class while the
-      // roster still has one spare: a camp where everybody plays a Priest
+      // roster still has one spare: a camp where everybody plays a Druid
       // reads as a bug in the population rather than a coincidence in it.
       expect(new Set(people.map((p) => p.name)).size).toBe(people.length);
       expect(new Set(people.map((p) => p.classId)).size).toBe(people.length);
@@ -3881,10 +3881,18 @@ describe('every creature has a shape', () => {
     // collides: `Mirefang Bow` matched `fang` before `bow` and the Ranger's
     // signature longbow came out as a knife.
     expect(weaponLookFor('Mirefang Bow', 'ranger')).toBe('bow');
-    expect(weaponLookFor('Mirefang Rod', 'mage')).toBe('staff');
+    // A rod is a Mage's wand, not a staff: the two used to share a silhouette,
+    // which meant the one weapon a caster looks at for a hundred levels was
+    // the same object at two lengths.
+    expect(weaponLookFor('Mirefang Rod', 'mage')).toBe('wand');
     expect(weaponLookFor('Mirefang Dirk', 'rogue')).toBe('dagger');
     // And a single made-up word still finds the real one inside it.
     expect(weaponLookFor('Fenblade', 'warrior')).toBe('blade');
+    // Creature parts are not weapon shapes, and they collide across classes:
+    // Saorla's Fang is a Warrior's greatsword and Twin Fangs is a Rogue's pair
+    // of daggers. The class knows which; a word table cannot.
+    expect(weaponLookFor("Saorla's Fang", 'warrior')).toBe('greatsword');
+    expect(weaponLookFor('Twin Fangs', 'rogue')).toBe('dagger');
   });
 
   it('gives every class a weapon even when its name says nothing', () => {

@@ -58,7 +58,7 @@ export type ModelState = 'idle' | 'walk' | 'run' | 'attack' | 'cast' | 'hit' | '
  *
  * Namespaced because the three id spaces are separate and a Warrior and a
  * creature called "warrior" would otherwise collide — which is precisely the
- * sort of thing that goes unnoticed until somebody's Priest turns into a wolf.
+ * sort of thing that goes unnoticed until somebody's Druid turns into a wolf.
  */
 export const MODELS: Record<string, ModelDef> = {
   // Nothing yet. This is the file to add to.

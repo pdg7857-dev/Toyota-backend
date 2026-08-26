@@ -352,8 +352,12 @@ export type WeaponLook =
   | 'mace'
   | 'spear'
   | 'dagger'
+  | 'knuckle'
   | 'bow'
   | 'staff'
+  | 'wand'
+  | 'totem'
+  | 'shield'
   | 'none';
 
 export type OffhandLook = 'blade' | 'bulwark' | 'grimoire' | 'none';
@@ -367,7 +371,7 @@ export type OffhandLook = 'blade' | 'bulwark' | 'grimoire' | 'none';
  * table with an extra step.
  *
  * The class is the fallback and it does real work, because weapons are
- * class-locked: a Mage's `Blackstone Focus` and a Priest's `Chieftain's
+ * class-locked: a Mage's `Blackstone Focus` and a Druid's `Chieftain's
  * Reliquary` name no object anybody would recognise, and the class is enough
  * to know one is a staff and the other is not. The printed table in the test
  * is what caught them sitting in the `blade` bucket with seventy-six others.
@@ -392,8 +396,6 @@ const WEAPON_WORDS: [string, WeaponLook][] = [
   ['cudgel', 'mace'],
   ['flail', 'mace'],
   ['reliquary', 'mace'],
-  ['scepter', 'mace'],
-  ['sceptre', 'mace'],
   ['spear', 'spear'],
   ['pike', 'spear'],
   ['lance', 'spear'],
@@ -401,35 +403,60 @@ const WEAPON_WORDS: [string, WeaponLook][] = [
   ['halberd', 'spear'],
   ['dagger', 'dagger'],
   ['knife', 'dagger'],
+  // The Rogue's other hand. A knuckle blade is a fist with an edge on it, and
+  // it has to read as a *different* weapon from a dagger or the class has one
+  // silhouette wearing two names.
+  ['knuckle', 'knuckle'],
+  ['knuckles', 'knuckle'],
+  ['claw', 'knuckle'],
+  ['claws', 'knuckle'],
+  ['fist', 'knuckle'],
+  ['katar', 'knuckle'],
+  ['punch', 'knuckle'],
   ['dirk', 'dagger'],
   ['shiv', 'dagger'],
   ['stiletto', 'dagger'],
   ['kris', 'dagger'],
-  ['fang', 'dagger'],
   ['bow', 'bow'],
   ['recurve', 'bow'],
   ['sling', 'bow'],
   ['stave', 'staff'],
   ['staff', 'staff'],
-  ['rod', 'staff'],
-  ['wand', 'staff'],
-  ['branch', 'staff'],
   ['crook', 'staff'],
   ['crozier', 'staff'],
-  ['focus', 'staff'],
-  ['talisman', 'staff'],
-  ['heartwood', 'staff'],
+  // A Mage's hand. Short, held out, and pointedly not a staff — the two used
+  // to share a silhouette, which meant the one weapon a caster looks at for a
+  // hundred levels was the same object at two lengths.
+  ['wand', 'wand'],
+  ['rod', 'wand'],
+  ['focus', 'wand'],
+  ['baton', 'wand'],
+  ['scepter', 'wand'],
+  ['sceptre', 'wand'],
+  // A Druid's. A carved post with something bound to the top of it.
+  ['totem', 'totem'],
+  ['idol', 'totem'],
+  ['fetish', 'totem'],
+  ['effigy', 'totem'],
+  ['talisman', 'totem'],
+  ['branch', 'totem'],
+  // Carried, not just worn. A Warrior with a shield in the off hand is the
+  // most recognisable thing in the game and it had no shape at all.
+  ['shield', 'shield'],
+  ['targe', 'shield'],
+  ['buckler', 'shield'],
+  ['aegis', 'shield'],
 ];
 
 const WEAPON_SORTED = [...WEAPON_WORDS].sort((a, b) => b[0].length - a[0].length);
 
 /** What this class carries when its weapon's name says nothing useful. */
 const CLASS_WEAPON: Record<string, WeaponLook> = {
-  warrior: 'axe',
-  priest: 'mace',
+  warrior: 'greatsword',
+  druid: 'totem',
   ranger: 'bow',
   rogue: 'dagger',
-  mage: 'staff',
+  mage: 'wand',
 };
 
 export function weaponLookFor(name: string | undefined, classId: string | undefined): WeaponLook {
@@ -440,8 +467,8 @@ export function weaponLookFor(name: string | undefined, classId: string | undefi
     // `Mirefang Bow` is a bow. Matching anywhere and taking the longest word
     // made it a dagger, because a rare spawn's epithet is a made-up word glued
     // onto a real one and `fang` is longer than `bow`. A whole word beats a
-    // fragment; `Fenblade`, which is one word, still finds its blade on the
-    // second pass.
+    // fragment; a made-up single word like `Fenlight` still finds the real one
+    // inside it on the second pass.
     const words = key.split(/[^a-z]+/).filter(Boolean);
     for (const [word, look] of WEAPON_SORTED) {
       if (words.includes(word)) return look;
@@ -516,6 +543,33 @@ export function weaponParts(look: WeaponLook): BodyPart[] {
       return [
         { shape: 'capsule', size: [0.014, 0.78, 0], at: [0, 0.24, 0.02], rot: [-0.08, 0, 0], tone: 0.5 },
         { shape: 'sphere', size: [0.04, 1.1, 1.1], at: [0, 0.62, 0.05], tone: 1.8 },
+      ];
+    case 'knuckle':
+      // Across the knuckles rather than out from the fist: three short blades
+      // on a bar, sitting where the hand is.
+      return [
+        { shape: 'box', size: [0.09, 0.03, 0.05], at: [0, 0.01, 0.01], tone: 0.5 },
+        { shape: 'box', size: [0.014, 0.13, 0.03], at: [-0.03, 0.07, 0.02], rot: [-0.5, 0, 0] },
+        { shape: 'box', size: [0.014, 0.15, 0.03], at: [0, 0.08, 0.02], rot: [-0.5, 0, 0] },
+        { shape: 'box', size: [0.014, 0.13, 0.03], at: [0.03, 0.07, 0.02], rot: [-0.5, 0, 0] },
+      ];
+    case 'wand':
+      return [
+        { shape: 'capsule', size: [0.011, 0.24, 0], at: [0, 0.1, 0.03], rot: [-0.55, 0, 0], tone: 0.5 },
+        { shape: 'sphere', size: [0.028, 1.1, 1.1], at: [0, 0.22, 0.11], tone: 2 },
+      ];
+    case 'totem':
+      // A carved post, wider at the head, with a ring bound below it. Held
+      // upright rather than levelled: a Druid plants it, they do not swing it.
+      return [
+        { shape: 'capsule', size: [0.018, 0.66, 0], at: [0, 0.2, 0.01], tone: 0.45 },
+        { shape: 'box', size: [0.09, 0.13, 0.09], at: [0, 0.55, 0.01], tone: 0.8 },
+        { shape: 'box', size: [0.12, 0.02, 0.02], at: [0, 0.42, 0.01], tone: 1.5 },
+      ];
+    case 'shield':
+      return [
+        { shape: 'box', size: [0.03, 0.4, 0.32], at: [-0.03, 0.08, 0.02], rot: [0, 0, 0.06] },
+        { shape: 'sphere', size: [0.055, 0.8, 0.8], at: [-0.05, 0.08, 0.02], tone: 1.5 },
       ];
     case 'none':
       return [];
@@ -805,7 +859,7 @@ export function bodyPlanForClass(classId: string): BodyPlan {
     case 'ranger':
       return BODY_PLANS.archer;
     case 'mage':
-    case 'priest':
+    case 'druid':
       return BODY_PLANS.caster;
     default:
       return BODY_PLANS.person;

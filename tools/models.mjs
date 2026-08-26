@@ -37,7 +37,7 @@ function knownIds(file, pattern) {
 
 const known = {
   mob: knownIds('mobs.ts', /\bid:\s*'([a-z0-9_]+)'/g),
-  class: new Set(['warrior', 'priest', 'ranger', 'rogue', 'mage']),
+  class: new Set(['warrior', 'druid', 'ranger', 'rogue', 'mage']),
   vendor: knownIds('vendors.ts', /\bid:\s*'([a-z0-9_]+)'/g),
 };
 

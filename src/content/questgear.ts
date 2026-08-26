@@ -75,9 +75,9 @@ const ARMOUR_NOUN: Record<ArmorSlot, string> = {
 
 const WEAPON_NOUN: Record<ClassId, string> = {
   warrior: 'Sword',
-  priest: 'Crook',
+  druid: 'Idol',
   ranger: 'Longbow',
-  rogue: 'Knives',
+  rogue: 'Knuckles',
   mage: 'Wand',
 };
 
@@ -86,7 +86,7 @@ const CLASS_FEEL: Record<
   { swingMs: number; attackRange: number; damageType: ItemDef['damageType']; primary: 'strength' | 'dexterity' | 'focus' }
 > = {
   warrior: { swingMs: 1850, attackRange: 2.7, damageType: 'physical', primary: 'strength' },
-  priest: { swingMs: 2100, attackRange: 2.9, damageType: 'nature', primary: 'focus' },
+  druid: { swingMs: 2100, attackRange: 2.9, damageType: 'nature', primary: 'focus' },
   ranger: { swingMs: 2400, attackRange: 12, damageType: 'physical', primary: 'dexterity' },
   rogue: { swingMs: 1400, attackRange: 2.3, damageType: 'physical', primary: 'dexterity' },
   mage: { swingMs: 2000, attackRange: 10, damageType: 'fire', primary: 'focus' },

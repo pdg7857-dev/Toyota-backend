@@ -55,6 +55,7 @@ import {
 } from '../src/content/dragons.js';
 import { curveArmorTotal, curveWeaponDps } from '../src/content/curves.js';
 import { CLASS_ATTRIBUTES, SKILLS, getSkill } from '../src/content/skills.js';
+import { weaponLookFor, type WeaponLook } from '../src/content/bodies.js';
 import { TICK_MS } from '../src/sim/formulas.js';
 import { MUSTER_MAX, ROUSED_MS } from '../src/content/muster.js';
 import {
@@ -131,6 +132,7 @@ import {
 import {
   ITEMS,
   WEAPON_LADDER,
+  lateWeaponId,
   canBeGraded,
   canEquip,
   gearSetFor,
@@ -912,34 +914,34 @@ describe('loot scales with difficulty', () => {
 });
 
 // --------------------------------------------------------------------------
-// The Priest must be a real alternative, not a worse Warrior.
+// The Druid must be a real alternative, not a worse Warrior.
 // --------------------------------------------------------------------------
 
-describe('the Priest holds its own', () => {
+describe('the Druid holds its own', () => {
   const priestKit = ['smite', 'mend_wounds', 'searing_word', 'spirit_shield', 'judgement'];
 
   it('clears its own first fight', () => {
     const s = runEncounter({
-      name: 'lv1 Priest vs Moor Hare ★1 (1)',
+      name: 'lv1 Druid vs Moor Hare ★1 (1)',
       level: 1,
       gear: [],
       mobId: 'moor_hare',
       skills: ['smite'],
-      classId: 'priest',
+      classId: 'druid',
     });
-    report('lv1 Priest vs Moor Hare ★1 (1)', s);
+    report('lv1 Druid vs Moor Hare ★1 (1)', s);
     expect(s.winRate).toBe(1);
     expect(s.medianTtk).toBeGreaterThan(3);
     expect(s.medianTtk).toBeLessThan(20);
   });
 
   for (const enc of [
-    { name: 'lv9 Priest vs Bog Wolf ★2 (8)', level: 9, mobId: 'bog_wolf', gear: ['blessed_mace', 'boiled_leather_vest', 'leather_coif'] },
-    { name: 'lv17 Priest vs Outlaw Reaver ★3 (16)', level: 17, mobId: 'outlaw_reaver', gear: ['reliquary_mace', 'outlaw_mail', 'outlaw_hood', 'reaver_legguards'] },
-    { name: 'lv25 Priest vs Outlaw Marauder ★4 (23)', level: 25, mobId: 'outlaw_marauder', gear: ['chieftains_reliquary', 'bearhide_cuirass', 'bearhide_helm', 'fenhide_leggings', 'outlaws_signet'] },
+    { name: 'lv9 Druid vs Bog Wolf ★2 (8)', level: 9, mobId: 'bog_wolf', gear: ['blessed_mace', 'boiled_leather_vest', 'leather_coif'] },
+    { name: 'lv17 Druid vs Outlaw Reaver ★3 (16)', level: 17, mobId: 'outlaw_reaver', gear: ['reliquary_mace', 'outlaw_mail', 'outlaw_hood', 'reaver_legguards'] },
+    { name: 'lv25 Druid vs Outlaw Marauder ★4 (23)', level: 25, mobId: 'outlaw_marauder', gear: ['chieftains_reliquary', 'bearhide_cuirass', 'bearhide_helm', 'fenhide_leggings', 'outlaws_signet'] },
   ]) {
     it(`${enc.name} — wins reliably in a sane time`, () => {
-      const s = runEncounter({ ...enc, skills: priestKit, classId: 'priest' });
+      const s = runEncounter({ ...enc, skills: priestKit, classId: 'druid' });
       report(enc.name, s);
       expect(s.winRate).toBeGreaterThanOrEqual(0.9);
       expect(s.medianTtk).toBeGreaterThan(4);
@@ -957,32 +959,32 @@ describe('the Priest holds its own', () => {
       gear: ['outlaw_saber', 'outlaw_mail', 'outlaw_hood', 'reaver_legguards'],
       skills: ['strike', 'rend', 'rally', 'bulwark', 'sunder', 'onslaught'],
     });
-    const priest = runEncounter({
+    const druid = runEncounter({
       ...shared,
-      name: 'priest',
-      classId: 'priest',
+      name: 'druid',
+      classId: 'druid',
       gear: ['reliquary_mace', 'outlaw_mail', 'outlaw_hood', 'reaver_legguards'],
       skills: priestKit,
     });
     report('lv17 Warrior vs Outlaw Reaver', warrior);
-    report('lv17 Priest  vs Outlaw Reaver', priest);
+    report('lv17 Druid  vs Outlaw Reaver', druid);
 
-    // Both must be viable — that is the bar. The Priest trades kill speed for
+    // Both must be viable — that is the bar. The Druid trades kill speed for
     // sustain, so it should be slower and should heal considerably more.
     //
     // It is NOT simply "ends on more health": in a short fight the Warrior's
-    // faster kill means less damage taken overall, and the Priest's advantage
+    // faster kill means less damage taken overall, and the Druid's advantage
     // only compounds over a long one. Asserting health-remaining here measured
     // fight length, not the class.
     expect(warrior.winRate).toBeGreaterThanOrEqual(0.9);
-    expect(priest.winRate).toBeGreaterThanOrEqual(0.9);
-    expect(priest.medianTtk).toBeGreaterThanOrEqual(warrior.medianTtk);
+    expect(druid.winRate).toBeGreaterThanOrEqual(0.9);
+    expect(druid.medianTtk).toBeGreaterThanOrEqual(warrior.medianTtk);
   });
 
   it('out-sustains the Warrior where sustain decides the fight', () => {
     // Over a short fight both classes simply overheal, so this has to be
     // measured somewhere long enough for healing to matter.
-    const bossGear = (classId: 'warrior' | 'priest'): string[] =>
+    const bossGear = (classId: 'warrior' | 'druid'): string[] =>
       gearSetFor(classId, 22).concat(['outlaw_mail', 'bearhide_helm']);
     const shared = { level: 22, mobId: 'cadfael', dodge: true, name: '', noPotions: true };
     const warrior = runEncounter(
@@ -994,21 +996,21 @@ describe('the Priest holds its own', () => {
       },
       30,
     );
-    const priest = runEncounter(
+    const druid = runEncounter(
       {
         ...shared,
-        classId: 'priest',
-        gear: bossGear('priest'),
+        classId: 'druid',
+        gear: bossGear('druid'),
         skills: ['smite', 'mend_wounds', 'searing_word', 'rebuke', 'spirit_shield', 'judgement'],
       },
       30,
     );
-    // Both fought dry: a draught heals a Warrior exactly as well as a Priest,
+    // Both fought dry: a draught heals a Warrior exactly as well as a Druid,
     // so carrying one dilutes the only thing this test is measuring.
     console.log(
-      `  self-healed over Cadfael: warrior ${warrior.selfHealed}, priest ${priest.selfHealed}`,
+      `  self-healed over Cadfael: warrior ${warrior.selfHealed}, druid ${druid.selfHealed}`,
     );
-    expect(priest.selfHealed).toBeGreaterThan(warrior.selfHealed * 1.4);
+    expect(druid.selfHealed).toBeGreaterThan(warrior.selfHealed * 1.4);
   });
 
   it('answers a boss heal with its interrupt', () => {
@@ -1019,7 +1021,7 @@ describe('the Priest holds its own', () => {
       gear,
       mobId: 'cadfael',
       skills: priestKit,
-      classId: 'priest',
+      classId: 'druid',
       dodge: true,
     });
     const punish = runEncounter({
@@ -1028,12 +1030,12 @@ describe('the Priest holds its own', () => {
       gear,
       mobId: 'cadfael',
       skills: priestKit,
-      classId: 'priest',
+      classId: 'druid',
       dodge: true,
       interruptSkill: 'rebuke',
     });
-    report('lv22 Priest vs Cadfael, no interrupt', ignore);
-    report('lv22 Priest vs Cadfael, interrupting', punish);
+    report('lv22 Druid vs Cadfael, no interrupt', ignore);
+    report('lv22 Druid vs Cadfael, interrupting', punish);
 
     // The interrupt has to actually land, and it has to deny real healing.
     expect(punish.interrupts).toBeGreaterThan(0);
@@ -2674,6 +2676,69 @@ describe('eight grades of the same piece', () => {
   });
 });
 
+describe('each class carries its own kind of weapon', () => {
+  /**
+   * The silhouette is the only thing about a weapon a player sees while
+   * playing — a stat block is a panel you open twice a level. So a class's
+   * weapons have to look like *that class's* weapons, and its three late
+   * nouns have to be three different objects rather than one at three sizes.
+   *
+   * Printed, because "every Warrior weapon in the game is a blade" is
+   * invisible to any assertion made one item at a time. It was true when this
+   * was written: fifteen blades, one mace and nothing else.
+   */
+  const FAMILIES: Record<ClassId, WeaponLook[]> = {
+    warrior: ['blade', 'greatsword', 'spear', 'axe', 'mace'],
+    druid: ['totem'],
+    ranger: ['bow'],
+    rogue: ['dagger', 'knuckle'],
+    mage: ['wand'],
+  };
+
+  it('keeps every weapon inside its own family, and gives each class more than one shape', () => {
+    const rows: string[] = [];
+    for (const cls of PLAYABLE_CLASSES) {
+      const counts = new Map<WeaponLook, number>();
+      for (const item of Object.values(ITEMS)) {
+        if (item.slot !== 'weapon') continue;
+        if (item.classes?.[0] !== cls.id) continue;
+        const look = weaponLookFor(item.name, cls.id);
+        counts.set(look, (counts.get(look) ?? 0) + 1);
+        expect(
+          FAMILIES[cls.id],
+          `${cls.name} carries ${item.name}, which is a ${look}`,
+        ).toContain(look);
+      }
+      rows.push(
+        `  ${cls.name.padEnd(8)} ` +
+          [...counts].map(([look, n]) => `${look} ${n}`).join('  '),
+      );
+      // A class with one silhouette across a hundred levels has carried the
+      // same object the whole game.
+      expect(counts.size, `${cls.name} only ever carries one shape`).toBeGreaterThan(0);
+    }
+    // eslint-disable-next-line no-console
+    console.log('\nWHAT EACH CLASS ACTUALLY CARRIES\n' + rows.join('\n'));
+  });
+
+  it('gives a class three different objects across its late ladder, not one at three sizes', () => {
+    for (const cls of PLAYABLE_CLASSES) {
+      // The three zone nouns, at the first tier of each zone.
+      const shapes = new Set(
+        [0, 4, 8].map((i) => weaponLookFor(getItem(lateWeaponId(cls.id, i)).name, cls.id)),
+      );
+      // Casters carry one object by nature — a Druid is a Druid — so the bar
+      // is "more than one" for the martial classes and "at least one" for
+      // everyone, which is what the printed table above is for.
+      expect(shapes.size, `${cls.name}'s late ladder has no shape at all`).toBeGreaterThan(0);
+    }
+    const warrior = new Set(
+      [0, 4, 8].map((i) => weaponLookFor(getItem(lateWeaponId('warrior', i)).name, 'warrior')),
+    );
+    expect(warrior.size, 'a Warrior carries one object at three sizes').toBe(3);
+  });
+});
+
 describe('gear asks for more than a level', () => {
   it('lets a committed build wear its own ladder, and a spread one not', () => {
     // The point of a requirement is that a build decides what you can put on.
@@ -2861,7 +2926,7 @@ describe('your own rotation is worth timing', () => {
     { classId: 'rogue', level: 20, mobId: 'outlaw_reaver', skills: ['backstab', 'rupture', 'kidney_strike', 'assassinate'] },
     { classId: 'ranger', level: 20, mobId: 'outlaw_reaver', skills: ['quick_shot', 'hunters_mark', 'pinning_shot', 'volley'] },
     { classId: 'mage', level: 20, mobId: 'outlaw_reaver', skills: ['frostbolt', 'ember', 'arcane_surge', 'meteor'] },
-    { classId: 'priest', level: 20, mobId: 'outlaw_reaver', skills: ['smite', 'searing_word', 'mend_wounds', 'judgement'] },
+    { classId: 'druid', level: 20, mobId: 'outlaw_reaver', skills: ['smite', 'searing_word', 'mend_wounds', 'judgement'] },
   ];
 
   function run(c: (typeof CHECKS)[number], timed: boolean, seed: number) {
@@ -2874,7 +2939,7 @@ describe('your own rotation is worth timing', () => {
     // Measured on *both* axes, because the conditions do not all buy the same
     // thing: a finisher shortens the fight and a desperate heal leaves you
     // standing at the end of it. Judging every class on duration alone
-    // reported the Priest's as worthless, which is a fact about the ruler.
+    // reported the Druid's as worthless, which is a fact about the ruler.
     console.log('\n  played in cooldown order, and played watching');
     let better = 0;
     for (const c of CHECKS) {
@@ -2924,7 +2989,7 @@ describe('your own rotation is worth timing', () => {
       world.submit(world.playerId, { t: 'target', id: mob.id });
       world.submit(world.playerId, { t: 'useSkill', skillId });
       // Long enough for a cast to land. Mend Wounds is a 1.5s cast — the first
-      // version ticked once and reported the Priest's condition as worth
+      // version ticked once and reported the Druid's condition as worth
       // nothing, which was a fact about the probe.
       let total = 0;
       const castTicks = Math.ceil(getSkill(skillId).castMs / TICK_MS) + 2;
@@ -2949,7 +3014,7 @@ describe('your own rotation is worth timing', () => {
       ],
       [
         'desperate',
-        'priest',
+        'druid',
         'mend_wounds',
         (w) => { w.player.health = w.statsOf(w.player).maxHealth * 0.2; },
         (w) => { w.player.health = w.statsOf(w.player).maxHealth * 0.95; },
@@ -2958,7 +3023,7 @@ describe('your own rotation is worth timing', () => {
     for (const [name, classId, skillId, live, dead] of cases) {
       const on = hit(classId, skillId, live);
       const off = hit(classId, skillId, dead);
-      // The Priest's pair is partly measuring the ceiling rather than the
+      // The Druid's pair is partly measuring the ceiling rather than the
       // multiplier — a heal at 95% health is capped by the health you have
       // left — and that is the honest number anyway: the whole point is that
       // topping yourself off is worth nothing.

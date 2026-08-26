@@ -439,7 +439,7 @@ export function addAttributes(a: Attributes, b: Partial<Attributes>): Attributes
  * Melee classes scale off Strength, casters off Focus. Keeping this as a
  * mapping rather than branching inside `deriveStats` means the combat maths
  * stays identical for every class — only the input attribute changes — so a
- * Priest and a Warrior are balanced against the same formula.
+ * Druid and a Warrior are balanced against the same formula.
  */
 /**
  * What each attribute is worth to *anybody*, whatever they play.
@@ -532,7 +532,7 @@ export function skillAttributePower(value: number | undefined, level: number): n
 
 export const PRIMARY_ATTRIBUTE: Record<ClassId, keyof Attributes> = {
   warrior: 'strength',
-  priest: 'focus',
+  druid: 'focus',
   ranger: 'dexterity',
   rogue: 'dexterity',
   mage: 'focus',

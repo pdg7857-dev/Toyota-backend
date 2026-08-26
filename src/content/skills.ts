@@ -8,7 +8,7 @@ import type { Attributes, ClassId, SkillDef } from '../sim/types.js';
  * rather than finishing their kit before the halfway point. Everything after
  * that is TAUGHT by a zone — see the second half of this file.
  *
- * Every class gets an interrupt, but they are not the same tool: the Priest's
+ * Every class gets an interrupt, but they are not the same tool: the Druid's
  * is long-ranged, comes earlier and locks out for longer — cutting a cast short
  * is the class's identity, not a bonus button.
  */
@@ -141,7 +141,7 @@ export const SKILLS: Record<string, SkillDef> = {
   smite: {
     id: 'smite',
     name: 'Smite',
-    classId: 'priest',
+    classId: 'druid',
     scalesWith: 'focus',
     reqLevel: 1,
     energyCost: 10,
@@ -159,7 +159,7 @@ export const SKILLS: Record<string, SkillDef> = {
   mend_wounds: {
     id: 'mend_wounds',
     name: 'Mend Wounds',
-    classId: 'priest',
+    classId: 'druid',
     scalesWith: 'focus',
     reqLevel: 3,
     energyCost: 22,
@@ -178,7 +178,7 @@ export const SKILLS: Record<string, SkillDef> = {
   searing_word: {
     id: 'searing_word',
     name: 'Searing Word',
-    classId: 'priest',
+    classId: 'druid',
     scalesWith: 'focus',
     reqLevel: 5,
     energyCost: 16,
@@ -196,7 +196,7 @@ export const SKILLS: Record<string, SkillDef> = {
   rebuke: {
     id: 'rebuke',
     name: 'Rebuke',
-    classId: 'priest',
+    classId: 'druid',
     reqLevel: 7,
     energyCost: 14,
     cooldownMs: 12000,
@@ -211,7 +211,7 @@ export const SKILLS: Record<string, SkillDef> = {
   spirit_shield: {
     id: 'spirit_shield',
     name: 'Spirit Shield',
-    classId: 'priest',
+    classId: 'druid',
     scalesWith: 'focus',
     reqLevel: 10,
     energyCost: 24,
@@ -228,7 +228,7 @@ export const SKILLS: Record<string, SkillDef> = {
   judgement: {
     id: 'judgement',
     name: 'Judgement',
-    classId: 'priest',
+    classId: 'druid',
     scalesWith: 'focus',
     reqLevel: 15,
     energyCost: 38,
@@ -634,7 +634,7 @@ export const CLASS_ATTRIBUTES: Record<ClassId, { power: keyof Attributes; guard:
   rogue: { power: 'dexterity', guard: 'strength' },
   ranger: { power: 'dexterity', guard: 'strength' },
   mage: { power: 'focus', guard: 'focus' },
-  priest: { power: 'focus', guard: 'focus' },
+  druid: { power: 'focus', guard: 'focus' },
 };
 
 /**
@@ -668,7 +668,7 @@ const CLASS_FEEL: Record<
   { range: number; damageType: SkillDef['damageType']; baseDefense: number; tomeNoun: string }
 > = {
   warrior: { range: 2.8, damageType: 'physical', baseDefense: 40, tomeNoun: 'Warscroll' },
-  priest: { range: 9, damageType: 'nature', baseDefense: 55, tomeNoun: 'Psalter' },
+  druid: { range: 9, damageType: 'nature', baseDefense: 55, tomeNoun: 'Psalter' },
   ranger: { range: 14, damageType: 'physical', baseDefense: 45, tomeNoun: 'Field Notes' },
   rogue: { range: 2.5, damageType: 'physical', baseDefense: 75, tomeNoun: 'Cipher' },
   mage: { range: 12, damageType: 'fire', baseDefense: 70, tomeNoun: 'Grimoire' },
@@ -685,7 +685,7 @@ const TAUGHT_NAMES: Record<ClassId, string[]> = {
     'Second Breath', 'Drowned Cleave', 'Blood Rising',
     'Iron Silence', 'Blackshield Blow', 'Last Word',
   ],
-  priest: [
+  druid: [
     'Stone Vigil', 'Highland Rite', 'Slow Penance',
     'Wellspring', 'Drowned Litany', 'Kindled Faith',
     'Binding Word', 'Duskfall Judgement', 'Final Prayer',

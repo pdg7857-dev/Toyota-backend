@@ -105,7 +105,7 @@ function lateVendor(
   const stock: string[] = [];
   for (const adjective of tierAdjectives) {
     const slug = adjective.toLowerCase();
-    for (const classId of ['warrior', 'priest', 'ranger', 'rogue', 'mage']) {
+    for (const classId of ['warrior', 'druid', 'ranger', 'rogue', 'mage']) {
       stock.push(`${slug}_${classId}_weapon`);
     }
     for (const slot of ['head', 'chest', 'legs', 'ring']) stock.push(`${slug}_${slot}`);

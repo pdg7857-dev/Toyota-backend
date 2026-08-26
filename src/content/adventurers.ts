@@ -40,17 +40,17 @@ export interface AdventurerName {
  */
 export const ADVENTURERS: AdventurerName[] = [
   { name: 'Bearach', classId: 'warrior' },
-  { name: 'Sile', classId: 'priest' },
+  { name: 'Sile', classId: 'druid' },
   { name: 'Tadhg', classId: 'ranger' },
   { name: 'Nuala', classId: 'rogue' },
   { name: 'Eimhin', classId: 'mage' },
   { name: 'Rónán', classId: 'warrior' },
-  { name: 'Aoibhe', classId: 'priest' },
+  { name: 'Aoibhe', classId: 'druid' },
   { name: 'Cormac', classId: 'ranger' },
   { name: 'Deirbhile', classId: 'rogue' },
   { name: 'Lorcan', classId: 'mage' },
   { name: 'Fionnuala', classId: 'warrior' },
-  { name: 'Cathal', classId: 'priest' },
+  { name: 'Cathal', classId: 'druid' },
 ];
 
 /** How many are out in a zone at once. */

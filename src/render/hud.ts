@@ -2724,7 +2724,7 @@ export class Hud {
       // What it actually does, for *this* class.
       //
       // The panel showed "Strength 25 (8+17)" and a plus button, and nothing
-      // anywhere said whether Strength was worth anything to a Priest. A
+      // anywhere said whether Strength was worth anything to a Druid. A
       // player spending a point they cannot unspend deserves to know what they
       // are buying, and "the primary attribute is the only branch in the
       // combat maths" is exactly the sort of thing a game knows and never says.

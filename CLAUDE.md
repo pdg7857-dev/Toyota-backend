@@ -466,7 +466,7 @@ what you have spent — a build nobody can see is a build nobody makes.
 
 ## Five classes, one formula
 
-All five are playable: Warrior, Priest, Ranger, Rogue, Mage.
+All five are playable: Warrior, Druid, Ranger, Rogue, Mage.
 
 `PRIMARY_ATTRIBUTE` is the **only** branch in combat maths — it selects which
 attribute feeds attack rating (Strength, Focus or Dexterity). Every class then
@@ -1912,6 +1912,37 @@ Four things make it affordable at six hundred creatures a zone:
 `view.radius` still does work: it was hand-tuned per creature back when it had
 to stand for the whole animal, so it survives as a *nudge* to girth rather than
 as the width itself. Taking it literally turned the Ardmoor goats into barrels.
+
+### Each class carries its own kind of weapon
+
+The silhouette is the only thing about a weapon a player sees while playing —
+a stat block is a panel you open twice a level. So a class's weapons have to
+look like *that class's* weapons, and the printed table is what showed they did
+not: fifteen Warrior blades, one mace and nothing else, and a Druid carrying
+staves and maces indiscriminately.
+
+| Class | Carries |
+|---|---|
+| Warrior | spears, swords, axes, hammers, greatswords |
+| Rogue | daggers and knuckle blades |
+| Ranger | bows |
+| Druid | totems |
+| Mage | wands |
+
+Four silhouettes were added for it — `knuckle`, `wand`, `totem`, `shield` — and
+the Mage's wand stopped being a short staff, which is what it had been for a
+hundred levels.
+
+The other half is the three **late nouns** per class, one per zone. A Warrior
+who carries a Blade, then a Warblade, then a Greatsword has carried one object
+at three sizes; a Warrior who carries a spear, then an axe, then a greatsword
+has changed weapon twice. A test asserts exactly that for the Warrior and
+prints the whole table for everyone.
+
+**Creature parts are not weapon shapes.** `fang`, `claw` and `talon` came out
+of the word table: they are what a dragon's trophy is called and they collide
+across classes — *Saorla's Fang* is a Warrior's greatsword and *Twin Fangs* is
+a Rogue's pair of daggers. The class fallback knows which; a word table cannot.
 
 ### What is in your hands
 

@@ -788,9 +788,9 @@ export const CLASSES: Record<ClassId, ClassDef> = {
     startingWeapon: 'rusted_blade',
     color: 0xd9c27a,
   },
-  priest: {
-    id: 'priest',
-    name: 'Priest',
+  druid: {
+    id: 'druid',
+    name: 'Druid',
     description:
       'Outlasts what it cannot outhit. Sustains through damage with healing, ' +
       'and is the surest hand at cutting a spell short.',

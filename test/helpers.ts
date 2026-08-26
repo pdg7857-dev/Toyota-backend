@@ -121,7 +121,7 @@ export function vendorZone(vendorId: string, distance = 2): ZoneDef {
  * attribute their attack rating scales off, the rest into Vitality.
  *
  * This MUST follow PRIMARY_ATTRIBUTE. It previously hardcoded Warrior and
- * Priest, which meant Ranger, Rogue and Mage were tested pouring points into
+ * Druid, which meant Ranger, Rogue and Mage were tested pouring points into
  * Strength — an attribute none of them use. They read as underpowered when the
  * only thing wrong was the harness building them wrong.
  */
@@ -489,7 +489,7 @@ export function simulateFight(world: World, options: FightOptions | string[] = {
               // Only a condition about the TARGET is worth waiting for. One
               // about your own state is a reward for playing well earlier, and
               // sitting on a heal until you are nearly dead is worse play, not
-              // better — measured as a Priest finishing fights on less health
+              // better — measured as a Druid finishing fights on less health
               // for doing it.
               if (!(HOLDABLE_CONDITIONS as readonly string[]).includes(skill.when.kind)) {
                 filler.push(id);

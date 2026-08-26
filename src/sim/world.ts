@@ -233,7 +233,11 @@ function roamHash(a: number, b: number): number {
 const COMBAT_TIMEOUT_MS = 6000;
 
 /** Save format version. Bump when the Entity shape changes. */
-const SAVE_VERSION = 11;
+// 12: the Priest became the Druid, and gear grew grades and requirements. A
+// save from before any of that holds a class id nothing answers to and item
+// ids at the wrong power; the version check drops it rather than loading a
+// character who cannot equip their own weapon.
+const SAVE_VERSION = 12;
 
 /**
  * How big a step `catchUp` takes through the time you were away.
@@ -573,7 +577,7 @@ export class World {
     if (camps.length === 0) return;
     const [lo, hi] = this.zone.levelRange;
     // One of each class, as far as the roster allows. Striding the list by a
-    // fixed step put three Priests in the Fenmarch, and a camp where everybody
+    // fixed step put three Druids in the Fenmarch, and a camp where everybody
     // plays the same thing reads as a bug in the population rather than a
     // coincidence in it.
     const takenClasses = new Set<string>();
@@ -590,7 +594,7 @@ export class World {
         return undefined;
       };
       // A fresh class if the roster still has one, otherwise just a new face:
-      // two people with the same name is the one thing worse than two Priests.
+      // two people with the same name is the one thing worse than two Druids.
       const who = from(true) ?? from(false) ?? ADVENTURERS[start]!;
       takenClasses.add(who.classId);
       takenNames.add(who.name);

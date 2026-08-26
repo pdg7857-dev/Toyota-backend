@@ -201,7 +201,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
     classTomes: zoneTomes('ardmoor', 'rare'),
     classWeapons: {
       warrior: 'stormforged_warrior_weapon',
-      priest: 'stormforged_priest_weapon',
+      druid: 'stormforged_druid_weapon',
       ranger: 'stormforged_ranger_weapon',
       rogue: 'stormforged_rogue_weapon',
       mage: 'stormforged_mage_weapon',
@@ -220,7 +220,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
     classTomes: zoneTomes('ardmoor', 'epic'),
     classWeapons: {
       warrior: 'gravebound_warrior_weapon',
-      priest: 'gravebound_priest_weapon',
+      druid: 'gravebound_druid_weapon',
       ranger: 'gravebound_ranger_weapon',
       rogue: 'gravebound_rogue_weapon',
       mage: 'gravebound_mage_weapon',
@@ -239,7 +239,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
     classTomes: zoneTomes('reach', 'rare'),
     classWeapons: {
       warrior: 'tidewrought_warrior_weapon',
-      priest: 'tidewrought_priest_weapon',
+      druid: 'tidewrought_druid_weapon',
       ranger: 'tidewrought_ranger_weapon',
       rogue: 'tidewrought_rogue_weapon',
       mage: 'tidewrought_mage_weapon',
@@ -258,7 +258,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
     classTomes: zoneTomes('reach', 'epic'),
     classWeapons: {
       warrior: 'wraithbound_warrior_weapon',
-      priest: 'wraithbound_priest_weapon',
+      druid: 'wraithbound_druid_weapon',
       ranger: 'wraithbound_ranger_weapon',
       rogue: 'wraithbound_rogue_weapon',
       mage: 'wraithbound_mage_weapon',
@@ -277,7 +277,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
     classTomes: zoneTomes('caer_dubh', 'rare'),
     classWeapons: {
       warrior: 'dread_warrior_weapon',
-      priest: 'dread_priest_weapon',
+      druid: 'dread_druid_weapon',
       ranger: 'dread_ranger_weapon',
       rogue: 'dread_rogue_weapon',
       mage: 'dread_mage_weapon',
@@ -296,7 +296,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
     classTomes: zoneTomes('caer_dubh', 'epic'),
     classWeapons: {
       warrior: 'godsbane_warrior_weapon',
-      priest: 'godsbane_priest_weapon',
+      druid: 'godsbane_druid_weapon',
       ranger: 'godsbane_ranger_weapon',
       rogue: 'godsbane_rogue_weapon',
       mage: 'godsbane_mage_weapon',
@@ -316,7 +316,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
     goldMultiplier: 1.2,
     classWeapons: {
       warrior: 'cadfaels_cleaver',
-      priest: 'chieftains_reliquary',
+      druid: 'chieftains_reliquary',
       ranger: 'cadfaels_hunting_bow',
       rogue: 'cadfaels_skinning_knife',
       mage: 'cadfaels_talisman',
@@ -333,7 +333,7 @@ export const LOOT_TABLES: Record<string, LootTable> = {
     id: 'old_scar',
     classWeapons: {
       warrior: 'scarred_fang',
-      priest: 'bonecarved_stave',
+      druid: 'bonecarved_stave',
       ranger: 'scarred_longbow',
       rogue: 'scarred_kris',
       mage: 'scarred_heartwood',

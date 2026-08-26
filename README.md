@@ -239,6 +239,13 @@ two and you will almost certainly die.
 level keeps climbing: about 6 kills for your first level, 147 by the twenties.
 Grey mobs give almost nothing, so pushing south is the only way forward.
 
+## Each class carries its own kind
+
+Warriors take spears, swords, axes, hammers and greatswords. Rogues take
+daggers and knuckle blades. Rangers take bows, Druids totems, Mages wands. And
+a class's weapon changes *shape* as it climbs rather than only size — the
+silhouette is the only thing about a weapon you see while playing.
+
 ## Gear asks for more than a level
 
 A weapon wants the attribute its class fights with; armour wants Vitality; a

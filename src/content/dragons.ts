@@ -216,7 +216,7 @@ export function dragonWeapons(def: DragonDef): Partial<Record<ClassId, string>> 
 
 const WYRM_NOUN: Record<ClassId, string> = {
   warrior: 'Fang',
-  priest: 'Relic',
+  druid: 'Relic',
   ranger: 'Talon',
   rogue: 'Claw',
   mage: 'Ember',
@@ -227,7 +227,7 @@ const WYRM_FEEL: Record<
   { swingMs: number; attackRange: number; damageType: ItemDef['damageType']; primary: 'strength' | 'dexterity' | 'focus' }
 > = {
   warrior: { swingMs: 1800, attackRange: 2.7, damageType: 'physical', primary: 'strength' },
-  priest: { swingMs: 2050, attackRange: 2.9, damageType: 'nature', primary: 'focus' },
+  druid: { swingMs: 2050, attackRange: 2.9, damageType: 'nature', primary: 'focus' },
   ranger: { swingMs: 2350, attackRange: 12, damageType: 'physical', primary: 'dexterity' },
   rogue: { swingMs: 1350, attackRange: 2.3, damageType: 'physical', primary: 'dexterity' },
   mage: { swingMs: 1950, attackRange: 10, damageType: 'fire', primary: 'focus' },

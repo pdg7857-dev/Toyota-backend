@@ -132,7 +132,7 @@ export const QUESTS: Record<string, QuestDef> = {
       ...reward(18, 2),
       classItems: {
         warrior: 'boar_spear',
-        priest: 'prayerwood_stave',
+        druid: 'prayerwood_stave',
         ranger: 'fenstalker_bow',
         rogue: 'fenblade',
         mage: 'fenlight_rod',
@@ -235,7 +235,7 @@ export const QUESTS: Record<string, QuestDef> = {
       ...reward(30, 2),
       classItems: {
         warrior: 'gravebound_warrior_weapon',
-        priest: 'gravebound_priest_weapon',
+        druid: 'gravebound_druid_weapon',
         ranger: 'gravebound_ranger_weapon',
         rogue: 'gravebound_rogue_weapon',
         mage: 'gravebound_mage_weapon',
@@ -259,7 +259,7 @@ export const QUESTS: Record<string, QuestDef> = {
       ...reward(38, 2),
       classItems: {
         warrior: 'gravebound_warrior_weapon',
-        priest: 'gravebound_priest_weapon',
+        druid: 'gravebound_druid_weapon',
         ranger: 'gravebound_ranger_weapon',
         rogue: 'gravebound_rogue_weapon',
         mage: 'gravebound_mage_weapon',
@@ -346,7 +346,7 @@ export const QUESTS: Record<string, QuestDef> = {
       ...reward(55, 2),
       classItems: {
         warrior: 'gravebound_warrior_weapon',
-        priest: 'gravebound_priest_weapon',
+        druid: 'gravebound_druid_weapon',
         ranger: 'gravebound_ranger_weapon',
         rogue: 'gravebound_rogue_weapon',
         mage: 'gravebound_mage_weapon',
@@ -370,7 +370,7 @@ export const QUESTS: Record<string, QuestDef> = {
       ...reward(68, 2),
       classItems: {
         warrior: 'gravebound_warrior_weapon',
-        priest: 'gravebound_priest_weapon',
+        druid: 'gravebound_druid_weapon',
         ranger: 'gravebound_ranger_weapon',
         rogue: 'gravebound_rogue_weapon',
         mage: 'gravebound_mage_weapon',
@@ -457,7 +457,7 @@ export const QUESTS: Record<string, QuestDef> = {
       ...reward(85, 2),
       classItems: {
         warrior: 'gravebound_warrior_weapon',
-        priest: 'gravebound_priest_weapon',
+        druid: 'gravebound_druid_weapon',
         ranger: 'gravebound_ranger_weapon',
         rogue: 'gravebound_rogue_weapon',
         mage: 'gravebound_mage_weapon',
@@ -497,7 +497,7 @@ export const QUESTS: Record<string, QuestDef> = {
       ...reward(98, 2),
       classItems: {
         warrior: 'gravebound_warrior_weapon',
-        priest: 'gravebound_priest_weapon',
+        druid: 'gravebound_druid_weapon',
         ranger: 'gravebound_ranger_weapon',
         rogue: 'gravebound_rogue_weapon',
         mage: 'gravebound_mage_weapon',

@@ -15,7 +15,7 @@ export interface Vec2 {
   z: number;
 }
 
-export type ClassId = 'warrior' | 'priest' | 'ranger' | 'rogue' | 'mage';
+export type ClassId = 'warrior' | 'druid' | 'ranger' | 'rogue' | 'mage';
 
 export type DamageType = 'physical' | 'fire' | 'frost' | 'nature';
 
@@ -120,7 +120,7 @@ export interface ItemDef {
    * Classes allowed to equip this. Undefined means anyone can.
    *
    * Weapons are class-locked so "a weapon for your class" is a meaningful
-   * reward — a Priest cannot swing a Warrior's greatsword to get its raw
+   * reward — a Druid cannot swing a Warrior's greatsword to get its raw
    * damage, and vice versa.
    */
   classes?: ClassId[];
@@ -232,7 +232,7 @@ export type SkillEffectKind = 'damage' | 'heal' | 'dot' | 'buff' | 'interrupt';
  *
  * `desperate` and `steady` are facts about **you**. Holding a heal until you
  * are nearly dead is not good play, it is worse play — the suite measured a
- * Priest ending fights on *less* health for doing it. They are a reward for
+ * Druid ending fights on *less* health for doing it. They are a reward for
  * playing well earlier in the fight (not panicking; not getting hit), not a
  * button to sit on, and nothing should ever be held for them.
  */
