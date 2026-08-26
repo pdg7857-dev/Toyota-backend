@@ -320,7 +320,11 @@ async function main() {
     const g = window.__game;
     if (!g) return false;
     const player = g.world.player;
-    const vendor = [...g.world.entities.values()].find((e) => e.kind === 'vendor');
+    // Named, not "the first vendor in the map". A zone has six traders now and
+    // the one nearest the arrival point is Ceallach, who sells luxuries and
+    // gives no work — which reported the quest offer as broken when what was
+    // actually wrong was the probe standing in the wrong shop.
+    const vendor = [...g.world.entities.values()].find((e) => e.vendorId === 'maeve');
     if (!vendor) return false;
     g.world.addItem(player, { itemId: 'bear_claw', qty: 3 });
     g.world.addItem(player, { itemId: 'wolf_pelt', qty: 5 });
@@ -395,7 +399,7 @@ async function main() {
       { itemId: keep.id, qty: 1 },
     ];
     g.hud.openVendor(
-      [...g.world.entities.values()].find((e) => e.kind === 'vendor').id,
+      [...g.world.entities.values()].find((e) => e.vendorId === 'maeve').id,
     );
     await new Promise((r) => setTimeout(r, 300));
 
@@ -1929,6 +1933,115 @@ async function main() {
     };
   });
 
+  // Towns, and the leystone road between them.
+  //
+  // The whole feature is about *places*, so the probe walks the character into
+  // one rather than pushing a synthetic event: the stone has to wake on its
+  // own, from proximity, with no key pressed — which is the one thing about it
+  // that could silently stop working and that nothing in the sim suite can see
+  // (the panel and the keys live here).
+  const leystones = await page.evaluate(async () => {
+    const g = window.__game;
+    const me = g.world.player;
+    const home = { ...me.pos };
+    const towns = g.world.zone.settlements ?? [];
+    if (towns.length < 2) return { towns: towns.length };
+    // The probe before this one killed something, and the road is closed while
+    // anything is still on you. Six seconds of combat timeout is longer than
+    // this probe takes, so without letting go of the fight first the whole
+    // check measures the previous one.
+    g.world.lastCombatTick.clear();
+    g.world.submit(me.id, { t: 'target', id: null });
+    g.world.submit(me.id, { t: 'autoAttack', on: false });
+
+    // Stand in the first town. No key: walking in is the whole interaction.
+    me.pos = { ...towns[0].pos };
+    await new Promise((r) => setTimeout(r, 300));
+    const first = !!g.world.stones[towns[0].id];
+
+    // And the trader who lives there is actually standing in it.
+    const keeper = [...g.world.entities.values()].find(
+      (e) => e.kind === 'vendor' && e.vendorId === towns[0].vendorId,
+    );
+    const keeperNear = keeper
+      ? Math.hypot(keeper.pos.x - towns[0].pos.x, keeper.pos.z - towns[0].pos.z) < 30
+      : false;
+
+    // Wake a second one so there is somewhere to step to.
+    me.pos = { ...towns[2].pos };
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Back to the first, and open the panel with the key rather than by hand:
+    // a panel nobody can open is the bug this game has shipped twice.
+    me.pos = { ...towns[0].pos };
+    await new Promise((r) => setTimeout(r, 250));
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyL', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 350));
+    const panel = document.querySelector('#ley-window');
+    const open = panel && getComputedStyle(panel).display === 'block';
+    const rows = [...panel.querySelectorAll('.realm-row')];
+    const text = rows.map((r) => r.textContent ?? '');
+    // The panel has to be reachable by a pointer. `#hud` is pointer-events:
+    // none so the world behind stays clickable, and anything that wants a
+    // click has to say so — this has been the bug twice now.
+    const clickable = rows.find((r) => r.classList.contains('clickable'));
+    const pointer = clickable ? getComputedStyle(clickable).pointerEvents : 'none';
+
+    // Step. The row does it, so this measures the control a player uses.
+    const before = { ...me.pos };
+    clickable?.click();
+    await new Promise((r) => setTimeout(r, 500));
+    const moved = Math.hypot(me.pos.x - before.x, me.pos.z - before.z);
+    const atTown = towns.some(
+      (t) => Math.hypot(me.pos.x - t.pos.x, me.pos.z - t.pos.z) < 3 && t.id !== towns[0].id,
+    );
+
+    // A stone you have never stood at is not on the road.
+    const unknown = towns.find((t) => !g.world.stones[t.id]);
+    g.world.submit(me.id, { t: 'leystone', stoneId: unknown ? unknown.id : 'nowhere' });
+    await new Promise((r) => setTimeout(r, 200));
+    const refused = !towns.some(
+      (t) => t.id === (unknown && unknown.id) && Math.hypot(me.pos.x - t.pos.x, me.pos.z - t.pos.z) < 3,
+    );
+
+    // The stone is a thing you can see, not only a rule. It is a landmark, so
+    // the renderer has to have put one where the sim says the town is.
+    const built = g.rig.structures.filter((st) => st.kind === 'leystone').length;
+    const onTown = g.rig.structures.some(
+      (st) =>
+        st.kind === 'leystone' &&
+        towns.some((t) => Math.hypot(st.pos.x - t.pos.x, st.pos.z - t.pos.z) < 1),
+    );
+
+    // Put everything back. Leaving the character in a different town leaves
+    // every check after this one measuring somewhere else — the lesson the
+    // muster probe had to learn twice.
+    if (panel) panel.style.display = 'none';
+    me.pos = { ...home };
+    me.targetId = null;
+    me.threat = {};
+    g.world.lastCombatTick.clear();
+    await new Promise((r) => setTimeout(r, 200));
+
+    return {
+      towns: towns.length,
+      first,
+      keeperNear,
+      open,
+      rows: rows.length,
+      pointer,
+      moved,
+      atTown,
+      refused,
+      built,
+      onTown,
+      names: text.slice(0, 3),
+      // Every town says what it is for, which is the reason there is more
+      // than one of them.
+      roles: new Set(towns.map((t) => t.role)).size,
+    };
+  });
+
   // Nothing is drawn on the furniture.
   //
   // Six hundred creatures project onto a screen that already has panels on it,
@@ -3094,6 +3207,15 @@ async function main() {
     ['a boss frame gives nothing away at first', kit.ok && kit.quietFirst],
     ['and names what it has actually shown you', kit.names],
     ['and what to do about it', kit.saysTheAnswer],
+    ['every zone has towns in it', leystones.towns >= 4 && leystones.towns <= 7],
+    ['each selling something different', leystones.roles >= 3],
+    ['a trader standing in each', leystones.keeperNear],
+    ['a stone that is actually there', leystones.built >= 4 && leystones.onTown],
+    ['walking in wakes it, with no key at all', leystones.first],
+    ['the road opens on L', leystones.open && leystones.rows > 3],
+    ['and can be clicked', leystones.pointer === 'auto'],
+    ['stepping puts you at another town', leystones.moved > 50 && leystones.atTown],
+    ['and never at one you have not stood in', leystones.refused],
     ['a kill is written down', reckoning.counted && reckoning.byBase],
     ['the panels have their own screen to themselves',
       tidy.boxes > 2 && tidy.plates > 4 && tidy.aimed && tidy.over === 0],
@@ -3247,6 +3369,7 @@ async function main() {
   console.log('muster:', JSON.stringify(muster), '| offer:', JSON.stringify(questOffer));
   console.log('timing:', JSON.stringify(timing));
   console.log('reckoning:', JSON.stringify(reckoning));
+  console.log('leystones:', JSON.stringify(leystones));
   console.log('levelling:', JSON.stringify(levelling));
   console.log('kit:', JSON.stringify(kit));
   console.log('build:', JSON.stringify(build));

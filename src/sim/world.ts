@@ -154,6 +154,11 @@ import {
   type DiscoverySite,
 } from '../content/discoveries.js';
 import { zoneStructures as structuresOf } from '../content/structures.js';
+import {
+  LEYSTONE_RANGE,
+  ROLE_LABEL,
+  type SettlementDef,
+} from '../content/settlements.js';
 import { rollTier, tieredId } from '../content/tiers.js';
 import {
   MUSTER_AT,
@@ -237,7 +242,11 @@ const COMBAT_TIMEOUT_MS = 6000;
 // save from before any of that holds a class id nothing answers to and item
 // ids at the wrong power; the version check drops it rather than loading a
 // character who cannot equip their own weapon.
-const SAVE_VERSION = 12;
+// 13: every zone grew four to seven towns, and the traders moved into them.
+// Vendors are entities and entities are saved, so a v12 world holds the old
+// traders standing in fields with none of the new ones anywhere — a save that
+// loads is worse than one that does not, because the shops are simply missing.
+const SAVE_VERSION = 13;
 
 /**
  * How big a step `catchUp` takes through the time you were away.
@@ -297,6 +306,21 @@ export class World {
    */
   sites: DiscoverySite[] = [];
   found: Record<string, true> = {};
+
+  /**
+   * Which leystones you have stood on.
+   *
+   * The same shape as `found`, and state for the same reason: the stones
+   * themselves are derived from the zone, and what a save has to remember is
+   * only which of them woke to you. Keyed on the town's own id rather than an
+   * index, so adding a settlement never re-points anybody's network.
+   *
+   * It is sim state and not renderer state, unlike the mark on the map, and
+   * the difference is the point: where a character may *go* is a fact about
+   * the world that a server would have to validate. Where they meant to walk
+   * is a note to themselves.
+   */
+  stones: Record<string, true> = {};
 
   /**
    * How hard the player has been working each patch of ground.
@@ -1593,6 +1617,9 @@ export class World {
       case 'travel':
         this.tryTravel(e, cmd.toZoneId);
         break;
+      case 'leystone':
+        this.tryLeystone(e, cmd.stoneId);
+        break;
       case 'reclaim':
         if (e.kind === 'player') this.reclaim(e);
         break;
@@ -1629,6 +1656,7 @@ export class World {
     this.tickSwings();
     this.tickRegen();
     this.tickRespawns();
+    this.tickLeystones();
 
     return this.events;
   }
@@ -3159,7 +3187,7 @@ export class World {
 
   private respawnPlayer(player: Entity): void {
     player.dead = false;
-    player.pos = { ...this.zone.playerStart };
+    player.pos = { ...this.graveAnchor() };
     player.targetId = null;
     player.autoAttack = false;
     player.effects = [];
@@ -3772,6 +3800,152 @@ export class World {
     this.travelTo(toZoneId);
   }
 
+  // --------------------------------------------------------------- leystones
+
+  /** The towns in the zone the player is standing in. */
+  get settlements(): SettlementDef[] {
+    return this.zone.settlements ?? [];
+  }
+
+  /**
+   * Every stone in the game you have woken, wherever it stands.
+   *
+   * Reads the zone registry rather than only the loaded zone, because the
+   * whole feature is getting *out* of the zone you are in. A stone you have
+   * not attuned is not in here at all — the network is a record of where you
+   * have actually been, the same way the map's discoveries are.
+   */
+  knownStones(): SettlementDef[] {
+    const out: SettlementDef[] = [];
+    // The loaded zone first, and then the registry without it. A zone that is
+    // not in `ZONES` is an ad-hoc one — a test arena, or anything a host built
+    // itself — and leaving it out would make the network work everywhere
+    // except the place the player is actually standing.
+    const zones = [this.zone, ...Object.values(ZONES).filter((z) => z.id !== this.zone.id)];
+    for (const zone of zones) {
+      for (const town of zone.settlements ?? []) {
+        if (this.stones[town.id]) out.push(town);
+      }
+    }
+    return out;
+  }
+
+  /** The stone the player is standing at, attuned or not. */
+  stoneAt(pos: Vec2): SettlementDef | null {
+    for (const town of this.settlements) {
+      if (dist(pos.x, pos.z, town.pos.x, town.pos.z) <= LEYSTONE_RANGE) return town;
+    }
+    return null;
+  }
+
+  /**
+   * Wake a stone by standing on it.
+   *
+   * No key, deliberately. Every other thing in this game that costs a keypress
+   * is a decision — loot this corpse, search this cairn, take this quest — and
+   * whether you would like a town you are standing in to be somewhere you can
+   * come back to is not a decision anybody has ever wanted to make.
+   */
+  private tickLeystones(): void {
+    const player = this.entities.get(this.playerId);
+    if (!player || player.dead) return;
+    const town = this.stoneAt(player.pos);
+    if (!town || this.stones[town.id]) return;
+    this.stones[town.id] = true;
+    this.events.push({
+      t: 'attuned',
+      entityId: player.id,
+      stoneId: town.id,
+      name: town.name,
+      role: ROLE_LABEL[town.role],
+    });
+  }
+
+  /**
+   * Step onto the leystone road.
+   *
+   * Free and instant, and across zones. There is no inventory tax and no
+   * cooldown: the fee exists in games with other players in it to stop a
+   * market being one map, and in a game with nobody else in it the only thing
+   * it taxes is the walk back to the shop.
+   *
+   * The gate is where you have been, and it is enough of one. You cannot
+   * attune a stone in a zone the road out would not let you into, so the
+   * network can never carry anybody past the level a zone asks for.
+   */
+  private tryLeystone(player: Entity, stoneId: string): void {
+    if (player.kind !== 'player') return;
+    const target = this.knownStones().find((s) => s.id === stoneId);
+    if (!target) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: 'You have never stood at that stone.',
+      });
+      return;
+    }
+    // Standing on a stone is what makes it a way out; being anywhere is not.
+    // Without this the network is a teleport key and the towns stop being
+    // places you go to.
+    const here = this.stoneAt(player.pos);
+    if (!here) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: 'You are not standing at a leystone.',
+      });
+      return;
+    }
+    if (here.id === target.id) return;
+    if (this.inCombat(player.id)) {
+      this.events.push({
+        t: 'error',
+        entityId: player.id,
+        message: 'Not with something still on you.',
+      });
+      return;
+    }
+
+    if (target.zoneId !== this.zone.id) {
+      this.travelTo(target.zoneId, target.pos);
+      return;
+    }
+    player.pos = { ...target.pos };
+    player.targetId = null;
+    player.autoAttack = false;
+    player.moveDir = { x: 0, z: 0 };
+    player.cast = null;
+    this.events.push({ t: 'spawn', entityId: player.id });
+  }
+
+  /**
+   * Where dying puts you down.
+   *
+   * The nearest stone you have woken, and the zone's arrival point if you have
+   * woken none. That is the second half of what a leystone is for and the half
+   * that costs something: the walk back from a death is dead time, and a
+   * player who attuned the town beside the camp they are farming has bought
+   * themselves out of most of it by having gone there once.
+   *
+   * It deliberately does not touch the debt. Your body is still on the map and
+   * `V` still clears what dying cost — a shorter walk back is not a cheaper
+   * death, and the recap says the same thing either way.
+   */
+  private graveAnchor(): Vec2 {
+    const player = this.entities.get(this.playerId);
+    let best: Vec2 = this.zone.playerStart;
+    let bestGap = Infinity;
+    for (const town of this.settlements) {
+      if (!this.stones[town.id]) continue;
+      const gap = player ? dist(player.pos.x, player.pos.z, town.pos.x, town.pos.z) : 0;
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = town.pos;
+      }
+    }
+    return best;
+  }
+
   /**
    * Load a different zone.
    *
@@ -3779,7 +3953,7 @@ export class World {
    * definition. Mobs respawn on a timer anyway, so nothing meaningful is lost,
    * and it keeps a save to one zone's worth of state instead of four.
    */
-  travelTo(zoneId: string): void {
+  travelTo(zoneId: string, arriveAt?: Vec2): void {
     const zone = getZone(zoneId);
     const player = this.player;
 
@@ -3792,7 +3966,10 @@ export class World {
     for (const hazard of this.hazards) this.events.push({ t: 'hazardGone', id: hazard.id });
     this.hazards = [];
 
-    player.pos = { ...zone.playerStart };
+    // The road out lands you at the arrival point; a leystone lands you at the
+    // stone you asked for. Same rebuild either way, because a zone is a zone
+    // however you got into it.
+    player.pos = { ...(arriveAt ?? zone.playerStart) };
     player.targetId = null;
     player.autoAttack = false;
     player.moveDir = { x: 0, z: 0 };
@@ -4189,6 +4366,9 @@ export class World {
       // Which landmarks you have opened. The sites themselves are derived, so
       // only the "once, ever" half is state.
       found: this.found,
+      // Which stones woke to you. The towns themselves are derived from the
+      // zone, so only the "you have been here" half is state.
+      stones: this.stones,
       entities: [...this.entities.values()],
     });
   }
@@ -4206,6 +4386,7 @@ export class World {
       hazards?: World['hazards'];
       nextHazardId?: number;
       found?: Record<string, true>;
+      stones?: Record<string, true>;
       controller?: Record<string, FactionId>;
       dragons?: Record<string, DragonState>;
       entities: Entity[];
@@ -4229,6 +4410,7 @@ export class World {
     if (Array.isArray(data.hazards)) world.hazards = data.hazards;
     if (typeof data.nextHazardId === 'number') world.nextHazardId = data.nextHazardId;
     if (data.found) world.found = { ...data.found };
+    if (data.stones) world.stones = { ...data.stones };
     world.nextId = data.nextId;
     world.playerId = data.playerId;
     if (data.control) world.control = { ...world.control, ...data.control };

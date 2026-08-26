@@ -39,6 +39,7 @@ Add `?fresh` to the URL to discard your save and start over.
 | `G` | Take the road to the next zone |
 | `J` | Quest log |
 | `K` | The realm — who holds what, and what they make of you |
+| `L` | The leystone road — step to any town you have walked into |
 | `B` | The reckoning — everything you have killed, and what it was |
 | `M` | The map |
 | `N` | Mute |
@@ -48,6 +49,22 @@ Add `?fresh` to the URL to discard your save and start over.
 | `Esc` | Clear target |
 
 Progress autosaves to `localStorage` every 10 seconds.
+
+## Towns
+
+Every zone has **six of them**, on the road, and each sells something the others
+do not — a smithy, an armoury, an apothecary, a scriptorium, a market, and the
+zone's own hold. The next one is always about ninety seconds' walk away.
+
+Each has a **leystone**. Walk into a town and its stone wakes to you, for good;
+after that `L` steps you to any stone you have woken, free, instantly, and
+across zones. There is no fee and no cooldown — the only thing a travel tax
+charges in a game with nobody else in it is the walk back to the shop. You do
+have to be standing at a stone to use one, and not while something is still on
+you.
+
+Dying puts you down at the nearest stone you have woken. It does not make dying
+cheaper: your body is still on the map and `V` still takes back what it cost.
 
 ## The war
 

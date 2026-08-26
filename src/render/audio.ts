@@ -71,6 +71,7 @@ type Voice =
   | 'quest'
   | 'learn'
   | 'drink'
+  | 'leystone'
   | 'error';
 
 export class GameAudio {
@@ -282,6 +283,9 @@ export class GameAudio {
         case 'levelUp':
           this.play('levelUp', 1);
           break;
+        case 'attuned':
+          this.play('leystone', 0.9);
+          break;
         case 'skillRanked':
         case 'skillUnlocked':
           this.play('learn', 0.8);
@@ -406,6 +410,12 @@ export class GameAudio {
         break;
       case 'quest':
         this.arpeggio(t, gain * 0.4, [440, 554.37, 659.25], 0.1, 0.45);
+        break;
+      case 'leystone':
+        // Two notes a fifth apart, held long and let ring. Deliberately not
+        // the level fanfare and not the quest chime: a stone waking up is a
+        // place opening rather than a thing being finished.
+        this.arpeggio(t, gain * 0.36, [329.63, 493.88], 0.24, 1.1, 'sine');
         break;
       case 'coin':
         this.arpeggio(t, gain * 0.28, [1046.5, 1396.9], 0.05, 0.16, 'triangle');

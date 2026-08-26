@@ -1582,3 +1582,43 @@ canvas { display: block; }
 
 #death-recap b { color: #ffd9a0; }
 #death-recap .recap-warn { color: #ffb07a; }
+
+/* --- The Leystone Road -------------------------------------------------- */
+/*
+ * Left of the Realm panel, so the two halves of "where is everything" can be
+ * open together — who holds what, and how you get there.
+ */
+#ley-window {
+  position: absolute;
+  top: 90px;
+  /* Left of the Realm panel and clear of the tracker's right edge: at 1440
+   * wide the first pass overlapped the "find something to fight" card, which
+   * is the one panel a new player is reading. */
+  right: 940px;
+  width: 250px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+  display: none;
+}
+
+.ley-note {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.ley-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #8fb2be;
+}
+
+/* The one affordance in the panel: a row you can actually step from. */
+.ley-go { color: #7fe6ff; font-size: 11px; font-weight: 600; }
+
+.realm-row.clickable:hover .ley-go { color: #ffffff; }
+
+/* A stone waking up. Same voice as a discovery, one step quieter. */
+.log-ley { color: #7fe6ff; font-weight: 600; }

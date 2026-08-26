@@ -478,3 +478,41 @@ export function getTheme(id: string | undefined): ZoneTheme {
   if (!theme) throw new Error(`Unknown zone theme: ${id}`);
   return theme;
 }
+
+/**
+ * The nearest spot to (x, z) that is not in a lake.
+ *
+ * Lives here rather than in `content/zone.ts` because three different things
+ * now need it — the road, the settlements and the strays — and two of them
+ * must not import the zone module. It is pure arithmetic over a `TerrainSpec`,
+ * which is exactly what this file is for.
+ *
+ * A spiral rather than a gradient walk: the ground is noise, so "uphill" is
+ * not reliably "towards dry land", and the Sunken Wood is a drowned forest
+ * where the nearest dry ground is sometimes a hundred metres away.
+ */
+export function dryGround(
+  x: number,
+  z: number,
+  themeId: string | undefined,
+  limit: number,
+  rings = 14,
+  step = 34,
+): { x: number; z: number } {
+  const spec = getTheme(themeId).terrain;
+  const water = spec.waterLevel;
+  const clamp = (v: number): number => Math.max(-limit, Math.min(limit, v));
+  if (water === undefined) return { x: clamp(x), z: clamp(z) };
+
+  for (let ring = 0; ring < rings; ring++) {
+    const r = ring * step;
+    const steps = ring === 0 ? 1 : 8;
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2 + ring;
+      const px = clamp(x + Math.cos(a) * r);
+      const pz = clamp(z + Math.sin(a) * r);
+      if (terrainHeight(px, pz, spec) > water + SHORE_CLEARANCE) return { x: px, z: pz };
+    }
+  }
+  return { x: clamp(x), z: clamp(z) };
+}

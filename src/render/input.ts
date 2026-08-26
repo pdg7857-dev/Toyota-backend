@@ -124,6 +124,9 @@ export class InputController {
       case 'KeyK':
         this.hud.toggleRealm();
         break;
+      case 'KeyL':
+        this.hud.toggleLeystones();
+        break;
       case 'KeyB':
         this.hud.toggleJournal();
         break;
@@ -158,6 +161,7 @@ export class InputController {
         // Back out one layer at a time. The away report is the outermost thing
         // on screen when it is up, so it goes first.
         if (this.hud.awayReportOpen) this.hud.hideAwayReport();
+        else if (this.hud.leystonesOpen) this.hud.hideLeystones();
         else if (this.map.isOpen) this.map.close();
         else if (this.hud.vendorOpen) this.hud.closeVendor();
         else this.emit({ t: 'target', id: null });

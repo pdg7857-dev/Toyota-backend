@@ -3,6 +3,7 @@ import { getSkill, skillBarFor } from '../content/skills.js';
 import { QUALITY_COLORS, bestDrink, canEquip, getItem } from '../content/items.js';
 import { MOBS, getMob, mobDropping } from '../content/mobs.js';
 import { buyPrice, getVendor, sellPrice } from '../content/vendors.js';
+import { ROLE_LABEL } from '../content/settlements.js';
 import { getQuest } from '../content/quests.js';
 import {
   MAX_LEVEL,
@@ -95,6 +96,7 @@ const RESERVED_PANELS = [
   '#tracker',
   '#right-panels',
   '#realm-window',
+  '#ley-window',
   '#journal-window',
   '#quest-log',
   '#vendor-window',
@@ -217,6 +219,8 @@ export class Hud {
     questLogBody: HTMLElement;
     realmWindow: HTMLElement;
     realmBody: HTMLElement;
+    leyWindow: HTMLElement;
+    leyBody: HTMLElement;
     journalWindow: HTMLElement;
     journalBody: HTMLElement;
     awayReport: HTMLElement;
@@ -376,6 +380,8 @@ export class Hud {
       questLogBody: this.q('#quest-log-body'),
       realmWindow: this.q('#realm-window'),
       realmBody: this.q('#realm-body'),
+      leyWindow: this.q('#ley-window'),
+      leyBody: this.q('#ley-body'),
       journalWindow: this.q('#journal-window'),
       journalBody: this.q('#journal-body'),
       awayReport: this.q('#away-report'),
@@ -649,6 +655,16 @@ export class Hud {
             ev.kind === 'boon' ? ev.name : `${ev.name} — ${ev.gold.toLocaleString()}g`,
             'found',
           );
+          break;
+        }
+        case 'attuned': {
+          // A banner rather than a card. Walking into a town and having the
+          // stone wake up is a good moment and it is not a *rare* one — there
+          // are twenty of them in the game — so it gets the same voice a front
+          // changing hands gets and not the one an epic gets.
+          this.log(`The stone at ${ev.name} wakes to you.`, 'log-ley');
+          this.log('You can step here from any stone you have woken. (L)', 'log-loot');
+          this.showZoneBanner(`${ev.name} — ${ev.role}`, 'realm');
           break;
         }
         case 'lootGained': {
@@ -1025,6 +1041,7 @@ export class Hud {
     this.repaint('character', this.els.characterWindow, () => this.characterSignature(player), () => this.renderCharacter());
     this.repaint('inventory', this.els.inventoryWindow, () => this.bagSignature(player), () => this.renderInventory());
     this.repaint('realm', this.els.realmWindow, () => this.realmSignature(), () => this.renderRealm());
+    this.repaint('ley', this.els.leyWindow, () => this.leySignature(player), () => this.renderLeystones());
     this.repaint('journal', this.els.journalWindow, () => this.journalSignature(player), () => this.renderJournal());
   }
 
@@ -1057,6 +1074,12 @@ export class Hud {
     return (player.quests ?? [])
       .map((q) => `${q.questId}:${q.counts.join('.')}`)
       .join(',') + `|${(player.questsDone ?? []).length}`;
+  }
+
+  private leySignature(player: Entity): string {
+    const known = Object.keys(this.world.stones).sort().join(',');
+    const here = this.world.stoneAt(player.pos)?.id ?? '-';
+    return `${known}|${here}|${this.world.zone.id}|${this.world.inCombat(player.id) ? 'fight' : 'calm'}`;
   }
 
   private realmSignature(): string {
@@ -2439,6 +2462,119 @@ export class Hud {
     }
   }
 
+  toggleLeystones(): void {
+    const visible = this.els.leyWindow.style.display === 'block';
+    this.els.leyWindow.style.display = visible ? 'none' : 'block';
+    if (!visible) this.renderLeystones();
+  }
+
+  get leystonesOpen(): boolean {
+    return this.els.leyWindow.style.display === 'block';
+  }
+
+  hideLeystones(): void {
+    this.els.leyWindow.style.display = 'none';
+  }
+
+  /**
+   * Everywhere you can step to, and everywhere you cannot yet.
+   *
+   * The unattuned stones of the zone you are standing in are listed too, greyed
+   * out and named. That is the half that makes the panel worth opening before
+   * you have a network: a list of two places you have been says "this feature
+   * is not for you yet", and a list that also shows the four towns in this zone
+   * you have not walked to says "here is what there is".
+   *
+   * Zones you have never been to are not in it at all. The network is a record
+   * of where you have been, and a list of the roads you have not earned is the
+   * checklist the discoveries deliberately refuse to be.
+   */
+  private renderLeystones(): void {
+    const player = this.world.player;
+    const body = this.els.leyBody;
+    body.innerHTML = '';
+
+    const here = this.world.stoneAt(player.pos);
+    const known = this.world.knownStones();
+    const fighting = this.world.inCombat(player.id);
+
+    const note = document.createElement('div');
+    note.className = 'ley-note';
+    note.textContent = here
+      ? fighting
+        ? `At ${here.name}. Not with something still on you.`
+        : `At ${here.name}. Choose where to step.`
+      : 'Stand at a leystone to use the road.';
+    body.appendChild(note);
+
+    const zoneOrder = Object.values(ZONES);
+    for (const zone of zoneOrder) {
+      const towns = zone.settlements ?? [];
+      if (towns.length === 0) continue;
+      const mine = towns.filter((t) => this.world.stones[t.id]);
+      const isHere = zone.id === this.world.zone.id;
+      // A zone you have never attuned anything in, and are not standing in, is
+      // not somewhere the road goes. Saying so with an empty heading would be
+      // a checklist.
+      if (mine.length === 0 && !isHere) continue;
+
+      const head = document.createElement('div');
+      head.className = 'realm-zone';
+      head.textContent = zone.name;
+      body.appendChild(head);
+
+      for (const town of towns) {
+        const attuned = !!this.world.stones[town.id];
+        if (!attuned && !isHere) continue;
+        const row = document.createElement('div');
+        const usable = attuned && !!here && here.id !== town.id && !fighting;
+        row.className = `realm-row${usable ? ' clickable' : ''}`;
+        // The word has to be the truth about *now*. Every row reading "step"
+        // while the note above says you are not at a stone is a panel arguing
+        // with itself, and the reader believes the row.
+        const state = !attuned
+          ? '<span class="band-neutral">not yet</span>'
+          : here && here.id === town.id
+            ? '<span class="band-good">you are here</span>'
+            : usable
+              ? '<span class="ley-go">step</span>'
+              : '<span class="band-neutral">attuned</span>';
+        row.innerHTML =
+          `<div class="realm-name"${attuned ? '' : ' style="opacity:0.5"'}>${town.name}` +
+          `<span class="ley-role">${ROLE_LABEL[town.role]}</span></div>${state}`;
+        this.tip(row, () => ({
+          title: town.name,
+          lines: [
+            town.blurb,
+            attuned
+              ? here
+                ? here.id === town.id
+                  ? 'This is the stone you are standing on.'
+                  : fighting
+                    ? 'Not with something still on you.'
+                    : 'Step here — free, and wherever it is.'
+                : 'Attuned. Stand at any stone to step here.'
+              : 'Walk to it once and it is yours for good.',
+          ],
+        }));
+        if (usable) {
+          row.addEventListener('click', () => {
+            this.emit({ t: 'leystone', stoneId: town.id });
+            this.hideLeystones();
+          });
+        }
+        body.appendChild(row);
+      }
+    }
+
+    if (known.length === 0) {
+      const none = document.createElement('div');
+      none.className = 'empty';
+      none.textContent = 'No stone has woken to you yet. Walk into a town.';
+      body.appendChild(none);
+    }
+  }
+
   toggleRealm(): void {
     const visible = this.els.realmWindow.style.display === 'block';
     this.els.realmWindow.style.display = visible ? 'none' : 'block';
@@ -3311,6 +3447,11 @@ const TEMPLATE = `
 
   <div id="travel-prompt"></div>
 
+  <div id="ley-window" class="window panel clickable">
+    <h3>The Leystone Road</h3>
+    <div id="ley-body"></div>
+  </div>
+
   <div id="realm-window" class="window panel clickable">
     <h3>The Realm</h3>
     <div id="realm-body"></div>
@@ -3355,6 +3496,6 @@ const TEMPLATE = `
     <b>WASD</b> move &nbsp; <b>Drag</b> or <b>←→</b> look &nbsp; <b>Scroll</b> zoom<br />
     <b>Click</b> / <b>Tab</b> target &nbsp; <b>1–0</b> / <b>⇧1–6</b> skills &nbsp; <b>T</b> auto-attack<br />
     <b>Q</b>/<b>X</b> drink &nbsp; <b>F</b> loot / search &nbsp; <b>E</b> trade &nbsp; <b>G</b> travel &nbsp; <b>J</b> quests<br />
-    <b>H</b> take horse &nbsp; <b>R</b> ride &nbsp; <b>K</b> realm &nbsp; <b>B</b> reckoning &nbsp; <b>M</b> map &nbsp; <b>V</b> reclaim &nbsp; <b>N</b> mute &nbsp; <b>[ ]</b> volume &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
+    <b>H</b> take horse &nbsp; <b>R</b> ride &nbsp; <b>K</b> realm &nbsp; <b>L</b> leystones &nbsp; <b>B</b> reckoning &nbsp; <b>M</b> map &nbsp; <b>V</b> reclaim &nbsp; <b>N</b> mute &nbsp; <b>[ ]</b> volume &nbsp; <b>C</b> character &nbsp; <b>I</b> inventory &nbsp; <b>Esc</b> clear target
   </div>
 `;

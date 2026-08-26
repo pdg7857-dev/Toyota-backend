@@ -894,6 +894,16 @@ export type Command =
   | { t: 'turnInQuest'; vendorId: EntityId; questId: string }
   | { t: 'abandonQuest'; questId: string }
   | { t: 'travel'; toZoneId: string }
+  /**
+   * Step onto the leystone road to a stone you have already attuned.
+   *
+   * A command rather than a renderer teleport for the reason every other way
+   * in is one: where a character may go is a fact about the world, and a
+   * server would have to validate this exactly as `applyCommand` does — the
+   * stone has to exist, you have to have stood on it once, and nothing may be
+   * hitting you at the time.
+   */
+  | { t: 'leystone'; stoneId: string }
   /** Stand where you fell and take back what dying cost you. */
   | { t: 'reclaim' }
   | { t: 'respawn' };
@@ -993,6 +1003,8 @@ export type SimEvent =
    * cleared the rest. `remaining` is what is still owed either way.
    */
   | { t: 'debt'; entityId: EntityId; kind: 'incurred' | 'repaid' | 'reclaimed'; amount: number; remaining: number }
+  /** A leystone woke to you. Once per stone, ever. */
+  | { t: 'attuned'; entityId: EntityId; stoneId: string; name: string; role: string }
   | { t: 'levelUp'; entityId: EntityId; level: number }
   /** A skill went up a rank. */
   | { t: 'skillRanked'; entityId: EntityId; skillId: string; rank: number }

@@ -14,6 +14,7 @@ import {
   MAX_LEVEL,
   STAR_MODIFIERS,
   BASE_MOVE_SPEED,
+  ROAM_RADIUS,
   baseMobXp,
   deriveMobStats,
   goldForKill,
@@ -147,6 +148,7 @@ import {
   type ItemTier,
 } from '../src/content/tiers.js';
 import { MAX_STOCK_QUALITY, VENDORS, buyPrice, sellPrice } from '../src/content/vendors.js';
+import { ROLE_LABEL, settlementsFor } from '../src/content/settlements.js';
 import { LUXURY_VENDOR_ID } from '../src/content/luxury.js';
 import { skillBarFor, skillsForClass, skillsTaughtBy } from '../src/content/skills.js';
 
@@ -3271,5 +3273,142 @@ describe('a camp that notices you are farming it', () => {
     // something else entirely.
     expect(duelZone('bog_wolf').musters).toBe(false);
     expect(pullZone('bog_wolf', 3).musters).toBe(false);
+  });
+});
+
+// --------------------------------------------------------------------------
+// Towns, and the road between them.
+// --------------------------------------------------------------------------
+
+describe('every zone has towns, and a road between them', () => {
+  const townsOf = (zone: (typeof ZONES)[string]) => zone!.settlements ?? [];
+
+  it('gives every zone four to seven of them, each selling something different', () => {
+    const rows: string[] = [];
+    for (const zone of Object.values(ZONES)) {
+      const towns = townsOf(zone);
+      rows.push(`\n  ${zone.name}  (${towns.length} towns)`);
+      for (const town of towns) {
+        const vendor = VENDORS[town.vendorId];
+        expect(vendor, `${town.name} has no trader`).toBeTruthy();
+        expect(vendor!.stock.length, `${vendor!.name} sells nothing`).toBeGreaterThan(0);
+        rows.push(
+          `    ${town.name.padEnd(19)} ${ROLE_LABEL[town.role].padEnd(12)} ` +
+            `${vendor!.name.padEnd(24)} ${String(vendor!.stock.length).padStart(2)} lines`,
+        );
+      }
+      // Four is enough that a zone has a shape; seven is where they stop being
+      // places and start being a row of shops.
+      expect(towns.length, `${zone.id} has ${towns.length} towns`).toBeGreaterThanOrEqual(4);
+      expect(towns.length, `${zone.id} has ${towns.length} towns`).toBeLessThanOrEqual(7);
+      // And a zone where every shop sells the same thing is one shop drawn
+      // five times, which is the whole reason for there being more than one.
+      const roles = new Set(towns.map((t) => t.role));
+      expect(roles.size, `${zone.id} has only ${roles.size} kind(s) of shop`).toBeGreaterThanOrEqual(
+        3,
+      );
+    }
+    console.log('\nWHAT IS IN EVERY TOWN' + rows.join('\n'));
+  });
+
+  it('keeps every leystone clear of everything that could reach it', () => {
+    // Same rule a trader has always run under, applied to the stone as well as
+    // to the shopfront: standing still at a stone is exactly when you least
+    // want something walking out of the fog at you.
+    for (const zone of Object.values(ZONES)) {
+      for (const town of townsOf(zone)) {
+        for (const spawn of zone.spawns) {
+          const def = MOBS[spawn.mobId]!;
+          const gap = Math.hypot(town.pos.x - spawn.pos.x, town.pos.z - spawn.pos.z);
+          const needed = def.aggroRadius + roamOf(spawn) + 4;
+          if (gap < needed) {
+            throw new Error(
+              `${zone.id}: the stone at ${town.name} is ${gap.toFixed(1)}u from a ` +
+                `${def.name}; needs ${needed.toFixed(1)}u`,
+            );
+          }
+        }
+      }
+    }
+  });
+
+  it('puts them on the road, and a walk rather than a trek apart', () => {
+    // The number that matters is not how far apart they are, it is how long
+    // the walk is — which is the same argument the zone's own size is fitted
+    // against. A town you cannot be bothered to walk to is a town that only
+    // exists once you have its stone.
+    const rows: string[] = [];
+    const wrong: string[] = [];
+    for (const zone of Object.values(ZONES)) {
+      const towns = townsOf(zone);
+      const road = roadPoints(zone.id, zone.theme);
+      rows.push(`\n  ${zone.name}`);
+      for (let i = 0; i < towns.length; i++) {
+        const town = towns[i]!;
+        const offRoad = roadDistance(road, town.pos.x, town.pos.z);
+        const next = towns[i + 1];
+        const walk = next
+          ? Math.hypot(next.pos.x - town.pos.x, next.pos.z - town.pos.z) / BASE_MOVE_SPEED
+          : 0;
+        rows.push(
+          `    ${town.name.padEnd(19)} ${offRoad.toFixed(0).padStart(4)}u off the road` +
+            (next ? `   ${walk.toFixed(0).padStart(3)}s to ${next.name}` : '   (last)'),
+        );
+        // On the road, not out in the wilds: a town nobody walks past is a
+        // town nobody finds, and the arrow only ever points at one thing.
+        if (offRoad > 280) wrong.push(`${town.name} is ${offRoad.toFixed(0)}u off the road`);
+        if (next && walk < 25) wrong.push(`${town.name} is on top of ${next.name}`);
+        if (next && walk > 140) {
+          wrong.push(`${town.name} to ${next.name} is a ${walk.toFixed(0)}s walk`);
+        }
+      }
+    }
+    // Collected rather than thrown at the first one, because the answer to a
+    // town in the wrong place is usually to move two of them — and a check
+    // that stops at the first violation hides the shape of the problem. Same
+    // reason every table in this file gets printed.
+    console.log('\nHOW FAR APART THE TOWNS ARE' + rows.join('\n'));
+    expect(wrong, wrong.join('; ')).toEqual([]);
+  });
+
+  it('puts the same towns in the same places every time', () => {
+    // A network whose stones move between sessions is a network nobody can
+    // learn, which is the same reason the road itself is hashed rather than
+    // rolled. Two independent builds of the same zone must agree exactly.
+    for (const zone of Object.values(ZONES)) {
+      const again = settlementsFor({
+        id: zone.id,
+        theme: zone.theme,
+        halfSize: zone.halfSize,
+        playerStart: zone.playerStart,
+        road: roadPoints(zone.id, zone.theme),
+        spawns: zone.spawns,
+        reachOf: (mobId) => (MOBS[mobId]?.aggroRadius ?? 12) + ROAM_RADIUS,
+      });
+      // `withStrays` and `withArrival` both add creatures after the towns are
+      // placed, so this is a rebuild against *more* spawns than the original
+      // saw: if a town could be pushed by one, it would move here.
+      expect(again.map((t) => `${t.id}:${t.pos.x.toFixed(2)}:${t.pos.z.toFixed(2)}`)).toEqual(
+        townsOf(zone).map((t) => `${t.id}:${t.pos.x.toFixed(2)}:${t.pos.z.toFixed(2)}`),
+      );
+    }
+  });
+
+  it('never sells above uncommon in one, however the stock was derived', () => {
+    // The keepers' stock is generated from the item registry rather than typed
+    // out, which is the one thing that could quietly put a rare in a shop. The
+    // cap is the rule that keeps every trader a safety net instead of a
+    // shortcut past the grind, so it is worth asserting twice.
+    for (const zone of Object.values(ZONES)) {
+      for (const town of townsOf(zone)) {
+        for (const itemId of VENDORS[town.vendorId]!.stock) {
+          const item = getItem(itemId);
+          expect(
+            item.quality === 'common' || item.quality === 'uncommon',
+            `${town.name} stocks ${item.name} (${item.quality})`,
+          ).toBe(true);
+        }
+      }
+    }
   });
 });

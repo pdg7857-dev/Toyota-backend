@@ -101,6 +101,7 @@ import {
 } from '../src/content/mobs.js';
 import { BOSS_STARS, isBoss } from '../src/sim/types.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
+import type { ZoneDef } from '../src/content/zone.js';
 
 function newWorld(seed = 1, zone = duelZone('mossback_boar')) {
   return new World({ seed, zone, classId: 'warrior' });
@@ -4514,5 +4515,220 @@ describe('the reckoning', () => {
     const world = new World({ seed: 8, zone: getZone('fenmarch'), classId: 'warrior' });
     for (let i = 0; i < 400; i++) world.tick();
     expect(Object.keys(world.player.slain ?? {}).length).toBe(0);
+  });
+});
+
+// --------------------------------------------------------------------------
+// Towns, and the leystone road between them.
+// --------------------------------------------------------------------------
+
+describe('the leystone road', () => {
+  /**
+   * Two towns and nothing else.
+   *
+   * A real zone would do — the towns are real content — but a real zone also
+   * has adventurers walking about, rare spawns rolling and camps mustering,
+   * all of which draw from the same `Rng`. The test that matters most here is
+   * the one asserting attuning draws from it *not at all*, and that cannot be
+   * measured in a world where four other things are drawing at the same time.
+   */
+  function townZone(mobId?: string): ZoneDef {
+    return {
+      ...emptyZone(),
+      id: 'test-towns',
+      halfSize: 400,
+      spawns: mobId ? [{ mobId, pos: { x: 100, z: 0 } }] : [],
+      settlements: [
+        {
+          id: 'ley_test_a',
+          zoneId: 'test-towns',
+          name: 'Aton',
+          role: 'hold',
+          blurb: 'A place.',
+          pos: { x: 0, z: 0 },
+          vendorPos: { x: 6, z: 0 },
+          vendorId: 'maeve',
+        },
+        {
+          id: 'ley_test_b',
+          zoneId: 'test-towns',
+          name: 'Beton',
+          role: 'smith',
+          blurb: 'Another place.',
+          pos: { x: 200, z: 0 },
+          vendorPos: { x: 206, z: 0 },
+          vendorId: 'maeve',
+        },
+      ],
+    };
+  }
+
+  function townWorld(mobId?: string): { world: World; player: Entity } {
+    const world = new World({ seed: 41, zone: townZone(mobId), classId: 'warrior' });
+    return { world, player: world.player };
+  }
+
+  /** Get into a fight, then walk back to the stone. */
+  function pickAFight(world: World, player: Entity): void {
+    const mob = [...world.entities.values()].find((e) => e.kind === 'mob' && !e.dead)!;
+    player.pos = { x: mob.pos.x - 2, z: mob.pos.z };
+    world.submit(player.id, { t: 'target', id: mob.id });
+    world.submit(player.id, { t: 'autoAttack', on: true });
+    world.advance(3000);
+  }
+
+  it('wakes a stone by standing on it, once and only once', () => {
+    const { world, player } = townWorld();
+    player.pos = { x: 0, z: 0 };
+    const first = world.tick().filter((e) => e.t === 'attuned');
+    expect(first.length).toBe(1);
+    expect(world.stones.ley_test_a).toBe(true);
+
+    // Ten more seconds standing in the same square must not say it again.
+    const again = world.advance(10_000).filter((e) => e.t === 'attuned');
+    expect(again.length).toBe(0);
+  });
+
+  it('never draws from the combat stream to do it', () => {
+    // The lesson roaming, the weather and the discoveries all had to learn: a
+    // thing that happens because you walked somewhere must not move the
+    // numbers of the next fight you pick.
+    const { world, player } = townWorld();
+    const control = new World({ seed: 41, zone: townZone(), classId: 'warrior' });
+    control.player.pos = { x: 300, z: 300 };
+    player.pos = { x: 0, z: 0 };
+    for (let i = 0; i < 60; i++) {
+      world.tick();
+      control.tick();
+    }
+    expect(world.stones.ley_test_a).toBe(true);
+    expect(world.rng.state).toBe(control.rng.state);
+  });
+
+  it('steps you from one stone to another, free and instantly', () => {
+    const { world, player } = townWorld();
+    player.pos = { x: 200, z: 0 };
+    world.tick();
+    player.pos = { x: 0, z: 0 };
+    world.tick();
+    expect(Object.keys(world.stones).sort()).toEqual(['ley_test_a', 'ley_test_b']);
+
+    const gold = player.gold ?? 0;
+    world.submit(player.id, { t: 'leystone', stoneId: 'ley_test_b' });
+    world.tick();
+    expect(player.pos.x).toBeCloseTo(200);
+    expect(player.gold ?? 0).toBe(gold);
+  });
+
+  it('refuses a stone you have never stood at', () => {
+    const { world, player } = townWorld();
+    player.pos = { x: 0, z: 0 };
+    world.tick();
+    world.submit(player.id, { t: 'leystone', stoneId: 'ley_test_b' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /never stood/.test(e.message))).toBe(true);
+    expect(player.pos.x).toBeCloseTo(0);
+  });
+
+  it('refuses unless you are standing at a stone', () => {
+    const { world, player } = townWorld();
+    player.pos = { x: 200, z: 0 };
+    world.tick();
+    player.pos = { x: 0, z: 0 };
+    world.tick();
+    // Walk out into the field between them.
+    player.pos = { x: 100, z: 0 };
+    world.submit(player.id, { t: 'leystone', stoneId: 'ley_test_b' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /not standing at a leystone/.test(e.message))).toBe(
+      true,
+    );
+    expect(player.pos.x).toBeCloseTo(100);
+  });
+
+  it('refuses while something is still on you', () => {
+    const { world, player } = townWorld('moor_hare');
+    player.pos = { x: 200, z: 0 };
+    world.tick();
+    player.pos = { x: 0, z: 0 };
+    world.tick();
+
+    pickAFight(world, player);
+    expect(world.inCombat(player.id), 'the harness never got into a fight').toBe(true);
+    // Back at the stone, but still being chased. The gate is `inCombat`, which
+    // is what a server would check too.
+    player.pos = { x: 0, z: 0 };
+    world.submit(player.id, { t: 'autoAttack', on: false });
+    world.submit(player.id, { t: 'leystone', stoneId: 'ley_test_b' });
+    const events = world.tick();
+    expect(events.some((e) => e.t === 'error' && /still on you/.test(e.message))).toBe(true);
+    expect(player.pos.x).toBeCloseTo(0);
+  });
+
+  it('carries you between zones, and rebuilds the one you land in', () => {
+    const world = new World({ seed: 12, zone: getZone('fenmarch'), classId: 'warrior' });
+    const player = world.player;
+    const fenmarch = getZone('fenmarch').settlements!;
+    const ardmoor = getZone('ardmoor').settlements!;
+    // Two stones a player could only have woken by walking to them.
+    world.stones[fenmarch[0]!.id] = true;
+    world.stones[ardmoor[2]!.id] = true;
+
+    player.pos = { ...fenmarch[0]!.pos };
+    world.submit(player.id, { t: 'leystone', stoneId: ardmoor[2]!.id });
+    const events = world.tick();
+
+    expect(events.some((e) => e.t === 'zoneChanged' && e.zoneId === 'ardmoor')).toBe(true);
+    expect(world.zone.id).toBe('ardmoor');
+    expect(player.pos.x).toBeCloseTo(ardmoor[2]!.pos.x);
+    // And the zone is actually populated, not an empty shell.
+    expect([...world.entities.values()].filter((e) => e.kind === 'mob').length).toBeGreaterThan(20);
+  });
+
+  it('puts you down at the nearest stone you have woken when you die', () => {
+    const { world, player } = townWorld('moor_hare');
+    player.pos = { x: 200, z: 0 };
+    world.tick();
+    expect(world.stones.ley_test_b).toBe(true);
+
+    // Die out past the far town: the nearest woken stone is Beton, not the
+    // zone's arrival point back at the origin.
+    const mob = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+    mob.pos = { x: 240, z: 0 };
+    player.pos = { x: 239, z: 0 };
+    player.health = 1;
+    world.submit(player.id, { t: 'target', id: mob.id });
+    for (let t = 0; t < 60_000 && !player.dead; t += TICK_MS) world.tick();
+    expect(player.dead, 'the harness never managed to kill anybody').toBe(true);
+    world.submit(player.id, { t: 'respawn' });
+    world.tick();
+    expect(player.pos.x).toBeCloseTo(200);
+    // And it costs nothing extra: your body is still on the map and V still
+    // clears the debt. A shorter walk back is not a cheaper death.
+    expect(player.deathSpot?.pos.x).toBeCloseTo(239);
+  });
+
+  it('falls back to the arrival point when no stone has woken', () => {
+    const { world, player } = townWorld('moor_hare');
+    const mob = [...world.entities.values()].find((e) => e.kind === 'mob')!;
+    mob.pos = { x: 300, z: 300 };
+    player.pos = { x: 299, z: 300 };
+    player.health = 1;
+    world.submit(player.id, { t: 'target', id: mob.id });
+    for (let t = 0; t < 60_000 && !player.dead; t += TICK_MS) world.tick();
+    expect(player.dead, 'the harness never managed to kill anybody').toBe(true);
+    world.submit(player.id, { t: 'respawn' });
+    world.tick();
+    expect(player.pos.x).toBeCloseTo(0);
+    expect(player.pos.z).toBeCloseTo(0);
+  });
+
+  it('remembers the network across a save', () => {
+    const { world, player } = townWorld();
+    player.pos = { x: 0, z: 0 };
+    world.tick();
+    const back = World.deserialize(world.serialize(), world.zone);
+    expect(back.stones.ley_test_a).toBe(true);
+    expect(back.knownStones().map((s) => s.id)).toEqual(['ley_test_a']);
   });
 });

@@ -8,6 +8,7 @@ import type { StructureDef } from '../content/structures.js';
 import { clockOf, type WeatherKind } from '../content/daylight.js';
 import { getMob } from '../content/mobs.js';
 import { getVendor } from '../content/vendors.js';
+import { ROLE_LABEL } from '../content/settlements.js';
 import { FACTIONS, holdingsIn } from '../content/factions.js';
 import { roadPoints } from '../content/zone.js';
 
@@ -425,6 +426,28 @@ export class MapView {
       }
     }
 
+    // Towns, so the minimap can answer "which way is the shop" — which is the
+    // question a player asks of it more often than any other and which it has
+    // never once been able to answer.
+    for (const town of this.world.zone.settlements ?? []) {
+      const [x, y] = at(town.pos);
+      if (x < -20 || y < -20 || x > size + 20 || y > size + 20) continue;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 8);
+      ctx.lineTo(x + 6, y);
+      ctx.lineTo(x, y + 8);
+      ctx.lineTo(x - 6, y);
+      ctx.closePath();
+      if (this.world.stones[town.id]) {
+        ctx.fillStyle = '#7fe6ff';
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = '#7fe6ff';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
+    }
+
     // Where you fell. This is what turns the walk back from dead time into a
     // decision — go through the thing that killed you, or pay it off in kills
     // somewhere safer.
@@ -625,7 +648,46 @@ export class MapView {
       star(ctx, x, y, 13, 6);
       label(`${def.name} ${def.level}`, x, y - 20, '#ffcaa8', 600);
     }
+    // Towns, and the stone standing in each.
+    //
+    // Drawn from the first look at the map rather than once found, unlike a
+    // discovery — a town is where you are *meant* to go, and a map that hides
+    // the shops is a map that makes a player walk three kilometres to find out
+    // there was one behind them. What the map does keep back is whether the
+    // stone is yours: a filled stone is somewhere you can step to from any
+    // other, a hollow one is somewhere you have not been.
+    const townVendors = new Set((zone.settlements ?? []).map((t) => t.vendorId));
+    for (const town of zone.settlements ?? []) {
+      const [x, y] = at(town.pos);
+      const known = !!this.world.stones[town.id];
+      ctx.fillStyle = 'rgba(14, 18, 22, 0.72)';
+      ctx.strokeStyle = '#57c6f0';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(x, y, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // The stone itself: a small upright in the middle of the ring.
+      ctx.beginPath();
+      ctx.moveTo(x, y - 6);
+      ctx.lineTo(x + 4.5, y);
+      ctx.lineTo(x, y + 6);
+      ctx.lineTo(x - 4.5, y);
+      ctx.closePath();
+      if (known) {
+        ctx.fillStyle = '#7fe6ff';
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = '#6a8a98';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      label(town.name, x, y - 19, known ? '#bdefff' : '#9fb6c0', 700);
+      label(ROLE_LABEL[town.role], x, y + 25, '#8fb2be', 500);
+    }
+    // Anyone who is not in a town — Ceallach's wagon — is still a trader.
     for (const placement of zone.vendors) {
+      if (townVendors.has(placement.vendorId)) continue;
       const [x, y] = at(placement.pos);
       ctx.fillStyle = '#57c6f0';
       ctx.beginPath();
@@ -682,6 +744,7 @@ export class MapView {
       `<span style="color:${THREAT_COLOURS.deadly}">● deadly</span>` +
       `<span style="color:#9fd08a">✛ found</span>` +
       `<span style="color:#ff9a5c">★ boss</span>` +
+      `<span style="color:#7fe6ff">◆ town (filled = leystone attuned, L)</span>` +
       `<span style="color:#57c6f0">● trader</span>` +
       `<span style="color:#8fe0a0">● road out</span>` +
       `<span style="color:#e8e3d0">▪ landmark</span>` +

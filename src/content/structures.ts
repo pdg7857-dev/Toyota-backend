@@ -38,7 +38,8 @@ export type StructureKind =
   | 'farmstead'
   | 'cairn'
   | 'camp'
-  | 'bridge';
+  | 'bridge'
+  | 'leystone';
 
 export interface StructureDef {
   kind: StructureKind;
@@ -78,6 +79,7 @@ const FOOTPRINT: Record<StructureKind, number> = {
   cairn: 6,
   camp: 13,
   bridge: 12,
+  leystone: 9,
 };
 
 /**
@@ -110,7 +112,7 @@ const ZONE_KINDS: Record<string, StructureKind[]> = {
  * farmstead at every shopfront — then the rest fill the empty country. The
  * anchors are what make a landmark information rather than decoration.
  */
-export function zoneStructures(zone: StructureZone, count = 26): StructureDef[] {
+export function zoneStructures(zone: StructureZone, country = 20): StructureDef[] {
   const anchors: Array<{ pos: Vec2; kind: StructureKind; scale?: number }> = [];
   const keepClear: Vec2[] = [];
   const seenHoldings = new Set<string>();
@@ -132,11 +134,56 @@ export function zoneStructures(zone: StructureZone, count = 26): StructureDef[] 
     anchors.push({ pos: { x: vendor.pos.x + 17, z: vendor.pos.z + 5 }, kind: 'farmstead' });
     keepClear.push(vendor.pos);
   }
+  // A town: its stone in the middle, and a couple of buildings round it.
+  //
+  // The stone is anchored, so it never holds a discovery and never counts as
+  // one of the landmarks that fill the empty country — a leystone is somewhere
+  // you come back to, and something you can only find once is the opposite of
+  // that.
+  //
+  // The buildings are what make it read as a *place* from four hundred metres
+  // rather than as a trader standing beside a rock. A vendor already brings one
+  // building with them, so this adds the rest of the hamlet; which kinds come
+  // from the zone, so the Fenmarch's towns are farms and Caer Dubh's are things
+  // somebody abandoned.
+  const TOWN_RADIUS = 23;
+  for (const town of zone.settlements ?? []) {
+    anchors.push({ pos: town.pos, kind: 'leystone', scale: 1 });
+    keepClear.push(town.pos);
+    const kinds = TOWN_KINDS[zone.id] ?? TOWN_KINDS.fenmarch!;
+    for (let i = 0; i < kinds.length; i++) {
+      // Deterministic angles off the town's own position, so a town is the
+      // same town every time you walk into it and no two are laid out alike.
+      const a = ((hash(`${town.id}:${i}`) % 360) / 360) * Math.PI * 2;
+      anchors.push({
+        pos: {
+          x: town.pos.x + Math.cos(a) * TOWN_RADIUS,
+          z: town.pos.z + Math.sin(a) * TOWN_RADIUS,
+        },
+        kind: kinds[i]!,
+        scale: 0.9,
+      });
+    }
+  }
   keepClear.push(zone.playerStart);
   for (const exit of zone.exits ?? []) keepClear.push(exit.pos);
 
-  return structuresFor(zone.id, zone.theme, anchors, zone.halfSize, keepClear, count);
+  return structuresFor(zone.id, zone.theme, anchors, zone.halfSize, keepClear, country);
 }
+
+/**
+ * What a town in each zone is built out of.
+ *
+ * Two buildings beside the trader's one. Deliberately the same table shape as
+ * `ZONE_KINDS` and deliberately different from it: the country around a zone
+ * says what happened there, and a town says who is still living in it.
+ */
+const TOWN_KINDS: Record<string, StructureKind[]> = {
+  fenmarch: ['farmstead', 'camp'],
+  ardmoor: ['farmstead', 'watchtower'],
+  reach: ['bridge', 'camp'],
+  caer_dubh: ['ruin', 'watchtower'],
+};
 
 /**
  * What this module needs of a zone.
@@ -155,6 +202,7 @@ export interface StructureZone {
   playerStart: Vec2;
   spawns: Array<{ mobId: string; pos: Vec2; holding?: string }>;
   vendors?: Array<{ pos: Vec2 }>;
+  settlements?: Array<{ id: string; pos: Vec2 }>;
   exits?: Array<{ pos: Vec2 }>;
 }
 
@@ -201,7 +249,17 @@ export function structuresFor(
   halfSize: number,
   /** Places nothing may be built on: camps, arenas, shopfronts. */
   keepClear: Vec2[],
-  count = 14,
+  /**
+   * How many landmarks to scatter across the **empty country**, not counting
+   * the anchored ones.
+   *
+   * It used to be a total, which quietly worked while a zone had four or five
+   * anchors and broke the moment every zone grew six towns: the anchors ate
+   * the budget, the wilds got nothing, and the discovery count — which only
+   * ever counts unanchored landmarks — fell from nine to one in the Sunken
+   * Wood. A number that means "and some others" cannot also mean "in total".
+   */
+  country = 14,
 ): StructureDef[] {
   const spec = getTheme(themeId).terrain;
   const water = spec.waterLevel;
@@ -240,7 +298,8 @@ export function structuresFor(
 
   // Then fill the empty country.
   let attempts = 0;
-  while (out.length < count && attempts < count * 60) {
+  let filled = 0;
+  while (filled < country && attempts < country * 60) {
     attempts++;
     const kind = kinds[Math.floor(random() * kinds.length)]!;
     const pos = {
@@ -255,6 +314,7 @@ export function structuresFor(
       scale: 0.85 + random() * 0.4,
       clearing: FOOTPRINT[kind],
     });
+    filled++;
   }
   return out;
 }

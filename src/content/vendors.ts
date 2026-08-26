@@ -1,6 +1,9 @@
 import { LUXURY_VENDOR_ID, luxuryMerchant } from './luxury.js';
 import { zoneTomes } from './skills.js';
 import { consumablesFor } from './consumables.js';
+import { ITEMS } from './items.js';
+import { ZONES } from './zone.js';
+import { allSettlementPlans, settlementVendorId, type SettlementRole } from './settlements.js';
 import type { ItemDef, VendorDef } from '../sim/types.js';
 
 /**
@@ -146,6 +149,129 @@ Object.assign(VENDORS, {
     66,
   ),
 });
+
+
+// --------------------------------------------------------------------------
+// The town keepers.
+//
+// A zone now has four to seven settlements in it and every one of them wants a
+// trader. Fifteen hand-written stock lists is fifteen chances to forget a
+// class's weapon in one town and never notice — the same argument that put the
+// late weapon ladders behind one DPS budget.
+//
+// So a keeper's stock is *derived from what the shop is for*: the smith reads
+// every weapon in the game a character in this band could carry, the armourer
+// reads every coat, and both stop at uncommon like every other trader. Add an
+// item to a ladder and it turns up in the right shop with nobody editing a
+// list — which is the whole reason `content/` is data.
+// --------------------------------------------------------------------------
+
+/** The best few of something a trader in this band would plausibly have. */
+function bestOf(
+  pick: (item: ItemDef) => boolean,
+  maxLevel: number,
+  perGroup: number,
+  group: (item: ItemDef) => string,
+): string[] {
+  const groups = new Map<string, ItemDef[]>();
+  for (const item of Object.values(ITEMS)) {
+    // The uncommon cap is the rule that keeps every trader a safety net rather
+    // than a shortcut, and it is what makes this generator safe to point at
+    // the whole registry: rares, epics, quest gear and signature pieces are
+    // all excluded by their own quality.
+    if (item.quality !== 'common' && item.quality !== 'uncommon') continue;
+    if (item.merchantGood || item.consumable || item.teaches) continue;
+    if ((item.reqLevel ?? 1) > maxLevel) continue;
+    if (!pick(item)) continue;
+    const key = group(item);
+    const list = groups.get(key) ?? [];
+    list.push(item);
+    groups.set(key, list);
+  }
+  const out: string[] = [];
+  for (const list of groups.values()) {
+    list.sort((a, b) => b.value - a.value);
+    for (const item of list.slice(0, perGroup)) out.push(item.id);
+  }
+  return out;
+}
+
+const ARMOUR_SLOTS = new Set(['head', 'chest', 'legs', 'ring']);
+
+/**
+ * What a shop of this kind keeps.
+ *
+ * Each role answers a different question, which is the point of there being
+ * more than one town: a row of general stores is one general store drawn five
+ * times, and a player who can buy everything in the first town never walks to
+ * the second.
+ */
+function roleStock(role: SettlementRole, band: [number, number]): string[] {
+  const [lo, hi] = band;
+  const mid = Math.round((lo + hi) / 2);
+  switch (role) {
+    case 'smith':
+      // Two rungs per class, so every character finds something and nobody
+      // finds the whole ladder.
+      return bestOf((i) => i.slot === 'weapon', hi, 2, (i) => i.classes?.[0] ?? 'any');
+    case 'armoury':
+      return bestOf((i) => ARMOUR_SLOTS.has(i.slot ?? ''), hi, 2, (i) => i.slot ?? 'none');
+    case 'apothecary':
+      // Both ends of the band: a character arriving in a zone and a character
+      // about to leave it want different bottles, and the walk between towns
+      // is not the interesting decision.
+      return [...new Set([...consumablesFor(hi), ...consumablesFor(lo)])];
+    case 'scholar':
+      // The one purchase that changes how a character plays. Never above
+      // uncommon: the rare and epic tomes are killed for.
+      return [...Object.values(zoneTomes(zoneIdOfBand(band), 'uncommon')), ...consumablesFor(mid)];
+    case 'market':
+      // A market is somewhere to *sell*. What it stocks is the odds and ends
+      // a player forgot to buy before they left.
+      return [...consumablesFor(mid), ...bestOf((i) => i.slot === 'ring', mid, 1, () => 'ring')];
+    default:
+      return consumablesFor(mid);
+  }
+}
+
+/** Which zone a band belongs to. Only the scholar needs it, for its tomes. */
+function zoneIdOfBand(band: [number, number]): string {
+  for (const zone of Object.values(ZONES)) {
+    if (zone.levelRange[0] === band[0] && zone.levelRange[1] === band[1]) return zone.id;
+  }
+  return 'fenmarch';
+}
+
+const ROLE_GREETING: Record<SettlementRole, string> = {
+  hold: 'Coin or goods. I am not fussy which.',
+  smith: 'Everything on that rack will hold an edge longer than you will hold a grudge.',
+  armoury: 'You will want more than that shirt where you are going.',
+  apothecary: 'Drink it when it is bad, not when it is over. That is the whole trick.',
+  scholar: 'Anyone can swing. Reading is the harder half.',
+  market: 'Whatever you dragged back, I will take it off you.',
+};
+
+const ROLE_COLOR: Record<SettlementRole, number> = {
+  hold: 0xd8c79a,
+  smith: 0xc08c5e,
+  armoury: 0xa8a29a,
+  apothecary: 0x8fbf9a,
+  scholar: 0xa9a3d0,
+  market: 0xd0b878,
+};
+
+for (const { zoneId, plan } of allSettlementPlans()) {
+  if (plan.vendorId) continue;
+  const band = ZONES[zoneId]?.levelRange ?? [1, 25];
+  const id = settlementVendorId(zoneId, plan.id);
+  VENDORS[id] = {
+    id,
+    name: plan.keeper ?? `The keeper of ${plan.name}`,
+    greeting: ROLE_GREETING[plan.role],
+    stock: [...new Set(roleStock(plan.role, band))],
+    view: { color: ROLE_COLOR[plan.role], height: 1.8, radius: 0.45 },
+  };
+}
 
 Object.assign(VENDORS, { [LUXURY_VENDOR_ID]: luxuryMerchant() });
 

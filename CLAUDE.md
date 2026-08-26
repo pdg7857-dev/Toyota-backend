@@ -60,6 +60,7 @@ input / HUD click ──> Command ──> World.submit()
 | `src/content/muster.ts` | What a camp does when it notices you are farming it. |
 | `src/content/adventurers.ts` | Who else is out there, and what they say. |
 | `src/content/structures.ts` | The things somebody built, and where they stand. |
+| `src/content/settlements.ts` | The towns, what each one sells, and the stone in it. |
 | `src/render/` | three.js, DOM, input. Nothing gameplay-authoritative. |
 | `src/render/scene.ts` | Builds a zone from its theme. Knows *how*, not *which*. |
 | `src/render/anim.ts` | Animation state machine — see "Animation" below. |
@@ -77,6 +78,7 @@ input / HUD click ──> Command ──> World.submit()
 | `tools/wildlife.mjs` | Stands still and watches the sky. |
 | `tools/muster.mjs` | Empties a camp and photographs it answering back. |
 | `tools/questrun.mjs` | Takes the first quest on offer and reads it back. |
+| `tools/towns.mjs` | Walks into every town in a zone and photographs it. |
 
 Adding a mob, item or skill should mean editing `src/content/` only.
 
@@ -701,8 +703,11 @@ farming a level-3 camp for gold, without needing a level check anywhere.
 
 ## Vendors close the economy
 
-Two traders (`content/vendors.ts`), placed clear of every camp's aggro radius —
-a shop you get pulled off mid-trade is not a shop, and a test enforces it.
+Twenty-five traders (`content/vendors.ts`) — one hand-written hold per zone,
+one generated keeper per town, and Ceallach. All of them placed clear of every
+camp's aggro radius: a shop you get pulled off mid-trade is not a shop, and a
+test enforces it. What each town's keeper stocks comes from its trade rather
+than from a list somebody typed — see "Towns, and the road between them".
 
 - **Selling**: merchant goods fetch their full listed value (that is their whole
   purpose); equipment fetches 25%, so vendoring drops never out-earns playing.
@@ -812,6 +817,118 @@ changes a constant.
 
 `npm test` prints how empty each zone is: now 109 units to the nearest creature
 on average, 291 at worst.
+
+## Towns, and the road between them
+
+Three kilometres of ground with one trader standing at the top of it. Every
+zone was a road, camps either side, a shop at one end and a boss at the other —
+"quite big, but kind of just open and dead", which it was, because the only
+thing on the map that was not a creature was a signpost.
+
+`content/settlements.ts` puts **six towns in every zone**, on the road, and
+gives each of them a leystone. Twenty-four places, hand-authored rather than
+generated — the one thing in this game south of the Fenmarch that is not fitted
+from a curve, because a name is the part a player reads and says out loud and a
+generated town name is a string with a seed in it.
+
+Four rules, each a test:
+
+- **Each one sells something the others do not.** A smithy, an armoury, an
+  apothecary, a scriptorium, a market, and the zone's own hold. A row of
+  identical general stores is one general store drawn five times, and a player
+  who can buy everything in the first town never walks to the second.
+- **What they stock is derived, not typed.** A keeper reads the item registry
+  for what a character in this band could carry, filtered to its own trade and
+  capped at uncommon like every other trader. Fifteen hand-written stock lists
+  is fifteen chances to forget a class's weapon in one town and never notice —
+  the same argument that put the late weapon ladders behind one DPS budget. The
+  uncommon cap is what makes it safe to point a generator at the whole
+  registry: rares, epics, quest gear and signature pieces exclude themselves.
+- **They are clear of every camp**, by the rule a trader has always run under,
+  and so is the stone — standing still is exactly when you least want something
+  walking out of the fog at you. A town goes where the plan puts it and then
+  *walks away* from anything that could reach it, because a hand-tuned
+  coordinate per town is twenty coordinates that stop being right the moment
+  somebody moves a camp.
+- **A town looks like a town.** The stone in the middle, the trader's
+  longhouse, and two more buildings whose kind comes from the zone — so the
+  Fenmarch's towns are farms and tents and Caer Dubh's are ruins and a watch
+  that is still watching. Without them a town reads from four hundred metres as
+  a trader standing beside a rock, which is what the first version was and what
+  `tools/towns.mjs` was written to catch.
+
+`npm test` prints what is in every town and how far apart they are: currently
+81 to 118 seconds' walk, which is the number that actually matters — a zone is
+ten minutes across on foot, so six towns is the count that makes the next one
+always about ninety seconds away.
+
+### The leystone road
+
+The other half, and the half that makes six towns a network rather than six
+errands. **Walk within eight metres of a stone and it is yours, for good.** No
+key: every other thing in this game that costs a keypress is a decision — loot
+this, search that, take this work — and whether you would like a town you are
+standing in to be somewhere you can come back to is not a decision anybody has
+ever wanted to make.
+
+Then **L** opens the road, and stepping is free, instant, and across zones.
+
+- **There is no fee, and there is no cooldown.** A travel tax exists in games
+  with other players in them to stop a market being one map. In a game with
+  nobody else in it the only thing it taxes is the walk back to the shop.
+- **The gate is where you have been.** You cannot attune a stone in a zone the
+  road out would not let you into, so the network can never carry anybody past
+  the level a zone asks for, and no level check is needed anywhere.
+- **You have to be standing at a stone to use one.** Otherwise it is a teleport
+  key and the towns stop being places you go to.
+- **Not while something is on you.** `inCombat`, which is what a server would
+  check too.
+
+It is **sim state**, not renderer state — unlike the mark on the map, and the
+difference is the point: where a character may *go* is a fact about the world
+that a server would have to validate, and where they meant to walk is a note to
+themselves. `World.stones` is keyed on the town's own id rather than an index,
+the same rule `found` runs under, so adding a settlement never re-points
+anybody's network. And attuning **never draws from `World.rng`** — the lesson
+roaming, the weather and the discoveries all had to learn, and a test ticks a
+control world alongside to prove it.
+
+Dying puts you down at **the nearest stone you have woken**, and the zone's
+arrival point if you have woken none. That is the half that costs something:
+the walk back from a death is dead time, and a player who attuned the town
+beside the camp they are farming has bought their way out of most of it by
+having gone there once. It deliberately does not touch the debt — your body is
+still on the map and **V** still clears what dying cost. A shorter walk back is
+not a cheaper death.
+
+The map draws the towns **from the first look**, unlike a discovery: a town is
+where you are *meant* to go, and a map that hides the shops makes a player walk
+three kilometres to find out there was one behind them. What it does keep back
+is whether the stone is yours — filled means somewhere you can step to, hollow
+means somewhere you have not been. Both views draw it, so the minimap can
+finally answer "which way is the shop", which is the question it is asked more
+than any other and has never once been able to answer.
+
+#### What the numbers had to learn
+
+- **Five towns cannot be ninety seconds apart.** A zone is ten minutes across,
+  so four towns is a three-minute walk between shops and five is a two-and-a-
+  half. Six is the first count where every hop is under two minutes, and the
+  printed table is what made that obvious — the first pass failed on one hop in
+  Ardmoor, was "fixed" by moving one town, and failed on a different hop in the
+  Sunken Wood. Two zones failing in different places is a count problem wearing
+  a placement problem's clothes.
+- **A landmark budget that counts the anchors is not a budget.** `zoneStructures`
+  took a *total*, which worked while a zone had four anchors and broke the
+  moment every zone grew six towns: the anchors ate it, the wilds got nothing,
+  and the Sunken Wood's discoveries fell from five to one. Only unanchored
+  landmarks hold anything, so a number that means "and some others" cannot also
+  mean "in total".
+- **"The first vendor in the zone" stopped meaning Maeve.** A zone has six
+  traders now, and `smoke` picked the nearest one to the arrival point to test
+  the quest offer with — which is Ceallach, who sells luxuries and gives no
+  work. It reported the quest offer as broken when what was wrong was the probe
+  standing in the wrong shop.
 
 ## Landmarks, and camps that move
 

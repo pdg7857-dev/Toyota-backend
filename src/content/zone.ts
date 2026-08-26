@@ -1,6 +1,7 @@
 import { BOSS_STARS, type Attributes, type ClassId, type Vec2 } from '../sim/types.js';
 import { MOBS } from './mobs.js';
-import { SHORE_CLEARANCE, getTheme, terrainHeight } from './terrain.js';
+import { dryGround } from './terrain.js';
+import { settlementsFor, type SettlementDef } from './settlements.js';
 import { ROAM_RADIUS } from '../sim/formulas.js';
 
 /**
@@ -75,6 +76,15 @@ export interface ZoneDef {
    * enforces the clearance.
    */
   vendors: VendorPlacement[];
+  /**
+   * The zone's towns, and the leystone standing in each of them.
+   *
+   * Derived from the road by `withSettlements` and then stored, rather than
+   * re-derived by every caller. The sim, the map and the renderer all read
+   * this one array, so they cannot disagree about where a town is — the same
+   * argument that moved `zoneStructures` out of the renderer.
+   */
+  settlements?: SettlementDef[];
   exits: ZoneExit[];
   /** Level band this zone is built for, shown in the UI and used by tests. */
   levelRange: [number, number];
@@ -193,23 +203,7 @@ function dryPlace(
   rings = 14,
   step = 34,
 ): Vec2 {
-  const spec = getTheme(themeId).terrain;
-  const water = spec.waterLevel;
-  const limit = ZONE_HALF * 0.96;
-  const clamp = (v: number): number => Math.max(-limit, Math.min(limit, v));
-  if (water === undefined) return { x: clamp(x), z: clamp(z) };
-
-  for (let ring = 0; ring < rings; ring++) {
-    const r = ring * step;
-    const steps = ring === 0 ? 1 : 8;
-    for (let i = 0; i < steps; i++) {
-      const a = (i / steps) * Math.PI * 2 + ring;
-      const px = clamp(x + Math.cos(a) * r);
-      const pz = clamp(z + Math.sin(a) * r);
-      if (terrainHeight(px, pz, spec) > water + SHORE_CLEARANCE) return { x: px, z: pz };
-    }
-  }
-  return { x: clamp(x), z: clamp(z) };
+  return dryGround(x, z, themeId, ZONE_HALF * 0.96, rings, step);
 }
 
 function camp(
@@ -516,6 +510,42 @@ function withStrays(zone: ZoneDef): ZoneDef {
 }
 
 /**
+ * Put a zone's towns on its road, and give each of them its trader.
+ *
+ * Runs *before* `withStrays`, which is the whole reason it is a pass rather
+ * than part of the literal: the strays keep their distance from `zone.vendors`,
+ * so a town that arrives after them is a town with animals in the square.
+ *
+ * A settlement's trader replaces that trader's hand-placed position, so the
+ * traders this game already had are now *in* towns rather than standing in a
+ * field near one. Anyone not in the plan — Ceallach, whose wagon is parked
+ * where a level-1 character walks past it — keeps the spot they were given.
+ */
+function withSettlements(zone: ZoneDef): ZoneDef {
+  const settlements = settlementsFor({
+    id: zone.id,
+    theme: zone.theme,
+    halfSize: zone.halfSize,
+    playerStart: zone.playerStart,
+    road: roadPoints(zone.id, zone.theme),
+    spawns: zone.spawns,
+    // Aggro plus roam: a creature is dangerous from where it wanders to, not
+    // from where it was put. Same figure the zone-layout test measures with.
+    reachOf: (mobId) => (MOBS[mobId]?.aggroRadius ?? 12) + ROAM_RADIUS,
+  });
+  if (settlements.length === 0) return zone;
+  const taken = new Set(settlements.map((s) => s.vendorId));
+  return {
+    ...zone,
+    settlements,
+    vendors: [
+      ...zone.vendors.filter((v) => !taken.has(v.vendorId)),
+      ...settlements.map((s) => ({ vendorId: s.vendorId, pos: s.vendorPos })),
+    ],
+  };
+}
+
+/**
  * How far down the road the first creatures a player ever sees are standing.
  *
  * Outside their aggro (10) plus their roam (9) with room to spare, so waking
@@ -607,7 +637,7 @@ function arena(bossId: string, guardId: string, at: number, theme: string, guard
  * so wandering is a choice about scenery and rares rather than a difficulty
  * cliff.
  */
-export const FENMARCH: ZoneDef = withArrival(withStrays({
+export const FENMARCH: ZoneDef = withArrival(withStrays(withSettlements({
   id: 'fenmarch',
   name: 'The Fenmarch',
   halfSize: ZONE_HALF,
@@ -648,13 +678,13 @@ export const FENMARCH: ZoneDef = withArrival(withStrays({
   ],
   levelRange: [1, 25],
   theme: 'plains',
-}));
+})));
 
 // --------------------------------------------------------------------------
 // Zones 2-4. Same shape as the Fenmarch, from the same generator.
 // --------------------------------------------------------------------------
 
-export const ARDMOOR: ZoneDef = withArrival(withStrays({
+export const ARDMOOR: ZoneDef = withArrival(withStrays(withSettlements({
   id: 'ardmoor',
   name: 'Ardmoor',
   halfSize: ZONE_HALF,
@@ -683,9 +713,9 @@ export const ARDMOOR: ZoneDef = withArrival(withStrays({
     { toZoneId: 'fenmarch', pos: { x: -640, z: ROAD_START + ARRIVAL_GAP + 60 }, label: 'The Hill Road to the Fenmarch', minLevel: 1 },
     { toZoneId: 'reach', pos: { x: 800, z: -700 }, label: 'The Drowned Causeway', minLevel: 38 },
   ],
-}));
+})));
 
-export const SUNKEN_REACH: ZoneDef = withArrival(withStrays({
+export const SUNKEN_REACH: ZoneDef = withArrival(withStrays(withSettlements({
   id: 'reach',
   name: 'The Sunken Wood',
   halfSize: ZONE_HALF,
@@ -714,9 +744,9 @@ export const SUNKEN_REACH: ZoneDef = withArrival(withStrays({
     { toZoneId: 'ardmoor', pos: { x: -640, z: ROAD_START + ARRIVAL_GAP + 60 }, label: 'The Causeway to Ardmoor', minLevel: 1 },
     { toZoneId: 'caer_dubh', pos: { x: 800, z: -700 }, label: 'The Black Road to Caer Dubh', minLevel: 66 },
   ],
-}));
+})));
 
-export const CAER_DUBH: ZoneDef = withArrival(withStrays({
+export const CAER_DUBH: ZoneDef = withArrival(withStrays(withSettlements({
   id: 'caer_dubh',
   name: 'Caer Dubh',
   halfSize: ZONE_HALF,
@@ -744,7 +774,7 @@ export const CAER_DUBH: ZoneDef = withArrival(withStrays({
   exits: [
     { toZoneId: 'reach', pos: { x: -640, z: ROAD_START + ARRIVAL_GAP + 60 }, label: 'The Black Road to the Sunken Wood', minLevel: 1 },
   ],
-}));
+})));
 
 
 /** Every zone, keyed by id. Save files store a zone id, not a zone. */

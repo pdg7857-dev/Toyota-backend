@@ -1282,6 +1282,34 @@ function buildStructure(def: StructureDef, theme: ZoneTheme): THREE.Object3D {
       }
       break;
     }
+    case 'leystone': {
+      // One upright with a lit seam down it, on a low plinth, ringed by four
+      // small stones. It has to be recognisable at four hundred metres and
+      // recognisable as *the same thing* in four different zones, so the shape
+      // is constant and only the light takes the theme — a town's stone in the
+      // Fenmarch and one in Caer Dubh are the same landmark, and a player who
+      // has to work out which is which every time has no network.
+      block(5.2, 0.6, 5.2, 0, 0.3, 0, dark);
+      const shaft = block(1.5, 6.4, 1.1, 0, 3.8, 0);
+      shaft.rotation.z = 0.03;
+      const glow = new THREE.Mesh(
+        new THREE.BoxGeometry(0.34, 4.6, 1.22),
+        new THREE.MeshStandardMaterial({
+          color: theme.boundary,
+          emissive: new THREE.Color(theme.boundary).lerp(new THREE.Color(0xffffff), 0.55),
+          emissiveIntensity: 1.5,
+          roughness: 0.35,
+        }),
+      );
+      glow.position.set(0, 3.9, 0);
+      group.add(glow);
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+        const s2 = block(0.7, 1.5, 0.6, Math.cos(a) * 3.1, 0.95, Math.sin(a) * 3.1, dark);
+        s2.rotation.y = a;
+      }
+      break;
+    }
     case 'bridge': {
       // A crossing that goes nowhere any more, which is most of what a bridge
       // in a drowned wood is.
