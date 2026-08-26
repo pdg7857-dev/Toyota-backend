@@ -56,7 +56,14 @@ export const ADVENTURERS: AdventurerName[] = [
 /** How many are out in a zone at once. */
 export const ADVENTURERS_PER_ZONE = 4;
 
-/** Seconds between one of them saying something, roughly. */
+/**
+ * Seconds between one of them starting something, roughly.
+ *
+ * Not the thing that actually governs how much talking there is — that is
+ * `CHATTER_MIN_GAP_MS`, because the fight outcomes want to speak far more
+ * often than this timer does and the floor is what turns them down. This is
+ * how often somebody with nothing else to say says something anyway.
+ */
 export const CHATTER_INTERVAL_SEC = 95;
 
 /**
@@ -93,46 +100,103 @@ export const DEATH_INTERVAL_SEC = 600;
  * population that only ever says filler is wallpaper, and one that only ever
  * reacts to events is a notification feed.
  */
-export const IDLE_CHATTER = [
-  'anyone selling a decent chest piece?',
-  'lfg for the boss, need a healer',
-  'that camp respawns way too fast',
-  'still 200 short for the wrought blade lol',
-  'how is everyone finding this grind',
-  'anyone seen a wild courser out here?',
-  'wtb tome, paying well',
-  'this zone is dead tonight',
-  'took me an hour to find that rare',
-  'careful south, the guards hit like a cart',
-  'grats',
-  'thanks for the res earlier',
-  'anyone know where the herd spawns',
-  'nearly there. one more level',
+/**
+ * Something one of them says, and what somebody else says back.
+ *
+ * The reply is the part that took longest to arrive and is most of the value.
+ * Before it, every line went from one person into the void: four people in a
+ * zone saying things at nobody, which is a population that talks *past* itself
+ * rather than to itself — four monologues wearing a crowd's clothes.
+ *
+ * `%t` in a reply is a town in this zone, filled in by the sim. "Check the
+ * armoury" is a line from a game; "armoury at Moorwatch had one" is a line
+ * from somebody who lives here.
+ */
+export interface Exchange {
+  line: string;
+  /** What somebody else says back. Empty means the line stands on its own. */
+  replies: string[];
+}
+
+export const IDLE_CHATTER: Exchange[] = [
+  {
+    line: 'anyone selling a decent chest piece?',
+    replies: ['armoury at %t had one earlier', 'try %t', 'sold mine an hour ago, sorry'],
+  },
+  {
+    line: 'lfg for the boss, need a healer',
+    replies: ['gl, been trying all night', 'i would but i am four levels short', 'good luck'],
+  },
+  {
+    line: 'that camp respawns way too fast',
+    replies: ['pull from the edge', 'yeah it is a bad one', 'that is the whole camp, not you'],
+  },
+  {
+    line: 'still 200 short for the wrought blade lol',
+    replies: ['sell the trophies, they add up', 'you will get there', 'been there'],
+  },
+  {
+    line: 'how is everyone finding this grind',
+    replies: ['about what it says on the tin', 'slow. worth it', 'ask me at 40'],
+  },
+  {
+    line: 'anyone seen a wild courser out here?',
+    replies: ['herd west of the road', 'saw one near %t', 'not today'],
+  },
+  {
+    line: 'wtb tome, paying well',
+    replies: ['scriptorium at %t', 'the boss drops the good one', 'the trader has the cheap one'],
+  },
+  { line: 'this zone is dead tonight', replies: ['it is not, i am right here', 'quiet is fine by me'] },
+  {
+    line: 'took me an hour to find that rare',
+    replies: ['that is about right', 'an hour is lucky', 'nice'] },
+  {
+    line: 'careful south, the guards hit like a cart',
+    replies: ['can confirm', 'thanks', 'learned that one already'],
+  },
+  { line: 'grats', replies: [] },
+  { line: 'thanks for the res earlier', replies: ['any time', 'no bother'] },
+  {
+    line: 'anyone know where the herd spawns',
+    replies: ['west, off the road', 'they move. keep walking'],
+  },
+  { line: 'nearly there. one more level', replies: ['go on then', 'grats in advance'] },
+  {
+    line: 'anyone at the stone in %t?',
+    replies: ['heading there now', 'attuned it this morning', 'what for'],
+  },
 ];
 
 /** Said when a holding changes hands. `%s` is the holding. */
-export const FRONT_CHATTER = [
-  'did %s just flip?',
-  'looks like %s changed hands',
-  '%s is ours now apparently',
-  'good luck getting through %s tonight',
+export const FRONT_CHATTER: Exchange[] = [
+  { line: 'did %s just flip?', replies: ['looks like it', 'was going to, it has been sliding all week'] },
+  { line: 'looks like %s changed hands', replies: ['about time', 'that will not last'] },
+  { line: '%s is ours now apparently', replies: ['for now', 'do not get used to it'] },
+  { line: 'good luck getting through %s tonight', replies: ['going round', 'i will risk it'] },
 ];
 
 /** Said when a dragon is out. `%s` is its name. */
-export const DRAGON_CHATTER = [
-  '%s is up',
-  '%s is out. everyone off the road',
-  'is anyone actually going for %s',
-  'saw %s land. absolutely not',
-  '%s up, forming a group, need bodies',
+export const DRAGON_CHATTER: Exchange[] = [
+  { line: '%s is up', replies: ['where', 'not again', 'on my way to look, not to fight'] },
+  { line: '%s is out. everyone off the road', replies: ['noted', 'going the long way'] },
+  { line: 'is anyone actually going for %s', replies: ['not a chance', 'one day', 'you first'] },
+  { line: 'saw %s land. absolutely not', replies: ['sensible', 'wise'] },
+  { line: '%s up, forming a group, need bodies', replies: ['i am four levels short', 'gl'] },
 ];
 
-/** Said when one of them dies. `%s` is the mob that did it. */
-export const DEATH_CHATTER = [
-  'well that %s got me',
-  'ouch. %s',
-  'pulled two %s. my fault',
-  'ugh, %s again',
+/**
+ * Said when one of them dies. `%s` is the mob that did it.
+ *
+ * Commiseration is the most human thing anybody says to anybody, and it is the
+ * cheapest reply in the game: nothing needs to know what happened, only that
+ * somebody had a bad time.
+ */
+export const DEATH_CHATTER: Exchange[] = [
+  { line: 'well that %s got me', replies: ['happens', 'that camp is rough', 'unlucky'] },
+  { line: 'ouch. %s', replies: ['you alright?', 'rough'] },
+  { line: 'pulled two %s. my fault', replies: ['we have all done it', 'at least you know why'] },
+  { line: 'ugh, %s again', replies: ['leave it, it is not worth it', 'third time?'] },
 ];
 
 /**
@@ -153,6 +217,37 @@ export const GRATS_CHATTER = [
 
 /** How close one of them has to be to congratulate you. */
 export const GRATS_RANGE = 34;
+
+/**
+ * How long somebody takes to answer.
+ *
+ * Long enough to read as a reply and not as a duet. Two lines on the same tick
+ * are one person talking to themselves in two voices.
+ */
+export const REPLY_DELAY_MS = 2200;
+
+/**
+ * How often the end of one of their fights is worth mentioning.
+ *
+ * Four people working camps produce a beaten creature or a bad pull every
+ * minute or so, and announcing every one of them is what actually made the
+ * population chatty — the idle timer was never the constraint. Real people do
+ * not narrate every skirmish; they mention the ones worth mentioning.
+ *
+ * Lowering this is also what paid for the replies: the same volume, spent on
+ * something being said *to somebody* rather than on the eleventh
+ * "%s legged it" of the hour.
+ */
+export const FIGHT_CHATTER_CHANCE = 0.45;
+
+/**
+ * How often a line that could be answered actually is.
+ *
+ * Not always, because a population where every question gets an answer is a
+ * script running a dialogue tree. Sometimes nobody is paying attention, and a
+ * question hanging unanswered is the most authentic thing in the file.
+ */
+export const REPLY_CHANCE = 0.62;
 
 // --------------------------------------------------------------------------
 // What they make of you.
@@ -303,11 +398,11 @@ export const FIGHT_MS = 45_000;
  * real: a population that only ever reports losing is not people, it is a
  * running joke.
  */
-export const DROVE_OFF_CHATTER = [
-  'that %s has had enough',
-  '%s legged it',
-  'saw off a %s, that will do',
-  'and stay off, %s',
+export const DROVE_OFF_CHATTER: Exchange[] = [
+  { line: 'that %s has had enough', replies: ['nice', 'good'] },
+  { line: '%s legged it', replies: ['let it go', 'they always do'] },
+  { line: 'saw off a %s, that will do', replies: ['that will do', 'well in'] },
+  { line: 'and stay off, %s', replies: ['ha'] },
 ];
 
 /** How fast they get their wind back afterwards, as a share of health a second. */

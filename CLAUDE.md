@@ -1560,6 +1560,53 @@ camp where three of the four play Druid reads as a bug in the population.
 for the same reason as `rareSpawns`: they walk and talk on the sim's `Rng`, so a
 populated arena is one where every seeded fight rolls different numbers.
 
+### And they answer each other
+
+Every line went from one person into the void: four people in a zone saying
+things at nobody, which is a population that talks *past* itself rather than to
+itself — four monologues wearing a crowd's clothes. An `Exchange` is a line and
+what somebody else says back, and the reply is most of the value in the whole
+feature: overhearing a conversation is a completely different thing from
+overhearing announcements.
+
+Four rules:
+
+- **One reply, then it stops.** A thread of four is a chat room, and a chat
+  room is a system rather than scenery. `pendingReply` is one deep and a reply
+  never arms another, so chaining is structural rather than rate-limited.
+- **Not always.** `REPLY_CHANCE` is 0.62 — a population where every question
+  gets an answer is a dialogue tree, and a question left hanging is the most
+  authentic thing in the file.
+- **A reply pays its own way.** It skips the floor on the way in, because an
+  answer two seconds later is the point, and then puts a full gap on the clock
+  *ahead* of itself. Without that the floor is paid once and spent twice, and
+  the measured volume goes up by nine tenths the moment replies land.
+- **`%t` is a town in this zone.** "Check the armoury" is a line out of a game;
+  "armoury at Moorwatch had one earlier" is a line from somebody who lives
+  here, and it costs one lookup.
+
+The volume had to be paid for out of something, and what paid for it was the
+**fight chatter**. Four people working camps produce a beaten creature or a bad
+pull every minute or so, and announcing every one of them is what actually made
+the population chatty — the idle timer was never the constraint.
+`FIGHT_CHATTER_CHANCE` is 0.45, so they mention the ones worth mentioning, and
+the budget goes on something said *to somebody* rather than on the eleventh
+"the Moor Hare legged it" of the hour. `npm test` prints both numbers: currently
+0.93 lines a minute, of which about a third are somebody answering.
+
+Two things the check had to learn:
+
+- **Measuring the idle rate was measuring the one source that is never the
+  constraint.** The volume test bounded lines against `CHATTER_INTERVAL_SEC`,
+  so raising that number did nothing at all while the real figure climbed. It
+  is bounded against `CHATTER_MIN_GAP_MS` now, which is what actually governs
+  it.
+- **"Never three close together" fails on coincidence.** A front flipping and a
+  "grats" both bypass the floor by design and can land two seconds after an
+  exchange with nothing wrong. The share of lines that are answers is the
+  measurement that would actually catch chaining — a third if it answers once,
+  past half if it threads.
+
 ### And they have an opinion about you
 
 They had exactly one thing to say about the player — a level — which made them a
@@ -2497,8 +2544,7 @@ Dialogue, crafting, **gameplay-authoritative terrain**, pathfinding
 traders never run out and never restock, which wants an inventory model if the
 economy ever grows past four zones.
 
-The adventurers pull real camps and have opinions about you now — see "And they
-pull real creatures now" and "And they have an opinion about you". What is still
-thin is that they never react to *each other*: two of them working the same camp
-do not acknowledge it, and a population that only ever talks past itself is
-still, at bottom, four monologues.
+The adventurers pull real camps, have opinions about you, and answer each other
+now. What is still thin is that they never react to *each other's fights*: one
+of them being worn down by a creature ten metres away is something the other
+would walk over for, and neither of them notices.

@@ -105,6 +105,7 @@ import {
   DEATH_CHATTER,
   DRAGON_CHATTER,
   DROVE_OFF_CHATTER,
+  FIGHT_CHATTER_CHANCE,
   FIGHT_FLOOR,
   FIGHT_MS,
   FRONT_CHATTER,
@@ -120,6 +121,9 @@ import {
   SAW_RANGE,
   GRATS_RANGE,
   IDLE_CHATTER,
+  REPLY_CHANCE,
+  REPLY_DELAY_MS,
+  type Exchange,
   REST_SHARE,
   YIELD_MARGIN,
 } from '../content/adventurers.js';
@@ -402,6 +406,17 @@ export class World {
    * reacting to what you are doing now.
    */
   private lastPraiseMs = -Infinity;
+  /**
+   * A line somebody said that is still waiting to be answered.
+   *
+   * One at a time and one deep, deliberately. A thread of four is a chat room,
+   * and a chat room is a system rather than scenery — what is being bought
+   * here is the feeling of overhearing something, and you only ever overhear
+   * the first half of a conversation.
+   *
+   * Not saved: it lives for two seconds.
+   */
+  private pendingReply: { speakerId: EntityId; replies: string[]; atTick: number } | null = null;
   /** True while `catchUp` is running the hours nobody was here for. */
   private catchingUp = false;
 
@@ -749,6 +764,7 @@ export class World {
     }
 
     this.tickChatter(npcs);
+    this.tickReplies(npcs);
     this.tickGearPraise(npcs);
   }
 
@@ -858,11 +874,13 @@ export class World {
       // are the ones somebody else wanted.
       if (worn) {
         npc.npcUntilMs = 0;
-        if (foe) this.say(npc, this.pick(DEATH_CHATTER).replace('%s', foe.name));
-      } else if (beaten && foe) {
+        if (foe && this.rng.chance(FIGHT_CHATTER_CHANCE)) {
+          this.speak(npc, this.pick(DEATH_CHATTER), foe.name);
+        }
+      } else if (beaten && foe && this.rng.chance(FIGHT_CHATTER_CHANCE)) {
         // And the other way round, because a population that only ever reports
         // losing is not people, it is a running joke.
-        this.say(npc, this.pick(DROVE_OFF_CHATTER).replace('%s', foe.name));
+        this.speak(npc, this.pick(DROVE_OFF_CHATTER), foe.name);
       }
       return false;
     }
@@ -890,7 +908,7 @@ export class World {
     if (!this.rng.chance(perTick)) return;
 
     const who = npcs[this.rng.int(0, npcs.length - 1)]!;
-    this.say(who, this.pick(IDLE_CHATTER));
+    this.speak(who, this.pick(IDLE_CHATTER));
   }
 
   /**
@@ -901,10 +919,23 @@ export class World {
    * the sum of however many things can currently talk. `event` lines are
    * reactions to something that actually happened and always land.
    */
-  private say(npc: Entity, text: string, kind: 'ambient' | 'event' = 'ambient'): void {
+  private say(
+    npc: Entity,
+    text: string,
+    kind: 'ambient' | 'event' | 'reply' = 'ambient',
+  ): boolean {
     const now = this.tickCount * TICK_MS;
-    if (kind === 'ambient' && now - this.lastChatMs < CHATTER_MIN_GAP_MS) return;
-    this.lastChatMs = now;
+    if (kind === 'ambient' && now - this.lastChatMs < CHATTER_MIN_GAP_MS) return false;
+    // A reply pays its own way.
+    //
+    // It skips the floor on the way in — an answer two seconds later is the
+    // whole point — and then puts a full gap on the clock ahead of itself, so
+    // a two-line exchange costs the population two turns of its budget rather
+    // than one. Without this the floor is paid once and spent twice, and the
+    // measured volume goes up by nine tenths the moment replies land: "they
+    // are quiet" has to stay a property of the feature rather than an accident
+    // of how many things can answer.
+    this.lastChatMs = kind === 'reply' ? now + CHATTER_MIN_GAP_MS : now;
     this.events.push({
       t: 'chat',
       entityId: npc.id,
@@ -912,6 +943,51 @@ export class World {
       classId: npc.classId ?? 'warrior',
       text,
     });
+    return true;
+  }
+
+  /**
+   * Somebody says something, and somebody else may answer it.
+   *
+   * The reply is the half that stops them being four monologues. It is not
+   * guaranteed — see `REPLY_CHANCE` — because a population where every question
+   * gets an answer is a dialogue tree, and a question left hanging is the most
+   * authentic thing the file has in it.
+   */
+  private speak(npc: Entity, exchange: Exchange, subject?: string): void {
+    const line = subject ? exchange.line.replace('%s', subject) : exchange.line;
+    if (!this.say(npc, this.fillPlaces(line))) return;
+    if (exchange.replies.length === 0) return;
+    if (!this.rng.chance(REPLY_CHANCE)) return;
+    this.pendingReply = {
+      speakerId: npc.id,
+      replies: exchange.replies,
+      atTick: this.tickCount + Math.round(REPLY_DELAY_MS / TICK_MS),
+    };
+  }
+
+  /** Somebody answers, a couple of seconds later, if anybody else is out here. */
+  private tickReplies(npcs: Entity[]): void {
+    const pending = this.pendingReply;
+    if (!pending || this.tickCount < pending.atTick) return;
+    this.pendingReply = null;
+    const others = npcs.filter((e) => e.id !== pending.speakerId);
+    if (others.length === 0) return;
+    const who = others[this.rng.int(0, others.length - 1)]!;
+    this.say(who, this.fillPlaces(this.pick(pending.replies)), 'reply');
+  }
+
+  /**
+   * `%t` is a town in this zone.
+   *
+   * "Check the armoury" is a line out of a game. "Armoury at Moorwatch had one
+   * earlier" is a line from somebody who lives here, and it costs one lookup.
+   */
+  private fillPlaces(text: string): string {
+    if (!text.includes('%t')) return text;
+    const towns = this.zone.settlements ?? [];
+    const where = towns.length > 0 ? this.pick(towns).name : this.zone.name;
+    return text.replace('%t', where);
   }
 
   private pick<T>(list: readonly T[]): T {
@@ -925,7 +1001,7 @@ export class World {
    * only ever says filler is scenery, and one that only reacts is a
    * notification feed. They need both.
    */
-  private reactTo(template: readonly string[], subject: string): void {
+  private reactTo(template: readonly Exchange[], subject: string): void {
     // Nobody is standing here during a catch-up — and more to the point, a
     // reaction draws from the Rng, so a front that fell while you were logged
     // out would change the numbers of the next fight you picked. Time alone
@@ -934,7 +1010,16 @@ export class World {
     const npcs = [...this.entities.values()].filter((e) => e.kind === 'npc');
     if (npcs.length === 0) return;
     const who = npcs[this.rng.int(0, npcs.length - 1)]!;
-    this.say(who, this.pick(template).replace('%s', subject), 'event');
+    const exchange = this.pick(template);
+    this.say(who, this.fillPlaces(exchange.line.replace('%s', subject)), 'event');
+    // A banner changing hands is exactly the sort of thing somebody answers.
+    if (exchange.replies.length > 0 && this.rng.chance(REPLY_CHANCE)) {
+      this.pendingReply = {
+        speakerId: who.id,
+        replies: exchange.replies,
+        atTick: this.tickCount + Math.round(REPLY_DELAY_MS / TICK_MS),
+      };
+    }
   }
 
   /**

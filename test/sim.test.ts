@@ -39,7 +39,6 @@ import { KIND_RARITY, MOUNTS, getMount, mountsOfKind, type MountKind } from '../
 import {
   ADVENTURERS,
   ADVENTURERS_PER_ZONE,
-  CHATTER_INTERVAL_SEC,
   FIGHT_FLOOR,
   GIVE_UP_AT,
   GRATS_RANGE,
@@ -103,7 +102,11 @@ import { BOSS_STARS, isBoss } from '../src/sim/types.js';
 import type { Entity, SimEvent } from '../src/sim/types.js';
 import type { ZoneDef } from '../src/content/zone.js';
 import { BASE_MOVE_SPEED, RESPEC_FREE_BELOW } from '../src/sim/formulas.js';
-import { PRAISE_MIN_GAP_MS } from '../src/content/adventurers.js';
+import {
+  CHATTER_MIN_GAP_MS,
+  PRAISE_MIN_GAP_MS,
+  REPLY_DELAY_MS,
+} from '../src/content/adventurers.js';
 import { FLIP_THRESHOLD } from '../src/content/factions.js';
 import {
   HOARD_SETS,
@@ -2805,24 +2808,73 @@ describe('the other adventurers', () => {
     }
   });
 
-  it('is quiet', () => {
-    // The fastest way to make a fake population feel fake is to make it chatty.
+  it('is quiet, and talks to itself rather than past itself', () => {
+    // One sample, two questions. How much they talk and whether any of it is
+    // aimed at anybody are the same measurement taken twice, and running the
+    // Fenmarch for half an hour costs two minutes — doing it once for each
+    // question was two minutes for nothing.
     const minutes = 30;
     const world = new World({ seed: 904, zone: getZone('fenmarch'), classId: 'warrior' });
-    const lines = chatLines(world.advance(minutes * 60 * 1000));
-    const perMinute = lines.length / minutes;
-    console.log(`  chatter: ${lines.length} lines in ${minutes} min (${perMinute.toFixed(2)}/min)`);
-    console.log(`    e.g. ${lines.slice(0, 3).join('  |  ')}`);
+    const said: Array<{ at: number; name: string; text: string }> = [];
+    for (let t = 0; t < minutes * 60_000; t += TICK_MS) {
+      for (const ev of world.tick()) {
+        if (ev.t === 'chat') said.push({ at: t, name: ev.name, text: ev.text });
+      }
+    }
 
-    // Around one line per interval, per zone — not per person.
-    const expected = 60 / CHATTER_INTERVAL_SEC;
-    expect(perMinute).toBeGreaterThan(expected * 0.4);
-    expect(perMinute).toBeLessThan(expected * 2.2);
+    // --- how much ---
+    const perMinute = said.length / minutes;
+    // Measured against the floor rather than against `CHATTER_INTERVAL_SEC`,
+    // because the floor is what actually governs the volume: the fight
+    // outcomes want to speak far more often than the idle timer does, and it
+    // is `CHATTER_MIN_GAP_MS` that turns them down. Checking the idle rate was
+    // checking the one source that is never the constraint — which is why
+    // raising it did nothing when replies pushed the real number up.
+    const ceiling = 60_000 / CHATTER_MIN_GAP_MS;
+    console.log(`  chatter: ${said.length} lines in ${minutes} min (${perMinute.toFixed(2)}/min)`);
+    console.log(`    e.g. ${said.slice(0, 4).map((l) => `[${l.name}] ${l.text}`).join('  |  ')}`);
+    expect(perMinute, `${perMinute.toFixed(2)}/min is a scrolling wall`).toBeLessThan(ceiling);
+    expect(perMinute, 'nobody said anything').toBeGreaterThan(0.15);
+
     // Every line is attributed to somebody who is actually here.
     const names = new Set(peopleIn(world).map((p) => p.name));
-    for (const line of lines) {
-      expect(names.has(line.slice(1, line.indexOf(']')))).toBe(true);
+    for (const line of said) expect(names.has(line.name)).toBe(true);
+
+    // And nothing ever ships a placeholder. `%s` is a creature or a holding
+    // and `%t` is one of this zone's towns; a line that reaches the log with
+    // either still in it is the most visible bug this file can have, and it is
+    // one no assertion about volume or turn-taking would ever see.
+    for (const line of said) {
+      expect(line.text.includes('%'), `unfilled: ${line.text}`).toBe(false);
     }
+
+    // --- and to whom ---
+    //
+    // Measured as "a line followed within a couple of seconds by a *different*
+    // person" rather than by matching strings, because what makes it a
+    // conversation is the turn, not the words.
+    const answered = said.filter(
+      (line, i) =>
+        i > 0 &&
+        line.at - said[i - 1]!.at <= REPLY_DELAY_MS + TICK_MS &&
+        line.name !== said[i - 1]!.name,
+    ).length;
+    console.log(`  ${answered} of ${said.length} lines were somebody answering`);
+    expect(answered, 'nothing anybody said was ever answered').toBeGreaterThan(0);
+
+    // And never a thread. One reply, then it stops — a chat room is a system,
+    // and what is being bought here is the feeling of overhearing something.
+    //
+    // Asserted as a share rather than by looking for three lines close
+    // together, which is what the first version did and which fails on
+    // coincidence: a front flipping or a "grats" bypasses the floor by design
+    // and can land two seconds after an exchange without anything being wrong.
+    // A population that chained would push this past half; one that answers
+    // once sits near a third.
+    expect(
+      answered / said.length,
+      `${answered} of ${said.length} lines are answers — that is a thread, not an exchange`,
+    ).toBeLessThan(0.5);
   });
 
   it('congratulates you on a level, if anyone was near enough to see it', () => {

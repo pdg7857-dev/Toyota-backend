@@ -58,6 +58,10 @@ the piece you are wearing. A dragon and a banner are public — the whole zone
 hears. Everything else needs somebody near enough to have seen it, and all of it
 goes through a long floor, because the twentieth compliment is worse than none.
 
+They also answer each other — a question gets a reply a couple of seconds later,
+in somebody else's voice, and sometimes it names a town in the zone. Once, never
+a thread: what is worth having is the feeling of overhearing something.
+
 You can put your own name to it on the first screen. It is optional.
 
 ## Nothing here is irreversible
